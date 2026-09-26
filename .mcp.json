@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "gabs": {
+      "type": "stdio",
+      "command": "C:\\Tools\\gabs\\gabs.exe",
+      "args": [
+        "server"
+      ],
+      "env": {}
+    }
+  }
+}

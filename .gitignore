@@ -1,0 +1,13 @@
+# Build output
+Source/**/bin/
+Source/**/obj/
+1.6/Assemblies/*.dll
+1.6/Assemblies/*.pdb
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+docs/VISION.md
+CLAUDE.md

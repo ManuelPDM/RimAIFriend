@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>AIPawnControl</RootNamespace>
+    <AssemblyName>AIPawnControl</AssemblyName>
+    <OutputPath>..\..\1.6\Assemblies\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <DebugType>none</DebugType>
+    <Nullable>disable</Nullable>
+
+    <!-- Override on the command line or in Directory.Build.props.user if your install differs -->
+    <RimWorldDir Condition="'$(RimWorldDir)' == ''">D:\SteamLibrary\steamapps\common\RimWorld</RimWorldDir>
+    <HarmonyDir Condition="'$(HarmonyDir)' == ''">D:\SteamLibrary\steamapps\workshop\content\294100\2009463077\Current\Assemblies</HarmonyDir>
+    <ManagedDir>$(RimWorldDir)\RimWorldWin64_Data\Managed</ManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Game + Harmony assemblies are provided at runtime; never copy them into the mod -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(ManagedDir)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(ManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(HarmonyDir)\0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>
