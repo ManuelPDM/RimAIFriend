@@ -1,4 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LanguageData>
   <AIPawnControl_ModName>AI Pawn Control</AIPawnControl_ModName>
+
+  <!-- Settings -->
+  <AIPawnControl_Endpoint>Endpoint (OpenAI-compatible)</AIPawnControl_Endpoint>
+  <AIPawnControl_Model>Model</AIPawnControl_Model>
+  <AIPawnControl_Temperature>Temperature: {0}</AIPawnControl_Temperature>
+  <AIPawnControl_Timeout>Timeout (seconds)</AIPawnControl_Timeout>
+  <AIPawnControl_MaxTokens>Max reply tokens</AIPawnControl_MaxTokens>
+  <AIPawnControl_Thinking>Let the model think first</AIPawnControl_Thinking>
+  <AIPawnControl_ThinkingTip>Slower (about 5x) and uses many more tokens. Off sends reasoning_effort=none.</AIPawnControl_ThinkingTip>
+  <AIPawnControl_LogPrompts>Log prompts and replies</AIPawnControl_LogPrompts>
+  <AIPawnControl_LogPromptsTip>Writes every request and reply to AIPawnControl/prompts-DATE.jsonl in the save data folder.</AIPawnControl_LogPromptsTip>
+  <AIPawnControl_TestConnection>Test connection</AIPawnControl_TestConnection>
+  <AIPawnControl_Testing>Testing...</AIPawnControl_Testing>
+  <AIPawnControl_TestOk>OK in {0}s: {1}</AIPawnControl_TestOk>
+  <AIPawnControl_TestFailed>Failed: {0}</AIPawnControl_TestFailed>
+  <AIPawnControl_PeriodicHours>Think every N in-game hours</AIPawnControl_PeriodicHours>
+  <AIPawnControl_ActsPerDay>Max decisions per in-game day</AIPawnControl_ActsPerDay>
+  <AIPawnControl_ReloadPrompts>Reload prompts</AIPawnControl_ReloadPrompts>
+  <AIPawnControl_PromptsReloaded>Prompts will be re-read from {0}</AIPawnControl_PromptsReloaded>
+
+  <!-- Pawn -->
+  <AIPawnControl_MindToggle>AI mind</AIPawnControl_MindToggle>
+  <AIPawnControl_MindToggleDesc>Let an AI run {0}'s life. It plans their day and picks what to focus on and who to talk to. The player can still draft them or give orders.</AIPawnControl_MindToggleDesc>
+  <AIPawnControl_EnableTitle>Give {0} a mind</AIPawnControl_EnableTitle>
+  <AIPawnControl_EnableNoteLabel>Optional character note (a secret goal, a quirk, how they see the colony). Leave empty to build the persona from their backstory and traits only.</AIPawnControl_EnableNoteLabel>
+  <AIPawnControl_EnableConfirm>Give a mind</AIPawnControl_EnableConfirm>
+  <AIPawnControl_ManualPrioritiesOff>AI mind: manual work priorities are off, so the AI can only switch work types on or off. Turn on manual priorities in the Work tab to let it rank them.</AIPawnControl_ManualPrioritiesOff>
+
+  <!-- Mind tab -->
+  <AIPawnControl_MindTab>Mind</AIPawnControl_MindTab>
+  <AIPawnControl_TabStatus>Status: {0}</AIPawnControl_TabStatus>
+  <AIPawnControl_TabManualOff>Manual work priorities are off: work types can only be switched on or off.</AIPawnControl_TabManualOff>
+  <AIPawnControl_TabPersona>persona</AIPawnControl_TabPersona>
+  <AIPawnControl_TabNote>player's note</AIPawnControl_TabNote>
+  <AIPawnControl_TabIntent>today's intent</AIPawnControl_TabIntent>
+  <AIPawnControl_TabSchedule>schedule</AIPawnControl_TabSchedule>
+  <AIPawnControl_TabPriorities>work priorities</AIPawnControl_TabPriorities>
+  <AIPawnControl_TabReason>last reasoning</AIPawnControl_TabReason>
+  <AIPawnControl_TabRecent>recent decisions</AIPawnControl_TabRecent>
+  <AIPawnControl_TabBudget>Left today: {0} decisions, {1} extra plans</AIPawnControl_TabBudget>
+  <AIPawnControl_StatusIdle>idle</AIPawnControl_StatusIdle>
+  <AIPawnControl_StatusThinking>thinking... ({0}s)</AIPawnControl_StatusThinking>
+  <AIPawnControl_StatusUnreachable>LLM unreachable, retrying later</AIPawnControl_StatusUnreachable>
+  <AIPawnControl_StatusPaused>paused ({0})</AIPawnControl_StatusPaused>
 </LanguageData>

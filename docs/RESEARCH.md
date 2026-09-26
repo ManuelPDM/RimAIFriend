@@ -106,5 +106,190 @@ and the docs.
 - `FloatMenuOption`: `Chosen(bool colonistOrdering, FloatMenu)`, `action`, `Label`, `Disabled`, `revalidateClickTarget`
 - `Pawn_JobTracker.TryTakeOrderedJob(Job, JobTag?, bool requestQueueing)`, `ClearQueuedJobs`, `EndCurrentJob`
 - `Job.playerForced`, `expiryInterval`, `checkOverrideOnExpire`; `Pawn_DraftController.Drafted`
-- Not yet verified: whether `Chosen(true, null)` accepts a null menu, and whether any provider reads
-  `Find.Selector` or `UI.MouseCell`. The fallback is calling `option.action()` directly.
+
+### Checked in the decompiled source (2026-09-25, Step 1)
+Paths are relative to `rimworld-reference\decompiled\Assembly-CSharp\`. Key claims were spot-checked by hand.
+
+#### Schedule (`RimWorld\Pawn_TimetableTracker.cs`)
+- `SetAssignment(int hour, TimeAssignmentDef)` (L56) is just `times[hour] = ta`. It has no bounds or null
+  check and no dirty flag, and no refresh is needed. The UI does the same (`PawnColumnWorker_Timetable.cs:96-100`).
+  `times` is saved automatically (L37).
+- `TimeAssignmentDefOf`: `Anything`, `Work`, `Joy`, `Sleep`, and `Meditate`, which is **null without Royalty**.
+  **Never store null or a custom def.** `JobGiver_Work.GetPriority` throws `NotImplementedException` on
+  anything else (`JobGiver_Work.cs` ~L25-47), and the UI dereferences every entry.
+- `timetable` exists only for humanlike pawns of the player faction (`PawnComponentsUtility.cs:280-299`), so
+  it's null for prisoners and guests. `CurrentAssignment` returns Anything unless `IsColonist` (L12-22).
+
+#### Work priorities (`RimWorld\Pawn_WorkSettings.cs`)
+- 1 is the highest priority, 4 the lowest (`LowestPriority = 4`), and 0 is off.
+- `SetPriority` (L140-158) marks the work-giver cache dirty by itself. It **logs a red error and does
+  nothing** if the work type is disabled, and it doesn't clamp out-of-range values (it only logs). So check
+  `pawn.WorkTypeIsDisabled(wt)` (`Pawn.cs:4526`) and clamp to 0-4 ourselves.
+- **1-4 only differ when manual priorities are on** (`Find.PlaySettings.useWorkPriorities`, a saved global
+  that defaults to off). When it's off, `GetPriority` returns 3 for any value above 0 (L160-169), but the stored
+  1/2/4 values are kept. If we flip the flag in code, call `workSettings.Notify_UseWorkPrioritiesChanged()`
+  on every player pawn, like the Work tab does (`MainTabWindow_Work.cs:41-52`).
+- **Never call `EnableAndInitialize`** (L89-129), because it overwrites every priority. Guard with
+  `workSettings?.EverWork`.
+
+#### Social interactions (`RimWorld\Pawn_InteractionsTracker.cs`)
+- **`TryInteractWith(recipient, def)` (L176+)**
+  - It calls `CanInteractNowWith` (L152-174), which checks:
+    - the 120-tick cooldown (L147-150);
+    - that the recipient is spawned, within 6 cells and in line of sight (`SocialInteractionUtility.cs:143-155`);
+    - that both pawns are awake, can talk, aren't burning, and aren't blocked by mental states, hediffs or lords
+      (`PawnUtility.IsInteractionBlocked`, L43-77).
+  - `ignoreTimeSinceLastInteraction` does **not** bypass the cooldown.
+  - It doesn't check downed, drafted, hostility, humanlike status or whether the def suits the pawns. We must
+    check those ourselves.
+- **On success:**
+  - initiator and recipient thoughts plus the opinion change (L285-298);
+  - skill XP;
+  - a **social-fight roll** from `intDef.socialFightBaseChance` (L214-218, 434-486). If a fight starts, the
+    worker is skipped.
+  - `Worker.Interacted`;
+  - an interaction mote;
+  - `lastInteractionTime` set on **both** pawns;
+  - a new `PlayLogEntry_Interaction` passed to `Find.PlayLog.Add` (L248-249);
+  - an optional letter.
+- **Safe to trigger on demand: Chitchat, DeepTalk, KindWords only.**
+  - Insult and Slight can start social fights.
+  - RomanceAttempt, MarriageProposal and Breakup change relations and send letters.
+  - Recruit, Enslave, ReduceWill, Convert, Suppress and the Spark*, Trial*, Counsel* and Speech* defs involve
+    prisoners, slaves, rituals or rebellions.
+  - KindWords, Slight and Breakup have no `DefOf` entry, so look them up with `DefDatabase<InteractionDef>`.
+- **Vanilla random chatter keeps running alongside ours.** It uses an MTB roll every 60 ticks and needs more
+  than 320 ticks since the last interaction (L106-145). It shares the cooldown fields with our calls.
+  Suppressing it would need a patch on `TryInteractRandomly`.
+
+#### Speech entries and Interaction Bubbles
+Bubbles is Workshop 1516158345, packageId `Jaxe.Bubbles`, "© Jaxe" with no license, so read it but don't copy.
+- **How Bubbles picks up entries:**
+  - Bubbles postfixes `PlayLog.Add` and accepts any `PlayLogEntry_Interaction` or subclass, and
+    `PlayLogEntry_InteractionSinglePawn`. It ignores every other `LogEntry`.
+  - It reads `initiator`/`recipient` by reflection and gets the text with
+    `ToGameStringFromPOV(initiator)` the first time it draws the bubble.
+  - **It needs no reference or call from us:** `Find.PlayLog.Add` is enough.
+- **Bubbles filters:**
+  - **Drafted pawns get no bubble** by default (`DoDrafted = false`). RimTalk flips this by reflection around
+    `Bubbler.Add`.
+  - No bubble for pawns off the current map, in fog, or at game speeds above its auto-hide setting.
+  - A bubble is at most 256 px wide and fades after 500 + 100 ticks (about 10 s at 1x).
+- **The PlayLog** (`Verse\PlayLog.cs`) is one global list capped at **150** entries and saved deep. The Social
+  tab shows the 12 newest entries for the pawn (`SocialCardUtility.cs:177`). It is not memory storage.
+- **Save risk with a custom entry class:**
+  - If the mod is removed, the class can't be resolved. `ScribeExtractor` returns null
+    (`ScribeExtractor.cs:105-150`), `Scribe_Collections` still adds that null to the list (L224-225), and
+    `PlayLog` then throws a NullReferenceException in the Social and Log tabs until 150 newer entries push it
+    out. A mod-only `InteractionDef` has the same problem.
+  - RimTalk works around this by converting its entries to vanilla ones in a prefix on
+    `GameDataSaveLoader.SaveGame`.
+- **Recommended pattern for us: no custom class.**
+  1. Use a plain vanilla `PlayLogEntry_Interaction`, either the one `TryInteractWith` creates (capture it
+     with a flagged `PlayLog.Add` prefix) or our own with a vanilla def.
+  2. Keep our text in a GameComponent dictionary keyed by `entry.GetUniqueLoadID()` (stable:
+     `LogEntry_{ticksAbs}_{logID}`, `LogEntry.cs:158-160`). Register the text before `PlayLog.Add`.
+  3. Postfix `LogEntry.ToGameStringFromPOV` to swap our text in.
+  4. Prune the dictionary to the entries still in the log.
+
+  If the mod is removed, the lines revert to vanilla chitchat text. `PlayLog.Add` applies no thoughts; if we
+  want any, apply them ourselves.
+
+#### Player orders vs ours
+- **`Pawn_JobTracker.TryTakeOrderedJob` (`Verse.AI\Pawn_JobTracker.cs:889-959`)**
+  - It sets `job.playerForced = true` on every call, so the flag doesn't prove the player gave the order.
+  - It has no notify or event.
+  - **Shift-queue trap:** it reads `KeyBindingDefOf.QueueOrder.IsDownEvent` (L904), which checks
+    `Event.current`, then `Input.GetKey`. If we call it while `Event.current` is non-null and the player is
+    holding Shift, our order gets **appended to the queue** instead of replacing the current job. Calling from
+    our `Root.Update` pump avoids that.
+- **Every player order path goes through it:** float-menu options, the auto-take goto (`Selector.cs:219`),
+  drag-goto (`MultiPawnGotoController` → `FloatMenuOptionProvider_DraftedMove.PawnGotoAction`), "Prioritize",
+  gizmos, targeter force-attack (`Verb.OrderForceTarget`), and abilities.
+- **Game-internal callers (false positives):**
+  - `Toils_Haul.cs:123` (a follow-up store job);
+  - `RestoreCapturedJobs` (`Pawn_JobTracker.cs:544`, called after `PawnFlyer` jumps);
+  - `JobDriver_GetReimplanted.cs:31` and `JobDriver_ResurrectMech.cs:32`;
+  - other mods.
+  - Mental states, lords and the think tree use `StartJob`, not this method.
+- **The `Drafted` setter** (`Pawn_DraftController.cs:19-102`) is also called automatically, from:
+  - `AutoUndrafter` (after 10,000 ticks with no threat);
+  - mental states and `MakeDowned`;
+  - faction changes;
+  - rituals;
+  - caravan, transporter and portal arrival (auto-draft);
+  - `PawnFlyer` restoring the previous state.
+- **Recommended hooks:**
+  1. **A prefix on `TryTakeOrderedJob`** for our pawn: skip when our `[ThreadStatic]` "our order" flag is set,
+     and count it as the player only when `Event.current != null`. Also wrap `RestoreCapturedJobs` in a flag.
+  2. **Drafting:** a postfix on `Pawn_DraftController.GetGizmos` that wraps the draft toggle's `toggleAction`
+     (L162-170) for our pawn. That catches only the player's click, not auto-undraft, downing or mental states.
+  3. **Optional:** a prefix on `FloatMenuOption.Chosen` with `colonistOrdering == true`, to catch picks that
+     open a dialog or targeter without ordering a job.
+
+#### Float menu without the UI (answers the open questions)
+- **Calling `Chosen(false, null)` is safe with a null menu.** `floatMenu` is only used as
+  `floatMenu?.PreOptionChosen` (`FloatMenuOption.cs:294-312`), and the game itself passes null
+  (`Selector.cs:219`). `colonistOrdering: false` skips the order sound. `Chosen` has no tutor checks; those
+  live in `DoGUI` (L443-456). Don't pass a `FloatMenuMap`, because its revalidation uses `Find.Selector`.
+- **`FloatMenuMakerMap.GetOptions` (`FloatMenuMakerMap.cs:27-71`)**
+  - It **doesn't filter by the selector**. It uses the list we pass, but it mutates it (so pass a fresh list).
+  - It **requires `pawn.Map == Find.CurrentMap`** (L31, 35, 135-138), so it only works on the map the player
+    is viewing.
+  - It rejects downed or deathresting pawns and posts a visible `Messages.Message` saying why.
+- **Things under the "click" come from `GenUI.ThingsUnderMouse`.** It hit-tests at `clickPos` but sorts, and
+  includes adjacent stacked items, using the **real mouse** (`GenUI.cs:447, 467, 494, 509-511`). The options
+  for the clicked cell are right, but their order and any adjacent items may vary. Use
+  `cell.ToVector3Shifted()`.
+- **Providers that misbehave when called from code:**
+  - `DraftedMove` for multi-select (uses `Selector.gotoController`); single-pawn is fine.
+  - `DressOtherPawn` (starts a targeter).
+  - Options that open a dialog, count window or submenu: Equip confirm, HackAncientTerminal, Mechanitor,
+    Xenogerm, LoadCaravan, LoadOntoPackAnimal, PickUpItem count, and `FloatMenuUtility` submenus.
+
+  Blacklist these, or detect a change in `Find.WindowStack`. Thing and Comp `GetFloatMenuOptions` don't read
+  the mouse or selector.
+- **For plain moves, skip the float menu:** call the public static
+  `FloatMenuOptionProvider_DraftedMove.PawnGotoAction(cell, pawn, RCellFinder.BestOrderedGotoDestNear(cell, pawn))`.
+
+#### Snapshot sources (read everything on the main thread; many getters fill caches or shared static lists)
+- **Needs:** `pawn.needs.AllNeeds`, `Need.LabelCap`, `CurLevelPercentage`, `ShowOnNeedList`.
+- **Mood:**
+  - `needs.mood.CurLevel` and `MoodString`;
+  - `mindState.mentalBreaker.BreakThresholdMinor/Major/Extreme` and `Break*IsImminent`;
+  - `pawn.InMentalState` and `MentalStateDef`.
+- **Thoughts:**
+  - `needs.mood.thoughts.GetDistinctMoodThoughtGroups(list)` and `MoodOffsetOfGroup(t)`. These use static temp
+    lists and are O(n²).
+  - Memories are `thoughts.memories.Memories` (`Thought_Memory`: `age`, `otherPawn`).
+  - Situational thoughts are `thoughts.situational`.
+- **Health:**
+  - `health.hediffSet.hediffs` (`Visible`, `LabelCap`, `Part`, `Severity`, `BleedRate`);
+  - `hediffSet.BleedRateTotal` and `PainTotal`;
+  - `summaryHealth.SummaryHealthPercent`;
+  - `health.Downed`, `HasHediffsNeedingTend()`;
+  - `HealthUtility.GetGeneralConditionLabel`.
+- **Skills:** `skills.skills` (`Level`, `passion`, `TotallyDisabled`).
+- **Relations:**
+  - `relations.DirectRelations` and `PawnRelationUtility.GetMostImportantRelation`;
+  - `relations.OpinionOf(other)`, which is costly, so only call it for nearby or important pawns;
+  - `OpinionExplanation`.
+- **Job:** `pawn.GetJobReport()` (`Pawn.cs:3118`; uses the lord's report if there is one, and is guarded
+  against exceptions), and `jobs.jobQueue`.
+- **Identity:**
+  - traits: `story.traits.allTraits`;
+  - backstory: `story.Childhood/Adulthood.TitleCapFor(gender)` and `FullDescriptionFor(pawn).Resolve()`;
+  - ideology: `pawn.Ideo`, which is null without Ideology;
+  - age: `ageTracker.AgeBiologicalYears`.
+- **Place and time:**
+  - `pawn.GetRoom()` and `Room.GetRoomRoleLabel()`. `Room.Role` can recalculate, which is expensive in huge
+    rooms.
+  - `GenLocalDate.HourOfDay/Season(map)`;
+  - `map.weatherManager.CurWeatherPerceived`;
+  - `map.mapTemperature.OutdoorTemp` and `pawn.AmbientTemperature`.
+- **Surroundings and danger:**
+  - `GenRadial.RadialDistinctThingsAround` (keep the radius small);
+  - `map.mapPawns.FreeColonistsSpawned` (a shared list, so copy it);
+  - `GenHostility.AnyHostileActiveThreatToPlayer(map)`;
+  - `map.dangerWatcher.DangerRating`.
+  - Alerts: `AlertsReadout.activeAlerts` is private, so we'd need reflection to read it.

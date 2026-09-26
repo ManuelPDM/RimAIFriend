@@ -1,0 +1,6 @@
+It's {time}. {trigger}
+
+{snapshot}
+
+What do you do now? Pick one option by its number. "keep going" means carry on with your normal day and let your schedule and work priorities guide you. Only pick something else if it fits your needs, mood, plan or personality better right now.
+{menu}

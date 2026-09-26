@@ -1,0 +1,14 @@
+Plan your day. It's {time}.
+
+{snapshot}
+
+[Work types] Priority 1 = do first, 4 = do last, 0 = won't do it at all.
+{worktypes}
+{prioritynote}
+
+[My schedule now] {schedule}
+
+Decide:
+- intent: one short sentence about what today is for.
+- schedule: 24 entries, one per hour from 0 to 23. Options: {scheduleoptions}. "work" hours block recreation and naps, "joy" hours are for recreation, and "anything" lets you work, rest or have fun as needed. Plan enough sleep and some recreation time.
+- a priority for every work type listed, based on your skills, passions, mood and what the colony needs. Don't just copy the current values: rank what matters most to you today as 1, and use 2-4 for the rest.
