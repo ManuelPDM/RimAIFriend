@@ -149,6 +149,7 @@ namespace AIPawnControl
             public Func<string, string> Apply; // runs on the main thread when chosen, gets her cleaned "say"; returns a readable result
             public bool IsTalk; // "say" is her opening line; for anything else it's a remark out loud
             public Pawn Target; // who she talks to, for a talk
+            public bool OwnRemark; // a later call makes her remark (the Project call), so the Act's "say" is dropped
         }
 
         /// <summary>Every action valid for this pawn right now, numbered. The schema only allows these ids.</summary>
@@ -188,6 +189,19 @@ namespace AIPawnControl
 
             if (mind.ExtraPlansLeft > 0)
                 Add("re-plan my day", () => mind.TryExtraPlan(force: false) ? "Re-planning." : "Couldn't re-plan now.");
+
+            if (BuildManager.Instance?.ActiveProject(pawn) is BuildProject project)
+                Add($"abandon my {project.Kind} project", () =>
+                {
+                    project.Abandon(byPlayer: false);
+                    return $"Gave up on the {project.Kind}; its blueprints are gone.";
+                });
+            if (BuildManager.Instance?.CantPlanReason(pawn) == null)
+            {
+                options.Add(new ActOption { Id = options.Count + 1, Label = "plan a new room", Apply = _ => ProjectCall.Start(mind), OwnRemark = true });
+                foreach (var furnish in Furnishing.Options(pawn))
+                    Add(furnish.label, () => Furnishing.Place(pawn, furnish));
+            }
 
             return options;
         }

@@ -35,7 +35,7 @@ namespace AIPawnControl
         // The live snapshot (SnapshotBuilder.Sections): no cap, never dropped.
         private static readonly string[] Snapshot =
         {
-            "Me", "Time", "Condition", "Needs", "Feelings", "Skills", "Doing now", "My plan", "I promised the player",
+            "Me", "Time", "Condition", "Needs", "Feelings", "Skills", "Doing now", "My plan", "I promised the player", "My project",
             "People nearby", "Colony", "Colony stores", "Rooms", "Recent",
         };
 
@@ -54,6 +54,7 @@ namespace AIPawnControl
             ["plan"] = new HashSet<string>(Snapshot) { "Today so far", "About" },
             ["act"] = new HashSet<string>(Snapshot) { "Today so far", "About", "On my mind" },
             ["chat"] = new HashSet<string>(Snapshot) { "Today so far", "About", "I remember" },
+            ["project"] = new HashSet<string>(Snapshot) { "Today so far" }, // the Act that chose it already recalled memories
             ["reflect"] = new HashSet<string> { "Me", "Time" }, // its events, people and goals come in the task values
         };
 

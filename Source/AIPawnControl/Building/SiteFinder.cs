@@ -21,7 +21,9 @@ namespace AIPawnControl
         public readonly List<(IntVec3 pos, float radius)> foci;
         private readonly int w, h;
         private readonly int[] walk;
-        private readonly bool[] reusable;
+        private readonly bool[] reusable, realWall, noEdifice, wallRunH, wallRunV, doorOk, spotBlocked;
+        private readonly Dictionary<(RoomKindDef, int, int, int, int), List<PlanEntry>> templates = new Dictionary<(RoomKindDef, int, int, int, int), List<PlanEntry>>();
+        public readonly Dictionary<string, long> timings = new Dictionary<string, long>();
         private readonly int[] satBlocked, satRingBad, satDoorTouch, satTrees, satItems, satFertility;
         private readonly Dictionary<Room, bool> outdoorsCache = new Dictionary<Room, bool>();
         private readonly Dictionary<Room, int> doorCountCache = new Dictionary<Room, int>();
@@ -30,6 +32,7 @@ namespace AIPawnControl
 
         public SiteFinder(Map map, IntVec3 center)
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             this.map = map;
             this.center = center;
             weights = SiteWeights.Load();
@@ -37,6 +40,7 @@ namespace AIPawnControl
             w = map.Size.x;
             h = map.Size.z;
             walk = Walk(map, center, weights.maxWalk);
+            timings["walk"] = clock.ElapsedMilliseconds;
 
             // Footprints lie within 8 cells of a reached cell (the door's outside cell is reached).
             int minX = int.MaxValue, minZ = int.MaxValue, maxX = int.MinValue, maxZ = int.MinValue;
@@ -56,7 +60,30 @@ namespace AIPawnControl
             var items = new bool[w * h];
             var fertilityTenths = new int[w * h];
             reusable = new bool[w * h];
+            realWall = new bool[w * h];
+            noEdifice = new bool[w * h];
+            wallRunH = new bool[w * h];
+            wallRunV = new bool[w * h];
+            doorOk = new bool[w * h];
+            spotBlocked = new bool[w * h];
             interactionSpots = InteractionSpots(map);
+            timings["spots"] = clock.ElapsedMilliseconds;
+            // Wall grids reach 12 cells past the scan area: alignment looks up to 10 beyond a footprint, slivers 2.
+            CellRect wallArea = scanArea.IsEmpty ? CellRect.Empty : scanArea.ExpandedBy(12).ClipInsideMap(map);
+            foreach (var c in wallArea)
+            {
+                int i = c.z * w + c.x;
+                Building edifice = c.GetEdifice(map);
+                noEdifice[i] = edifice == null;
+                reusable[i] = IsReusableWall(c, map);
+                realWall[i] = reusable[i] && edifice.def == ThingDefOf.Wall;
+            }
+            foreach (var c in wallArea)
+            {
+                int i = c.z * w + c.x, x = c.x, z = c.z;
+                wallRunH[i] = reusable[i] && ((x > 0 && reusable[i - 1]) || (x < w - 1 && reusable[i + 1]));
+                wallRunV[i] = reusable[i] && ((z > 0 && reusable[i - w]) || (z < h - 1 && reusable[i + w]));
+            }
             for (int i = 0; i < blocked.Length; i++)
             {
                 var c = new IntVec3(i % w, 0, i / w);
@@ -65,8 +92,14 @@ namespace AIPawnControl
                     blocked[i] = ringBad[i] = true;
                     continue;
                 }
-                reusable[i] = IsReusableWall(c, map);
+                if (walk[i] >= 0 && !(c.GetEdifice(map) is Building_Door))
+                {
+                    Room room = c.GetRoom(map);
+                    doorOk[i] = room != null && (!IsIndoors(room) || IsHallway(room));
+                }
                 blocked[i] = IsBlocked(c, out trees[i], out items[i]);
+                foreach (var t in c.GetThingList(map))
+                    spotBlocked[i] |= t.def.passability != Traversability.Standable; // a tree or chunk on a work spot fails vanilla's placement
                 ringBad[i] = blocked[i] && !reusable[i];
                 fertilityTenths[i] = Mathf.Max(0, Mathf.RoundToInt((c.GetTerrain(map).fertility - 1f) * 10f));
             }
@@ -82,12 +115,14 @@ namespace AIPawnControl
                         doorTouch[i] = true;
                 }
             }
+            timings["cells"] = clock.ElapsedMilliseconds;
             satBlocked = Sat(blocked);
             satRingBad = Sat(ringBad);
             satDoorTouch = Sat(doorTouch);
             satTrees = Sat(trees);
             satItems = Sat(items);
             satFertility = Sat(fertilityTenths);
+            timings["grids"] = clock.ElapsedMilliseconds;
         }
 
         /// <summary>Things whose meditation focus is hurt by artificial structures nearby (the anima tree), with the radius from their def.</summary>
@@ -240,7 +275,13 @@ namespace AIPawnControl
 
         // ---- summed-area tables ----
 
-        private int[] Sat(bool[] grid) => Sat(grid.Select(b => b ? 1 : 0).ToArray());
+        private int[] Sat(bool[] grid)
+        {
+            var ints = new int[grid.Length];
+            for (int i = 0; i < grid.Length; i++)
+                ints[i] = grid[i] ? 1 : 0;
+            return Sat(ints);
+        }
 
         private int[] Sat(int[] grid)
         {
@@ -258,74 +299,146 @@ namespace AIPawnControl
 
         // ---- candidates ----
 
-        /// <summary>Every footprint that passes the hard rules and gets a layout, scored, best first.</summary>
-        public List<RoomPlan> Candidates(RoomKind kind)
+        /// <summary>A footprint with its door and grid-only score. Cheap: a full RoomPlan is built only for the best ones.</summary>
+        public class Candidate
         {
-            var result = new List<RoomPlan>();
+            public CellRect rect;
+            public IntVec3 door;
+            public Rot4 side;
+            public float score;
+            public int Width => rect.Width - 2;
+            public int Height => rect.Height - 2;
+        }
+
+        /// <summary>Every footprint of this interior size (width along x, height along z) that passes the hard rules and has a door, best first.</summary>
+        public List<Candidate> Candidates(int width, int height)
+        {
+            var result = new List<Candidate>();
             if (scanArea.IsEmpty)
                 return result;
-            foreach (int size in Footprints)
-                for (int z = scanArea.minZ; z + size - 1 <= scanArea.maxZ; z++)
-                    for (int x = scanArea.minX; x + size - 1 <= scanArea.maxX; x++)
-                    {
-                        var rect = new CellRect(x, z, size, size);
-                        if (Sum(satBlocked, rect.ContractedBy(1)) > 0 || Sum(satRingBad, rect) > 0 || Sum(satDoorTouch, rect) > 0)
-                            continue;
-                        var plan = Layout(kind, rect);
-                        if (plan != null)
-                            result.Add(plan);
-                    }
+            for (int z = scanArea.minZ; z + height + 1 <= scanArea.maxZ; z++)
+                for (int x = scanArea.minX; x + width + 1 <= scanArea.maxX; x++)
+                {
+                    var c = TryCandidate(new CellRect(x, z, width + 2, height + 2));
+                    if (c != null)
+                        result.Add(c);
+                }
             result.Sort((a, b) => b.score.CompareTo(a.score));
             return result;
         }
 
-        private RoomPlan Layout(RoomKind kind, CellRect rect)
+        private Candidate TryCandidate(CellRect rect)
         {
-            var plan = new RoomPlan { kind = kind, map = map, footprint = rect };
-            foreach (var c in rect.EdgeCells)
-                if (reusable[c.z * w + c.x])
-                    plan.reusedWalls.Add(c);
+            if (!rect.InBounds(map) || Sum(satBlocked, rect.ContractedBy(1)) > 0 || Sum(satRingBad, rect) > 0 || Sum(satDoorTouch, rect) > 0)
+                return null;
+            if (!ChooseDoor(rect, out IntVec3 door, out Rot4 side))
+                return null;
+            return new Candidate { rect = rect, door = door, side = side, score = Score(rect, door, side, null) };
+        }
 
-            // The door: best walk from the base, then centred on its wall (vanilla's TryGetBestRectExteriorCell idea).
+        /// <summary>The door: best walk from the base, then centred on its wall (vanilla's TryGetBestRectExteriorCell idea).</summary>
+        private bool ChooseDoor(CellRect rect, out IntVec3 door, out Rot4 doorSide)
+        {
+            door = IntVec3.Invalid;
+            doorSide = Rot4.North;
             float bestKey = float.MaxValue;
+            IntVec3 centre = rect.CenterCell;
             foreach (var c in rect.EdgeCells)
             {
                 if (IsCorner(rect, c))
                     continue;
                 Rot4 side = SideOf(rect, c);
                 IntVec3 outside = c + side.FacingCell;
-                int d = WalkAt(outside);
-                if (d < 0 || outside.GetEdifice(map) is Building_Door)
+                if (!outside.InBounds(map))
                     continue;
-                if (plan.reusedWalls.Contains(c) && c.GetEdifice(map).def != ThingDefOf.Wall)
+                int o = outside.z * w + outside.x;
+                if (!doorOk[o])
+                    continue;
+                int i = c.z * w + c.x;
+                if (reusable[i] && !realWall[i])
                     continue; // only a real wall can be replaced by a door blueprint
-                Room room = outside.GetRoom(map);
-                if (room == null || (IsIndoors(room) && !IsHallway(room)))
-                    continue;
-                float offCentre = side.IsHorizontal ? Mathf.Abs(c.z - rect.CenterCell.z) : Mathf.Abs(c.x - rect.CenterCell.x);
-                float key = d * 10 + offCentre;
+                float offCentre = side.IsHorizontal ? Mathf.Abs(c.z - centre.z) : Mathf.Abs(c.x - centre.x);
+                float key = walk[o] * 10 + offCentre;
                 if (key < bestKey)
                 {
                     bestKey = key;
-                    plan.door = c;
-                    plan.doorOutside = outside;
-                    plan.doorInside = c - side.FacingCell;
+                    door = c;
+                    doorSide = side;
                 }
             }
-            if (bestKey == float.MaxValue)
-                return null;
-            plan.reusedWalls.Remove(plan.door);
+            return bestKey < float.MaxValue;
+        }
 
+        /// <summary>The weighted score from the grids alone. With a plan, also fills its terms and description inputs.</summary>
+        private float Score(CellRect rect, IntVec3 door, Rot4 doorSide, RoomPlan plan)
+        {
+            IntVec3 outside = door + doorSide.FacingCell;
+            int walkTiles = walk[outside.z * w + outside.x];
+            int reused = 0, slivers = 0;
+            var sides = 0; // bit per side with a reused wall
             foreach (var c in rect.EdgeCells)
-                if (c == plan.door)
-                    plan.entries.Add(new PlanEntry(ThingDefOf.Door, c, Rot4.North));
-                else if (!plan.reusedWalls.Contains(c))
-                    plan.entries.Add(new PlanEntry(ThingDefOf.Wall, c, Rot4.North));
+            {
+                int i = c.z * w + c.x;
+                bool corner = IsCorner(rect, c);
+                if (reusable[i] && c != door)
+                {
+                    reused++;
+                    if (!corner)
+                        sides |= 1 << SideOf(rect, c).AsInt;
+                    continue;
+                }
+                if (corner)
+                    continue;
+                IntVec3 step = SideOf(rect, c).FacingCell;
+                IntVec3 gap = c + step, beyond = c + step * 2;
+                if (beyond.InBounds(map) && noEdifice[gap.z * w + gap.x] && reusable[beyond.z * w + beyond.x])
+                    slivers++;
+            }
+            int sharedSides = 0;
+            for (int r = 0; r < 4; r++)
+                if ((sides & (1 << r)) != 0)
+                    sharedSides++;
+            int aligned = 0;
+            for (int r = 0; r < 4; r++)
+                if (ContinuesWallLine(rect, new Rot4(r)))
+                    aligned++;
+            int trees = Sum(satTrees, rect), items = Sum(satItems, rect);
+            bool inHome = map.areaManager.Home[rect.CenterCell];
+            int siteEdge = Mathf.Min(Mathf.Min(rect.minX, rect.minZ), Mathf.Min(w - 1 - rect.maxX, h - 1 - rect.maxZ));
+            int shelter = Mathf.Clamp(EdgeDistance(rect.CenterCell) - EdgeDistance(center), -15, 15);
+            bool standard = Mathf.Min(rect.Width, rect.Height) - 2 >= StandardSize;
 
-            if (!RoomPlacer.Place(plan))
-                return null;
-            Score(plan);
-            return plan;
+            float walkTerm = weights.walk * walkTiles;
+            float shared = weights.sharedWallCell * reused + weights.sharedSide * sharedSides;
+            float alignedTerm = weights.alignedSide * aligned;
+            float sliverTerm = weights.sliverCell * slivers;
+            float farmland = weights.fertility * Sum(satFertility, rect);
+            float shelterTerm = weights.shelter * shelter + weights.nearEdge * Mathf.Max(0, 15 - siteEdge);
+            float clearing = weights.tree * trees + weights.item * items;
+            float home = inHome ? weights.home : 0f;
+            float size = standard ? weights.bigRoom : 0f;
+            float score = walkTerm + shared + alignedTerm + sliverTerm + farmland + shelterTerm + clearing + home + size;
+            if (plan != null)
+            {
+                plan.walk = walkTiles;
+                plan.sharedSides = sharedSides;
+                plan.trees = trees;
+                plan.items = items;
+                plan.inHome = inHome;
+                plan.score = score;
+                var t = plan.terms;
+                t.Clear();
+                t["walk"] = walkTerm;
+                t["shared"] = shared;
+                t["aligned"] = alignedTerm;
+                t["slivers"] = sliverTerm;
+                t["farmland"] = farmland;
+                t["shelter"] = shelterTerm;
+                t["clearing"] = clearing;
+                t["home"] = home;
+                t["size"] = size;
+            }
+            return score;
         }
 
         public static bool IsCorner(CellRect r, IntVec3 c) => (c.x == r.minX || c.x == r.maxX) && (c.z == r.minZ || c.z == r.maxZ);
@@ -333,52 +446,6 @@ namespace AIPawnControl
         /// <summary>Which side of the rect an edge cell is on (the direction pointing out of the room).</summary>
         public static Rot4 SideOf(CellRect r, IntVec3 c) =>
             c.z == r.maxZ ? Rot4.North : c.z == r.minZ ? Rot4.South : c.x == r.maxX ? Rot4.East : Rot4.West;
-
-        private void Score(RoomPlan plan)
-        {
-            CellRect rect = plan.footprint;
-            plan.walk = WalkAt(plan.doorOutside);
-            plan.trees = Sum(satTrees, rect);
-            plan.items = Sum(satItems, rect);
-            plan.inHome = map.areaManager.Home[rect.CenterCell];
-            var sides = new HashSet<Rot4>();
-            foreach (var c in plan.reusedWalls)
-                if (!IsCorner(rect, c))
-                    sides.Add(SideOf(rect, c));
-            plan.sharedSides = sides.Count;
-
-            int aligned = 0;
-            for (int r = 0; r < 4; r++)
-                if (ContinuesWallLine(rect, new Rot4(r)))
-                    aligned++;
-            int slivers = 0;
-            foreach (var c in rect.EdgeCells)
-            {
-                if (IsCorner(rect, c) || plan.reusedWalls.Contains(c))
-                    continue;
-                IntVec3 step = SideOf(rect, c).FacingCell;
-                IntVec3 gap = c + step, beyond = c + step * 2;
-                if (beyond.InBounds(map) && gap.GetEdifice(map) == null && IsReusableWall(beyond, map))
-                    slivers++;
-            }
-            int siteEdge = Mathf.Min(Mathf.Min(rect.minX, rect.minZ), Mathf.Min(w - 1 - rect.maxX, h - 1 - rect.maxZ));
-            int shelter = Mathf.Clamp(EdgeDistance(rect.CenterCell) - EdgeDistance(center), -15, 15);
-
-            var t = plan.terms;
-            t.Clear();
-            t["walk"] = weights.walk * plan.walk;
-            t["shared"] = weights.sharedWallCell * plan.reusedWalls.Count + weights.sharedSide * plan.sharedSides;
-            t["aligned"] = weights.alignedSide * aligned;
-            t["slivers"] = weights.sliverCell * slivers;
-            t["farmland"] = weights.fertility * Sum(satFertility, rect);
-            t["shelter"] = weights.shelter * shelter + weights.nearEdge * Mathf.Max(0, 15 - siteEdge);
-            t["clearing"] = weights.tree * plan.trees + weights.item * plan.items;
-            t["home"] = plan.inHome ? weights.home : 0f;
-            t["size"] = rect.Width == 7 ? weights.bigRoom : 0f;
-            plan.score = 0f;
-            foreach (var v in t.Values)
-                plan.score += v;
-        }
 
         private int EdgeDistance(IntVec3 c) => Mathf.Min(Mathf.Min(c.x, c.z), Mathf.Min(w - 1 - c.x, h - 1 - c.z));
 
@@ -391,24 +458,95 @@ namespace AIPawnControl
             bool vertical = side == Rot4.East || side == Rot4.West;
             int line = side == Rot4.North ? rect.maxZ : side == Rot4.South ? rect.minZ : side == Rot4.East ? rect.maxX : rect.minX;
             int lo = vertical ? rect.minZ : rect.minX, hi = vertical ? rect.maxZ : rect.maxX;
-            IntVec3 At(int along) => vertical ? new IntVec3(line, 0, along) : new IntVec3(along, 0, line);
-            bool Wall(IntVec3 c) => c.InBounds(map) && IsReusableWall(c, map);
+            bool[] run = vertical ? wallRunV : wallRunH;
             for (int d = 1; d <= 10; d++)
-                foreach (int along in new[] { lo - d, hi + d })
-                    if (Wall(At(along)) && (Wall(At(along - 1)) || Wall(At(along + 1))))
+                for (int end = 0; end < 2; end++)
+                {
+                    int along = end == 0 ? lo - d : hi + d;
+                    int x = vertical ? line : along, z = vertical ? along : line;
+                    if (x >= 0 && z >= 0 && x < w && z < h && run[z * w + x])
                         return true;
+                }
             return false;
         }
 
-        /// <summary>The best n that don't overlap each other and pass the validator.</summary>
-        public static List<RoomPlan> TopSites(List<RoomPlan> sorted, int n, RoomValidator validator, ThingDef material)
+        // ---- plans ----
+
+        /// <summary>
+        /// The full plan for a candidate and a kind: walls, door and the kind's furniture, scored with every term. Null if
+        /// the kind's items don't fit. The furniture comes from a template: the interior is empty, so the layout depends only
+        /// on the kind, the size and where the door is, and it's worked out once per scan and shifted into place.
+        /// </summary>
+        public RoomPlan Plan(Candidate c, RoomKindDef kind)
+        {
+            if (!kind.Fits(c.Width, c.Height))
+                return null;
+            var plan = NewPlan(c, kind);
+            var furniture = Template(plan, c);
+            if (furniture == null)
+                return null;
+            IntVec3 origin = new IntVec3(c.rect.minX, 0, c.rect.minZ);
+            foreach (var e in furniture)
+            {
+                var moved = e.Moved(origin);
+                if (moved.def.hasInteractionCell || !moved.def.multipleInteractionCellOffsets.NullOrEmpty())
+                    foreach (var spot in ThingUtility.InteractionCellsWhenAt(moved.def, moved.cell, moved.rot, map))
+                        if (spotBlocked[spot.z * w + spot.x])
+                            return null;
+                plan.entries.Add(moved);
+            }
+            foreach (var cell in c.rect.EdgeCells)
+                if (cell == c.door)
+                    plan.entries.Add(new PlanEntry(ThingDefOf.Door, cell, Rot4.North));
+                else if (!plan.reusedWalls.Contains(cell))
+                    plan.entries.Add(new PlanEntry(ThingDefOf.Wall, cell, Rot4.North));
+            Score(c.rect, c.door, c.side, plan);
+            return plan;
+        }
+
+        private RoomPlan NewPlan(Candidate c, RoomKindDef kind)
+        {
+            var plan = new RoomPlan
+            {
+                kind = kind, map = map, footprint = c.rect,
+                door = c.door, doorOutside = c.door + c.side.FacingCell, doorInside = c.door - c.side.FacingCell,
+            };
+            foreach (var cell in c.rect.EdgeCells)
+                if (reusable[cell.z * w + cell.x] && cell != c.door)
+                    plan.reusedWalls.Add(cell);
+            return plan;
+        }
+
+        /// <summary>The kind's furniture relative to the footprint's corner, or null if it doesn't fit (cached per scan).</summary>
+        private List<PlanEntry> Template(RoomPlan plan, Candidate c)
+        {
+            int offset = c.side.IsHorizontal ? c.door.z - c.rect.minZ : c.door.x - c.rect.minX;
+            var key = (plan.kind, c.Width, c.Height, c.side.AsInt, offset);
+            if (templates.TryGetValue(key, out var cached))
+                return cached;
+            var scratch = NewPlan(c, plan.kind);
+            List<PlanEntry> result = null;
+            if (RoomPlacer.Place(scratch))
+            {
+                IntVec3 origin = new IntVec3(c.rect.minX, 0, c.rect.minZ);
+                result = scratch.entries.Select(e => e.Moved(-origin)).ToList();
+            }
+            templates[key] = result;
+            return result;
+        }
+
+        /// <summary>The best n that don't overlap each other and pass the validator, as plans of this kind.</summary>
+        public List<RoomPlan> TopSites(List<Candidate> sorted, int n, RoomKindDef kind, RoomValidator validator, ThingDef material)
         {
             var top = new List<RoomPlan>();
-            foreach (var plan in sorted)
+            foreach (var c in sorted)
             {
                 if (top.Count >= n)
                     break;
-                if (top.Any(t => t.footprint.Overlaps(plan.footprint)))
+                if (top.Any(t => t.footprint.Overlaps(c.rect)))
+                    continue;
+                var plan = Plan(c, kind);
+                if (plan == null)
                     continue;
                 var failures = validator.Check(plan, material);
                 if (failures.Count > 0)
@@ -419,6 +557,91 @@ namespace AIPawnControl
                 top.Add(plan);
             }
             return top;
+        }
+
+        // ---- sites and sizes (PHASE4.md §2, §5) ----
+
+        public const int StandardSize = 5;
+
+        /// <summary>Every interior size she may choose, width along x and height along z, both orientations.</summary>
+        public static readonly List<(int w, int h)> Shapes = Enumerable.Range(4, 4).SelectMany(a => Enumerable.Range(4, 4).Select(b => (a, b))).ToList();
+
+        /// <summary>The top 3 sites as validated plain rooms at the standard 5×5, else 4×4 where 5×5 fits nowhere.</summary>
+        public List<RoomPlan> Sites(RoomValidator validator, ThingDef material, out List<Candidate> candidates, int n = 3)
+        {
+            candidates = Candidates(StandardSize, StandardSize);
+            var sites = TopSites(candidates, n, RoomKindDef.Plain, validator, material);
+            if (sites.Count == 0)
+            {
+                candidates = Candidates(4, 4);
+                sites = TopSites(candidates, n, RoomKindDef.Plain, validator, material);
+            }
+            return sites;
+        }
+
+        /// <summary>The candidates of one shape whose interior contains the cell, best first.</summary>
+        private List<Candidate> Around(IntVec3 cell, int width, int height)
+        {
+            var result = new List<Candidate>();
+            for (int x = cell.x - width; x <= cell.x - 1; x++)
+                for (int z = cell.z - height; z <= cell.z - 1; z++)
+                {
+                    var c = TryCandidate(new CellRect(x, z, width + 2, height + 2));
+                    if (c != null)
+                        result.Add(c);
+                }
+            result.Sort((a, b) => b.score.CompareTo(a.score));
+            return result;
+        }
+
+        /// <summary>The biggest interior (by area) that fits at a site: a footprint whose interior holds the site's centre.</summary>
+        public (int w, int h) MaxFit(RoomPlan site)
+        {
+            IntVec3 cell = site.Interior.CenterCell;
+            foreach (var (sw, sh) in Shapes.OrderByDescending(s => s.w * s.h).ThenByDescending(s => Mathf.Min(s.w, s.h)))
+                if (Around(cell, sw, sh).Count > 0)
+                    return (sw, sh);
+            return (site.Width, site.Height);
+        }
+
+        /// <summary>
+        /// Her chosen kind and size at a site: the best validated plan of that size whose interior holds the site's centre (either
+        /// orientation). If it doesn't fit there, or is below the kind's minimum, the nearest size that fits (smaller first on a
+        /// tie). The note says what changed, or is null.
+        /// </summary>
+        public RoomPlan Fit(RoomPlan site, RoomKindDef kind, int width, int height, RoomValidator validator, ThingDef material, out string note)
+        {
+            note = null;
+            IntVec3 cell = site.Interior.CenterCell;
+            int area = width * height;
+            var order = Shapes.Where(s => kind.Fits(s.w, s.h))
+                .OrderBy(s => Mathf.Min(s.w, s.h) == Mathf.Min(width, height) && Mathf.Max(s.w, s.h) == Mathf.Max(width, height) ? 0 : 1)
+                .ThenBy(s => Mathf.Abs(s.w * s.h - area))
+                .ThenBy(s => s.w * s.h)
+                .ToList();
+            foreach (var (sw, sh) in order)
+            {
+                int tries = 0;
+                foreach (var c in Around(cell, sw, sh))
+                {
+                    var plan = Plan(c, kind);
+                    if (plan == null)
+                        continue;
+                    var failures = validator.Check(plan, material);
+                    if (failures.Count > 0)
+                    {
+                        ModLog.Warning($"Fit dropped by the validator (a site-finder bug): {string.Join("; ", failures)}\n{TextMap.Draw(plan)}");
+                        if (++tries >= 5)
+                            break;
+                        continue;
+                    }
+                    if (Mathf.Min(sw, sh) != Mathf.Min(width, height) || Mathf.Max(sw, sh) != Mathf.Max(width, height))
+                        note = kind.Fits(width, height) ? $"a {width}×{height} {kind.label} doesn't fit there, so it's {plan.SizeLabel}"
+                            : $"a {kind.label} needs at least {kind.minSize.x}×{kind.minSize.z}, so it's {plan.SizeLabel}";
+                    return plan;
+                }
+            }
+            return null;
         }
 
         // ---- materials and words ----
@@ -443,10 +666,10 @@ namespace AIPawnControl
         public static string StockLine(Map map, List<ThingDef> materials) =>
             "In storage: " + string.Join(", ", materials.Select(m => $"{m.label} {map.resourceCounter.GetCount(m)}"));
 
-        /// <summary>One site in words, with no coordinates (PHASE4.md §2).</summary>
-        public string Describe(RoomPlan plan, char letter, List<ThingDef> materials)
+        /// <summary>One site in words, with no coordinates (PHASE4.md §2): where, walls shared, distance, clearing, room to grow, wall cost.</summary>
+        public string Describe(RoomPlan plan, char letter, List<ThingDef> materials, (int w, int h) maxFit)
         {
-            var parts = new List<string> { Where(plan), $"{plan.InteriorSize}×{plan.InteriorSize}" };
+            var parts = new List<string> { Where(plan) };
             if (plan.sharedSides > 0)
                 parts.Add(plan.sharedSides == 1 ? "shares 1 wall" : $"shares {plan.sharedSides} walls");
             parts.Add($"{plan.walk} tiles from the centre");
@@ -456,23 +679,36 @@ namespace AIPawnControl
             if (plan.items > 0)
                 clearing.Add(plan.items == 1 ? "1 item to move" : $"{plan.items} items to move");
             parts.Add(clearing.Count > 0 ? string.Join(", ", clearing) : "open ground");
+            parts.Add($"fits up to {maxFit.w}×{maxFit.h}");
+            return $"{letter}: {string.Join(", ", parts)}. Walls and door at {plan.SizeLabel}: {CostText(plan, materials)}.";
+        }
 
+        /// <summary>"80 wood or 90 granite blocks", plus anything that doesn't come in the listed materials.</summary>
+        public static string CostText(RoomPlan plan, List<ThingDef> materials)
+        {
             var needs = new List<string>();
             var extras = new Dictionary<ThingDef, int>();
+            bool usesMaterial = false;
             foreach (var m in materials)
             {
                 var cost = plan.Cost(m);
-                cost.TryGetValue(m, out int n);
-                needs.Add($"{n} {m.label}");
+                if (cost.TryGetValue(m, out int n))
+                {
+                    usesMaterial = true;
+                    needs.Add($"{n} {m.label}");
+                }
                 foreach (var kv in cost)
                     if (!materials.Contains(kv.Key))
                         extras[kv.Key] = kv.Value;
             }
-            string extra = extras.Count > 0 ? " plus " + string.Join(", ", extras.Select(kv => $"{kv.Value} {kv.Key.label}")) : "";
-            return $"{letter}: {string.Join(", ", parts)}. Needs {string.Join(" or ", needs)}{extra}.";
+            var fixedCost = extras.Select(kv => $"{kv.Value} {kv.Key.label}").ToList();
+            if (!usesMaterial)
+                return fixedCost.Count > 0 ? string.Join(" + ", fixedCost) : "nothing";
+            return string.Join(" or ", needs) + (fixedCost.Count > 0 ? " plus " + string.Join(", ", fixedCost) : "");
         }
 
-        private string Where(RoomPlan plan)
+        /// <summary>Where a room is, in words: "against the kitchen's west wall", "north-east of the base, by the water".</summary>
+        public string Where(RoomPlan plan)
         {
             foreach (var c in plan.reusedWalls)
             {

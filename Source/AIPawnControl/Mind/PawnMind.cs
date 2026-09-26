@@ -308,6 +308,13 @@ namespace AIPawnControl
             });
         }
 
+        /// <summary>Gives today's decision back (a project found no site, §5).</summary>
+        public void GiveBackAct()
+        {
+            if (actsDay == LocalDay && actsToday > 0)
+                actsToday--;
+        }
+
         private void OnAct(Dictionary<string, object> reply)
         {
             var menu = pendingMenu;
@@ -324,7 +331,7 @@ namespace AIPawnControl
             try
             {
                 result = option.Apply(say);
-                if (!option.IsTalk && say != null && AIPawnControlMod.Settings.speakLines)
+                if (!option.IsTalk && !option.OwnRemark && say != null && AIPawnControlMod.Settings.speakLines)
                 {
                     SpeechLog.Say(pawn, say);
                     result += $" Said: \"{say}\"";
@@ -723,7 +730,7 @@ namespace AIPawnControl
         /// <param name="maxAgeTicks">Drop the reply if more game time than this passed while waiting (e.g. at ultrafast speed).</param>
         /// <param name="stillValid">Replaces the usual pause check when the reply arrives; returns why to drop it, or null.</param>
         /// <param name="maxTokens">Overrides the settings' reply budget (0 = use the setting).</param>
-        private void Send(string callType, List<KeyValuePair<string, string>> messages, object schema, Action<Dictionary<string, object>> onReply,
+        internal void Send(string callType, List<KeyValuePair<string, string>> messages, object schema, Action<Dictionary<string, object>> onReply,
                           int maxAgeTicks = int.MaxValue, Func<string> stillValid = null, Action<string> onError = null, int maxTokens = 0)
         {
             Cancel();

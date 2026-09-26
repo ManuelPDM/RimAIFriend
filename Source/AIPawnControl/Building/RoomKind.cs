@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.Linq;
 using RimWorld;
+using UnityEngine;
 using Verse;
 
 namespace AIPawnControl
@@ -7,87 +9,187 @@ namespace AIPawnControl
     /// <summary>One item of a room kind and the rules for where it goes (PHASE4.md §1).</summary>
     public class RoomItem
     {
-        public ThingDef def;
-        /// <summary>Against a wall, facing away from it (for a bed: its head, Position, against the wall).</summary>
+        /// <summary>Alternatives: the first one that's buildable is used (dining chair, else stool).</summary>
+        public List<ThingDef> defs = new List<ThingDef>();
+        /// <summary>Against a wall (a bed: its head, Position, against the wall and rotated away). The default placement.</summary>
         public bool backToWall;
-        /// <summary>Index of an earlier item this one must sit cardinally next to (its Position: a bed's head), or -1.</summary>
+        /// <summary>As close to the middle as the other rules allow (a dining table).</summary>
+        public bool centre;
+        /// <summary>Index of an earlier item this one sits cardinally next to (facing it), or -1.</summary>
         public int nextTo = -1;
-        /// <summary>Skipped when it isn't buildable yet (research) or doesn't fit, instead of failing the room.</summary>
+        /// <summary>Placed again while it fits, up to this many.</summary>
+        public int repeat = 1;
+        /// <summary>How many must fit for the room to count (ignored when optional).</summary>
+        public int min = 1;
+        /// <summary>Skipped when it isn't buildable (research, difficulty) or doesn't fit, instead of failing the room.</summary>
         public bool optional;
-    }
+        /// <summary>Prefer a def the colony doesn't have yet (a second workshop gets a different bench).</summary>
+        public bool preferNew;
+        /// <summary>Beds: set to medical once built (a hospital without hospital beds).</summary>
+        public bool medical;
+        /// <summary>Free cardinal neighbours to keep around it (a chess table's players).</summary>
+        public int clearAround;
 
-    /// <summary>A room template: a list of items the placer puts in one at a time. Later kinds are just other lists.</summary>
-    public class RoomKind
-    {
-        public string label;
-        public List<RoomItem> items = new List<RoomItem>();
-
-        private static RoomKind bedroom;
-
-        public static RoomKind Bedroom => bedroom ?? (bedroom = new RoomKind
+        public ThingDef Resolve(Map map)
         {
-            label = "bedroom",
-            items =
+            ThingDef first = null;
+            foreach (var def in defs)
             {
-                new RoomItem { def = ThingDefOf.Bed, backToWall = true },
-                new RoomItem { def = DefDatabase<ThingDef>.GetNamed("EndTable"), nextTo = 0, optional = true },
-            },
-        });
-
-        public static bool Buildable(ThingDef def) => BuildCopyCommandUtility.FindAllowedDesignator(def) != null;
+                if (def == null || !RoomKindDef.Buildable(def))
+                    continue;
+                if (!preferNew || map.listerBuildings.ColonistsHaveBuilding(def) == false)
+                    return def;
+                first = first ?? def;
+            }
+            return first;
+        }
     }
 
     /// <summary>
-    /// Rule-based furniture placer: each item takes the best cell its rules allow, and the cell inside the door and
-    /// every free cell's path from it stay clear. Returns false if a required item doesn't fit.
+    /// A room kind (PHASE4.md §1): the items that make vanilla give a room its role. Data in Defs/RoomKinds.xml, so a new
+    /// kind needs no code. No role means the plain room, which vanilla names by whatever ends up in it.
+    /// </summary>
+    public class RoomKindDef : Def
+    {
+        public RoomRoleDef role;
+        /// <summary>Hers (the bedroom): the bed is claimed for her and it's "my bedroom".</summary>
+        public bool owned;
+        /// <summary>The smallest interior: x = the short side, z = the long side.</summary>
+        public IntVec2 minSize = new IntVec2(4, 4);
+        public List<RoomItem> items = new List<RoomItem>();
+
+        public static RoomKindDef Bedroom => DefDatabase<RoomKindDef>.GetNamed("AIPC_Bedroom");
+        public static RoomKindDef Plain => DefDatabase<RoomKindDef>.GetNamed("AIPC_PlainRoom");
+
+        public static bool Buildable(ThingDef def) => BuildCopyCommandUtility.FindAllowedDesignator(def) != null;
+
+        /// <summary>Walls and doors are buildable, and every required item has a buildable def.</summary>
+        public bool BuildableNow(Map map) =>
+            Buildable(ThingDefOf.Wall) && Buildable(ThingDefOf.Door) && items.All(i => i.optional || i.Resolve(map) != null);
+
+        public bool Fits(int width, int height) =>
+            Mathf.Min(width, height) >= minSize.x && Mathf.Max(width, height) >= minSize.z;
+    }
+
+    /// <summary>
+    /// Rule-based furniture placer: each item takes the best cell its rules allow, one at a time. Interaction cells,
+    /// watch cells and the cell inside the door stay clear, every item keeps a free neighbour, and every free cell stays
+    /// reachable from the door. Returns false if a required item doesn't fit. Pure geometry: the interior is empty.
     /// </summary>
     public static class RoomPlacer
     {
+        private class State
+        {
+            public RoomPlan plan;
+            public CellRect inner;
+            public readonly HashSet<IntVec3> taken = new HashSet<IntVec3>();    // furniture
+            public readonly HashSet<IntVec3> reserved = new HashSet<IntVec3>(); // walkable, but no furniture
+            public readonly List<PlanEntry> placed = new List<PlanEntry>();
+        }
+
         public static bool Place(RoomPlan plan)
         {
-            CellRect inner = plan.Interior;
-            var taken = new HashSet<IntVec3> { plan.doorInside };
-            var placed = new List<PlanEntry>();
+            var s = new State { plan = plan, inner = plan.Interior };
+            s.reserved.Add(plan.doorInside);
+            var firstOf = new List<PlanEntry>();
 
             foreach (var item in plan.kind.items)
             {
-                PlanEntry entry = null;
-                if (RoomKind.Buildable(item.def))
-                    entry = item.backToWall ? BestAgainstWall(item.def, plan, inner, taken)
-                        : item.nextTo >= 0 && item.nextTo < placed.Count && placed[item.nextTo] != null ? NextTo(item.def, placed[item.nextTo], plan, inner, taken)
-                        : null;
-                if (entry == null && !item.optional)
+                ThingDef def = item.Resolve(plan.map);
+                PlanEntry first = null;
+                int count = 0;
+                if (def != null)
+                    while (count < item.repeat)
+                    {
+                        PlanEntry anchor = item.nextTo >= 0 && item.nextTo < firstOf.Count ? firstOf[item.nextTo] : null;
+                        PlanEntry entry = item.nextTo >= 0 ? (anchor != null ? NextTo(def, anchor, s, item) : null)
+                            : item.centre ? Centre(def, s, item)
+                            : AgainstWall(def, s, item);
+                        if (entry == null)
+                            break;
+                        Commit(entry, s, item);
+                        first = first ?? entry;
+                        count++;
+                    }
+                if (!item.optional && count < Mathf.Min(item.min, item.repeat))
                     return false;
-                placed.Add(entry);
-                if (entry == null)
-                    continue;
-                foreach (var c in entry.Rect)
-                    taken.Add(c);
-                plan.entries.Add(entry);
+                firstOf.Add(first);
             }
+            plan.entries.AddRange(s.placed);
             return true;
         }
 
-        private static PlanEntry BestAgainstWall(ThingDef def, RoomPlan plan, CellRect inner, HashSet<IntVec3> taken)
+        /// <summary>
+        /// One more item in a room that already has furniture (furnishing, §9): what's there is taken, its work spots stay
+        /// clear, and it keeps a free neighbour. Next to the anchor (a seat by a table) if given, else against a wall.
+        /// </summary>
+        public static PlanEntry PlaceOne(RoomPlan plan, ThingDef def, List<PlanEntry> existing, PlanEntry nextTo)
         {
+            var s = new State { plan = plan, inner = plan.Interior };
+            s.reserved.Add(plan.doorInside);
+            var none = new RoomItem();
+            foreach (var e in existing)
+                foreach (var c in e.Rect)
+                    s.taken.Add(c);
+            foreach (var e in existing)
+            {
+                var clear = KeepClear(e, s, none);
+                if (clear != null)
+                    foreach (var c in clear)
+                        s.reserved.Add(c);
+                s.placed.Add(e);
+            }
+            var item = new RoomItem { defs = { def } };
+            return (nextTo != null ? NextTo(def, nextTo, s, item) : null) ?? AgainstWall(def, s, item);
+        }
+
+        private static void Commit(PlanEntry entry, State s, RoomItem item)
+        {
+            foreach (var c in entry.Rect)
+                s.taken.Add(c);
+            foreach (var c in KeepClear(entry, s, item))
+                s.reserved.Add(c);
+            if (item.medical)
+                entry.medical = true;
+            s.placed.Add(entry);
+        }
+
+        private static PlanEntry AgainstWall(ThingDef def, State s, RoomItem item)
+        {
+            RoomPlan plan = s.plan;
             PlanEntry best = null;
             float bestScore = float.MinValue;
-            foreach (var cell in inner)
-                for (int r = 0; r < 4; r++)
+            foreach (var cell in s.inner)
+                foreach (var rot in Rotations(def))
                 {
-                    var toWall = new Rot4(r);
-                    IntVec3 wall = cell + toWall.FacingCell;
-                    if (inner.Contains(wall) || wall == plan.door)
+                    var entry = new PlanEntry(def, cell, rot);
+                    int contacts = WallContacts(entry.Rect, s);
+                    if (def.IsBed)
+                    {
+                        IntVec3 behindHead = cell - rot.FacingCell;
+                        if (s.inner.Contains(behindHead) || behindHead == plan.door)
+                            continue;
+                    }
+                    else if (contacts == 0)
                         continue;
-                    var entry = new PlanEntry(def, cell, toWall.Opposite);
-                    if (!Fits(entry, plan, inner, taken, awayFromDoor: true))
+                    if (!Fits(entry, s, item, awayFromDoor: true))
                         continue;
-                    // Far from the door first; on a tie, the wall opposite the door, then off the door's line.
-                    float score = cell.DistanceToSquared(plan.doorInside);
-                    if (toWall.FacingCell == plan.doorInside - plan.door)
-                        score += 0.5f;
-                    if (cell.x != plan.doorInside.x && cell.z != plan.doorInside.z)
-                        score += 0.25f;
+                    float score;
+                    if (def.IsBed)
+                    {
+                        // Far from the door first; on a tie, the wall opposite the door, then off the door's line.
+                        score = cell.DistanceToSquared(plan.doorInside);
+                        if (rot.Opposite.FacingCell == plan.doorInside - plan.door)
+                            score += 0.5f;
+                        if (cell.x != plan.doorInside.x && cell.z != plan.doorInside.z)
+                            score += 0.25f;
+                    }
+                    else
+                    {
+                        // Far from the door, the long side against the wall.
+                        Vector3 centre = entry.Rect.CenterVector3;
+                        score = (centre - plan.doorInside.ToVector3Shifted()).MagnitudeHorizontalSquared() + contacts * 0.5f;
+                    }
                     if (score > bestScore)
                     {
                         bestScore = score;
@@ -97,41 +199,174 @@ namespace AIPawnControl
             return best;
         }
 
-        private static PlanEntry NextTo(ThingDef def, PlanEntry anchor, RoomPlan plan, CellRect inner, HashSet<IntVec3> taken)
+        private static PlanEntry Centre(ThingDef def, State s, RoomItem item)
         {
+            PlanEntry best = null;
+            float bestDist = float.MaxValue;
+            Vector3 middle = s.inner.CenterVector3;
+            foreach (var cell in s.inner)
+                foreach (var rot in Rotations(def))
+                {
+                    var entry = new PlanEntry(def, cell, rot);
+                    float d = (entry.Rect.CenterVector3 - middle).MagnitudeHorizontalSquared();
+                    if (d < bestDist && Fits(entry, s, item, awayFromDoor: false))
+                    {
+                        bestDist = d;
+                        best = entry;
+                    }
+                }
+            return best;
+        }
+
+        private static PlanEntry NextTo(ThingDef def, PlanEntry anchor, State s, RoomItem item)
+        {
+            bool facility = def.GetCompProperties<CompProperties_Facility>() != null;
             PlanEntry fallback = null;
-            for (int r = 0; r < 4; r++)
+            foreach (var cell in Adjacent(anchor.Rect))
             {
-                IntVec3 cell = anchor.cell + new Rot4(r).FacingCell;
-                var entry = new PlanEntry(def, cell, anchor.rot);
-                if (!Fits(entry, plan, inner, taken, awayFromDoor: false))
+                Rot4 rot = facility ? anchor.rot : def.rotatable ? Facing(cell, anchor.Rect) : Rot4.North;
+                var entry = new PlanEntry(def, cell, rot);
+                if (!Fits(entry, s, item, awayFromDoor: false))
                     continue;
-                // Prefer a cell against a wall, out of the way.
-                bool againstWall = !inner.ContractedBy(1).Contains(cell);
-                if (againstWall)
-                    return entry;
+                if (facility && !CompAffectedByFacilities.CanPotentiallyLinkTo_Static(def, cell, rot, anchor.def, anchor.cell, anchor.rot, s.plan.map))
+                    continue;
+                if (WallContacts(entry.Rect, s) > 0)
+                    return entry; // out of the way
                 fallback = fallback ?? entry;
             }
             return fallback;
         }
 
-        private static bool Fits(PlanEntry entry, RoomPlan plan, CellRect inner, HashSet<IntVec3> taken, bool awayFromDoor)
+        /// <summary>Cells cardinally next to the rect, outside it.</summary>
+        public static IEnumerable<IntVec3> Adjacent(CellRect r)
+        {
+            for (int x = r.minX; x <= r.maxX; x++)
+            {
+                yield return new IntVec3(x, 0, r.minZ - 1);
+                yield return new IntVec3(x, 0, r.maxZ + 1);
+            }
+            for (int z = r.minZ; z <= r.maxZ; z++)
+            {
+                yield return new IntVec3(r.minX - 1, 0, z);
+                yield return new IntVec3(r.maxX + 1, 0, z);
+            }
+        }
+
+        /// <summary>The rotation whose facing cell points from this cell into the anchor.</summary>
+        private static Rot4 Facing(IntVec3 cell, CellRect anchor)
+        {
+            for (int r = 0; r < 4; r++)
+                if (anchor.Contains(cell + new Rot4(r).FacingCell))
+                    return new Rot4(r);
+            return Rot4.North;
+        }
+
+        private static IEnumerable<Rot4> Rotations(ThingDef def)
+        {
+            if (!def.rotatable)
+            {
+                yield return Rot4.North;
+                yield break;
+            }
+            for (int r = 0; r < 4; r++)
+                yield return new Rot4(r);
+        }
+
+        /// <summary>Cells of the rect with a ring cell (not the door) cardinally next to them.</summary>
+        private static int WallContacts(CellRect rect, State s)
+        {
+            int n = 0;
+            foreach (var c in rect)
+                for (int r = 0; r < 4; r++)
+                {
+                    IntVec3 w = c + new Rot4(r).FacingCell;
+                    if (!s.inner.Contains(w) && w != s.plan.door)
+                    {
+                        n++;
+                        break;
+                    }
+                }
+            return n;
+        }
+
+        private static bool Fits(PlanEntry entry, State s, RoomItem item, bool awayFromDoor)
         {
             var rect = entry.Rect;
             foreach (var c in rect)
             {
-                if (!inner.Contains(c) || taken.Contains(c))
+                if (!s.inner.Contains(c) || s.taken.Contains(c) || s.reserved.Contains(c))
                     return false;
-                if (awayFromDoor && c.AdjacentToCardinal(plan.doorInside))
+                if (awayFromDoor && c.AdjacentToCardinal(s.plan.doorInside))
                     return false;
             }
-            if (entry.def.hasInteractionCell)
+            var clear = KeepClear(entry, s, item);
+            if (clear == null)
+                return false;
+            foreach (var c in clear)
+                if (!s.inner.Contains(c) || s.taken.Contains(c) || rect.Contains(c))
+                    return false;
+            // Every placed item (this one too) keeps a free neighbour to be used and built from.
+            if (!HasFreeNeighbour(rect, s, rect))
+                return false;
+            foreach (var p in s.placed)
+                if (!HasFreeNeighbour(p.Rect, s, rect))
+                    return false;
+            return AllFreeReachable(s.inner, s.plan.doorInside, s.taken, rect);
+        }
+
+        private static bool HasFreeNeighbour(CellRect of, State s, CellRect extra)
+        {
+            foreach (var c in Adjacent(of))
+                if (s.inner.Contains(c) && !s.taken.Contains(c) && !extra.Contains(c))
+                    return true;
+            return false;
+        }
+
+        /// <summary>Cells that must stay free for the item to work: interaction cells, watch cells, cells around it. Null = can't.</summary>
+        private static List<IntVec3> KeepClear(PlanEntry entry, State s, RoomItem item)
+        {
+            var cells = new List<IntVec3>();
+            ThingDef def = entry.def;
+            if (def.hasInteractionCell || !def.multipleInteractionCellOffsets.NullOrEmpty())
+                cells.AddRange(ThingUtility.InteractionCellsWhenAt(def, entry.cell, entry.rot, s.plan.map));
+            if (IsWatchBuilding(def))
             {
-                IntVec3 ic = ThingUtility.InteractionCellWhenAt(entry.def, entry.cell, entry.rot, plan.map);
-                if (!inner.Contains(ic) || taken.Contains(ic) || rect.Contains(ic))
-                    return false;
+                var watch = WatchCells(def, entry.cell, entry.rot).Where(c => s.inner.Contains(c) && !s.taken.Contains(c) && !entry.Rect.Contains(c)).ToList();
+                if (watch.Count == 0)
+                    return null;
+                cells.AddRange(watch);
             }
-            return AllFreeReachable(inner, plan.doorInside, taken, rect);
+            if (item.clearAround > 0)
+            {
+                var around = Adjacent(entry.Rect).Where(c => s.inner.Contains(c) && !s.taken.Contains(c)).ToList();
+                if (around.Count < item.clearAround)
+                    return null;
+                cells.AddRange(around.Take(item.clearAround));
+            }
+            return cells;
+        }
+
+        public static bool IsWatchBuilding(ThingDef def) => def.building != null && def.PlaceWorkers != null && def.PlaceWorkers.Any(w => w is PlaceWorker_WatchArea);
+
+        /// <summary>Vanilla's watch rect (WatchBuildingUtility.GetWatchCellRect) for each direction the building can be watched from.</summary>
+        public static IEnumerable<IntVec3> WatchCells(ThingDef def, IntVec3 center, Rot4 rot)
+        {
+            var b = def.building;
+            var dirs = def.rotatable ? new[] { rot.AsInt } : new[] { 0, 1, 2, 3 };
+            foreach (int dir in dirs)
+            {
+                var r = new Rot4(dir);
+                IntVec3 step = r.FacingCell;
+                int half = b.watchBuildingStandRectWidth / 2;
+                for (int d = b.watchBuildingStandDistanceRange.min; d <= b.watchBuildingStandDistanceRange.max; d++)
+                    for (int w = -half; w <= half; w++)
+                    {
+                        if (b.watchBuildingStandRectWidth % 2 == 0 && w == (r == Rot4.West || r == Rot4.North ? -half : half))
+                            continue;
+                        IntVec3 side = r.IsHorizontal ? new IntVec3(0, 0, w) : new IntVec3(w, 0, 0);
+                        yield return center + step * d + side;
+                    }
+            }
         }
 
         /// <summary>Every free interior cell can be reached from the cell inside the door (4 neighbours).</summary>

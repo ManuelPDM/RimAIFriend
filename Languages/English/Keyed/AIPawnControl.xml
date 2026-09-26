@@ -24,6 +24,8 @@
   <AIPawnControl_ChatBubblesTip>Her replies in the Mind tab chat also appear as a speech bubble over her.</AIPawnControl_ChatBubblesTip>
   <AIPawnControl_ReloadPrompts>Reload prompts</AIPawnControl_ReloadPrompts>
   <AIPawnControl_Memory>Memory</AIPawnControl_Memory>
+  <AIPawnControl_AllowBuilding>Allow building</AIPawnControl_AllowBuilding>
+  <AIPawnControl_AllowBuildingTip>AI colonists may plan new rooms and furnish rooms they built. They only place blueprints; the colony builds them. Off: no new projects; a running one is left as-is.</AIPawnControl_AllowBuildingTip>
   <AIPawnControl_MemoryTip>Off: no nightly reflection and no recalled memories in prompts. What happens is still noted, and promises are still kept (they expire each morning).</AIPawnControl_MemoryTip>
   <AIPawnControl_EmbedEndpoint>Embedding endpoint (empty: same as above)</AIPawnControl_EmbedEndpoint>
   <AIPawnControl_EmbedModel>Embedding model</AIPawnControl_EmbedModel>

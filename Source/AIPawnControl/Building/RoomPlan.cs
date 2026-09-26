@@ -11,6 +11,7 @@ namespace AIPawnControl
         public IntVec3 cell;
         public Rot4 rot;
         public ThingDef stuff;
+        public bool medical; // a bed code sets to medical once built (hospital)
 
         public PlanEntry() { }
 
@@ -29,13 +30,16 @@ namespace AIPawnControl
             Scribe_Values.Look(ref cell, "cell");
             Scribe_Values.Look(ref rot, "rot");
             Scribe_Defs.Look(ref stuff, "stuff");
+            Scribe_Values.Look(ref medical, "medical");
         }
+
+        public PlanEntry Moved(IntVec3 by) => new PlanEntry(def, cell + by, rot) { stuff = stuff, medical = medical };
     }
 
     /// <summary>A planned room at one site: the footprint (walls included), reused walls, and every new thing to place.</summary>
     public class RoomPlan
     {
-        public RoomKind kind;
+        public RoomKindDef kind;
         public Map map;
         public CellRect footprint;
         public IntVec3 door, doorOutside, doorInside;
@@ -60,7 +64,9 @@ namespace AIPawnControl
         }
 
         public CellRect Interior => footprint.ContractedBy(1);
-        public int InteriorSize => footprint.Width - 2;
+        public int Width => footprint.Width - 2;
+        public int Height => footprint.Height - 2;
+        public string SizeLabel => $"{Width}×{Height}";
 
         public PlanEntry Find(ThingDef def) => entries.Find(e => e.def == def);
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using RimWorld;
 using Verse;
 using Verse.AI;
@@ -128,24 +129,47 @@ namespace AIPawnControl
                     fail.Add($"V4: {free - reach.Count} free cells can't be reached from the door");
             }
 
-            // V5 furniture
-            PlanEntry bed = plan.Find(ThingDefOf.Bed);
-            if (bed == null)
-                fail.Add("V5: no bed");
-            else
+            // V5 furniture: inside, beds' heads against a wall, interaction cells free, the kind's items there, links, access.
+            var beds = new List<PlanEntry>();
+            foreach (var e in plan.Furniture)
             {
-                foreach (var c in bed.Rect)
+                foreach (var c in e.Rect)
                     if (!inner.Contains(c))
-                        fail.Add("V5: bed sticks out of the room");
-                if (BedUtility.GetSleepingSlotPos(0, bed.cell, bed.rot, bed.def.size) != bed.cell)
-                    fail.Add("V5: bed head isn't at its Position");
-                IntVec3 behindHead = bed.cell - bed.rot.FacingCell;
-                if (!plan.IsRingSolid(behindHead) || behindHead == plan.door)
-                    fail.Add("V5: bed head isn't against a wall");
-                foreach (var e in plan.Furniture)
-                    if (e != bed && e.def.GetCompProperties<CompProperties_Facility>() != null
-                        && !CompAffectedByFacilities.CanPotentiallyLinkTo_Static(e.def, e.cell, e.rot, bed.def, bed.cell, bed.rot, map))
-                        fail.Add($"V5: {e.def.label} wouldn't link to the bed");
+                    {
+                        fail.Add($"V5: {e.def.label} sticks out of the room");
+                        break;
+                    }
+                if (e.def.IsBed)
+                {
+                    beds.Add(e);
+                    if (BedUtility.GetSleepingSlotPos(0, e.cell, e.rot, e.def.size) != e.cell)
+                        fail.Add("V5: bed head isn't at its Position");
+                    IntVec3 behindHead = e.cell - e.rot.FacingCell;
+                    if (!plan.IsRingSolid(behindHead) || behindHead == plan.door)
+                        fail.Add("V5: bed head isn't against a wall");
+                }
+                if (e.def.hasInteractionCell || !e.def.multipleInteractionCellOffsets.NullOrEmpty())
+                    foreach (var ic in ThingUtility.InteractionCellsWhenAt(e.def, e.cell, e.rot, map))
+                        if (!inner.Contains(ic) || furnitureCells.Contains(ic))
+                            fail.Add($"V5: {e.def.label}'s interaction cell is blocked");
+                bool access = false;
+                foreach (var n in RoomPlacer.Adjacent(e.Rect))
+                    access |= inner.Contains(n) && !furnitureCells.Contains(n);
+                if (!access)
+                    fail.Add($"V5: {e.def.label} has no free cell next to it");
+            }
+            foreach (var e in plan.Furniture)
+                if (!e.def.IsBed && beds.Count > 0 && e.def.GetCompProperties<CompProperties_Facility>() is CompProperties_Facility facility
+                    && facility.mustBePlacedAdjacentCardinalToBedHead
+                    && !beds.Exists(bed => CompAffectedByFacilities.CanPotentiallyLinkTo_Static(e.def, e.cell, e.rot, bed.def, bed.cell, bed.rot, map)))
+                    fail.Add($"V5: {e.def.label} wouldn't link to a bed");
+            foreach (var item in plan.kind.items)
+            {
+                if (item.optional)
+                    continue;
+                int count = plan.Furniture.Count(e => item.defs.Contains(e.def));
+                if (count < Math.Min(item.min, item.repeat))
+                    fail.Add($"V5: {count} of the kind's {item.defs[0].label} placed, needs {Math.Min(item.min, item.repeat)}");
             }
 
             // V6 footprint, cell by cell (vanilla checks fog only at a thing's centre; blueprints delete zone cells).

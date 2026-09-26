@@ -52,7 +52,8 @@ namespace AIPawnControl
             return new Dictionary<string, string>
             {
                 ["Me"] = $"{pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
-                         $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.{ideo}",
+                         $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.{ideo}" +
+                         (BuildManager.Instance?.RoomsPhrase(pawn) is string rooms && rooms.Length > 0 ? " " + rooms : ""),
                 ["Time"] = $"{TimeString(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
                            $"I'm in: {RoomLabel(pawn)}. Schedule now: {pawn.timetable?.CurrentAssignment?.label ?? "anything"}.",
                 ["Condition"] = Condition(pawn),
@@ -62,6 +63,7 @@ namespace AIPawnControl
                 ["Doing now"] = (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + ".", // null between jobs, e.g. as a mental break starts
                 ["My plan"] = string.IsNullOrEmpty(mind.intent) ? null : mind.intent,
                 ["I promised the player"] = mind.memory.Promises,
+                ["My project"] = BuildManager.Instance?.ProjectLine(pawn),
                 ["People nearby"] = People(pawn),
                 ["Colony"] = Colony(map),
                 ["Colony stores"] = Stores(map),

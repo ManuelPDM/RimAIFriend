@@ -19,6 +19,7 @@ namespace AIPawnControl
         public bool speakLines = true;
         public bool chatBubbles = true;
         public bool memoryEnabled = true; // off: no Reflect and no retrieval; events and goals are still kept
+        public bool allowBuilding = true;  // off: no room projects offered; a running one is left as-is
         public string embedEndpoint = ""; // empty: same as the chat endpoint
         public string embedModel = "google/embedding-gemma-300m";
         public int embedDims;              // the model's own size, as detected by "Test embeddings"
@@ -45,6 +46,7 @@ namespace AIPawnControl
             Scribe_Values.Look(ref speakLines, "speakLines", true);
             Scribe_Values.Look(ref chatBubbles, "chatBubbles", true);
             Scribe_Values.Look(ref memoryEnabled, "memoryEnabled", true);
+            Scribe_Values.Look(ref allowBuilding, "allowBuilding", true);
             Scribe_Values.Look(ref embedEndpoint, "embedEndpoint", "");
             Scribe_Values.Look(ref embedModel, "embedModel", "google/embedding-gemma-300m");
             Scribe_Values.Look(ref embedDims, "embedDims");
@@ -84,6 +86,7 @@ namespace AIPawnControl
 
             list.GapLine();
             list.CheckboxLabeled("AIPawnControl_Memory".Translate(), ref memoryEnabled, "AIPawnControl_MemoryTip".Translate());
+            list.CheckboxLabeled("AIPawnControl_AllowBuilding".Translate(), ref allowBuilding, "AIPawnControl_AllowBuildingTip".Translate());
             embedEndpoint = list.TextEntryLabeled("AIPawnControl_EmbedEndpoint".Translate(), embedEndpoint);
             embedModel = list.TextEntryLabeled("AIPawnControl_EmbedModel".Translate(), embedModel);
             if (list.ButtonText("AIPawnControl_TestEmbeddings".Translate()))

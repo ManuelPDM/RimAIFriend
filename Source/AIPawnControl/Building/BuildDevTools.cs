@@ -34,10 +34,41 @@ namespace AIPawnControl
             BuildProject project = manager.ActiveProject(pawn);
             if (project == null)
             {
+                PawnMind mind = MindManager.Instance?.MindOf(pawn);
+                if (mind != null && mind.persona != null)
+                    yield return new Command_Action
+                    {
+                        defaultLabel = "DEV: Plan a room now",
+                        defaultDesc = "Runs the site scan and the Project call (kind, size, site, material), ignoring the budget and cooldown.",
+                        icon = icon,
+                        action = () =>
+                        {
+                            if (mind.Thinking)
+                            {
+                                Messages.Message($"{pawn.LabelShort} is thinking already.", MessageTypeDefOf.RejectInput, false);
+                                return;
+                            }
+                            mind.AddDecision("DEV plan a room now: " + ProjectCall.Start(mind, dev: true), importance: 0);
+                        },
+                    };
+                yield return new Command_Action
+                {
+                    defaultLabel = "DEV: Furnish now",
+                    defaultDesc = "Logs the furnishing options her Act menu would show and places the first one. No LLM; the cooldown applies.",
+                    icon = icon,
+                    action = () =>
+                    {
+                        var options = Furnishing.Options(pawn);
+                        ModLog.Message($"{pawn.LabelShort} furnishing options ({BuildManager.Instance.CantPlanReason(pawn) ?? "may build"}): " +
+                                       (options.Count > 0 ? string.Join(" | ", options.Select(o => o.label)) : "none"));
+                        if (options.Count > 0)
+                            ModLog.Message(Furnishing.Place(pawn, options[0]));
+                    },
+                };
                 yield return new Command_Action
                 {
                     defaultLabel = "DEV: Place site A now",
-                    defaultDesc = "Places the best site in the most-stocked material as blueprints. No LLM.",
+                    defaultDesc = "Pick a room kind; places it at the best site, 5×5, in the most-stocked material as blueprints. No LLM.",
                     icon = icon,
                     action = () => BuildDevTools.PlaceBest(pawn),
                 };
@@ -61,7 +92,7 @@ namespace AIPawnControl
     public static class BuildDevTools
     {
         private const int StressAnchors = 20;
-        private const int StressSamplePerAnchor = 200;
+        private const int StressSampleAtCentre = 40;
         private const int HeatmapTicks = 3000;
 
         public static string ReportPath => Path.Combine(GenFilePaths.SaveDataFolderPath, "AIPawnControl", "building-report.txt");
@@ -95,40 +126,77 @@ namespace AIPawnControl
             var clock = Stopwatch.StartNew();
             IntVec3 center = SiteFinder.BaseCenter(map);
             var finder = new SiteFinder(map, center);
-            var candidates = finder.Candidates(RoomKind.Bedroom);
+            long tGrids = clock.ElapsedMilliseconds;
             var materials = SiteFinder.Materials(map);
-            var top = SiteFinder.TopSites(candidates, 3, new RoomValidator(map, center, finder.weights.maxWalk), materials[0]);
-            clock.Stop();
+            var validator = new RoomValidator(map, center, finder.weights.maxWalk);
+            long tValidator = clock.ElapsedMilliseconds;
+            var sites = finder.Sites(validator, materials[0], out var candidates);
+            long tSites = clock.ElapsedMilliseconds;
+            var fits = sites.Select(finder.MaxFit).ToList();
+            long tMaxFit = clock.ElapsedMilliseconds;
 
-            report.AppendLine($"== Site options: base centre ({center.x},{center.z}), {candidates.Count} candidates, {clock.ElapsedMilliseconds} ms");
+            // What placing each kind at site A costs (the step after her reply): templates, fit and validation.
+            var kinds = DefDatabase<RoomKindDef>.AllDefsListForReading;
+            var kindPlans = new List<(RoomKindDef kind, RoomPlan plan, string note, long ms)>();
+            if (sites.Count > 0)
+                foreach (var kind in kinds)
+                {
+                    long before = clock.ElapsedMilliseconds;
+                    var plan = finder.Fit(sites[0], kind, SiteFinder.StandardSize, SiteFinder.StandardSize, validator, materials[0], out string note);
+                    kindPlans.Add((kind, plan, note, clock.ElapsedMilliseconds - before));
+                }
+            clock.Stop();
+            long scan = tMaxFit; // what runs when she picks "plan a new room"
+
+            report.AppendLine($"== Site options: base centre ({center.x},{center.z}), {candidates.Count} candidates at {SiteFinder.StandardSize}x{SiteFinder.StandardSize}");
+            report.AppendLine($"Timing: scan {scan} ms = grids {tGrids} (walk {finder.timings["walk"]}, other things' work spots to {finder.timings["spots"]}, cells to {finder.timings["cells"]}) + validator setup {tValidator - tGrids} + candidates and top sites {tSites - tValidator} + room to grow {tMaxFit - tSites}; " +
+                              $"then per kind at site A: {string.Join(", ", kindPlans.Select(k => $"{k.kind.label} {k.ms}"))} ms");
             if (finder.foci.Count > 0)
                 report.AppendLine($"No-build foci (anima tree etc.): {string.Join(", ", finder.foci.Select(f => $"({f.pos.x},{f.pos.z}) r{f.radius:0.#}"))}");
             report.AppendLine(SiteFinder.StockLine(map, materials));
-            if (top.Count == 0)
+            if (sites.Count == 0)
                 report.AppendLine("No site passes.");
-            for (int i = 0; i < top.Count; i++)
+            for (int i = 0; i < sites.Count; i++)
             {
-                RoomPlan p = top[i];
-                report.AppendLine(finder.Describe(p, (char)('A' + i), materials));
+                RoomPlan p = sites[i];
+                report.AppendLine(finder.Describe(p, (char)('A' + i), materials, fits[i]));
                 report.AppendLine("  " + p.TermsText());
                 report.AppendLine(TextMap.Draw(p));
             }
+            report.AppendLine("Each kind at site A, 5x5 asked:");
+            foreach (var (kind, plan, note, _) in kindPlans)
+            {
+                if (plan == null)
+                {
+                    report.AppendLine($"  {kind.label}: doesn't fit{(kind.BuildableNow(map) ? "" : " (not buildable now)")}");
+                    continue;
+                }
+                report.AppendLine($"  {kind.label} {plan.SizeLabel}{(note != null ? $" ({note})" : "")}: furniture {SiteFinder.CostText(FurnitureOnly(plan), materials)}");
+                report.AppendLine(TextMap.Draw(plan));
+            }
             report.AppendLine("Best 10 candidates (overlapping ones included):");
-            foreach (var p in candidates.Take(10))
-                report.AppendLine($"  {p.InteriorSize}x{p.InteriorSize} ({p.footprint.minX},{p.footprint.minZ})-({p.footprint.maxX},{p.footprint.maxZ}) door ({p.door.x},{p.door.z}): {p.TermsText()}");
-            Heatmap(map, center, candidates, top);
-            return (top, $"{top.Count} sites from {candidates.Count} candidates");
+            foreach (var c in candidates.Take(10))
+                report.AppendLine($"  {c.Width}x{c.Height} ({c.rect.minX},{c.rect.minZ})-({c.rect.maxX},{c.rect.maxZ}) door ({c.door.x},{c.door.z}): score {c.score:0.0}");
+            Heatmap(map, center, candidates, sites);
+            return (sites, $"{sites.Count} sites from {candidates.Count} candidates in {scan} ms");
+        }
+
+        private static RoomPlan FurnitureOnly(RoomPlan plan)
+        {
+            var copy = new RoomPlan { kind = plan.kind, map = plan.map, footprint = plan.footprint };
+            copy.entries.AddRange(plan.Furniture);
+            return copy;
         }
 
         /// <summary>Each candidate's centre coloured by its best score; the top sites outlined. Stays while paused.</summary>
-        private static void Heatmap(Map map, IntVec3 center, List<RoomPlan> candidates, List<RoomPlan> top)
+        private static void Heatmap(Map map, IntVec3 center, List<SiteFinder.Candidate> candidates, List<RoomPlan> top)
         {
             if (candidates.Count == 0)
                 return;
             var best = new Dictionary<IntVec3, float>();
             foreach (var p in candidates)
             {
-                IntVec3 c = p.footprint.CenterCell;
+                IntVec3 c = p.rect.CenterCell;
                 if (!best.TryGetValue(c, out float s) || p.score > s)
                     best[c] = p.score;
             }
@@ -146,6 +214,10 @@ namespace AIPawnControl
             map.debugDrawer.FlashCell(center, 0.5f, "centre", HeatmapTicks);
         }
 
+        /// <summary>
+        /// Every kind in every size: from the base centre, a sample of candidates per (kind, size); from ~20 random anchors,
+        /// one per (kind, size). Each is laid out as a full plan and validated. Expected: zero failures.
+        /// </summary>
         private static string StressTest(Map map, StringBuilder report)
         {
             var clock = Stopwatch.StartNew();
@@ -156,34 +228,52 @@ namespace AIPawnControl
 
             var perRule = new Dictionary<string, int>();
             var examples = new Dictionary<string, List<string>>();
-            int checkedCount = 0, total = 0;
+            var perKind = new Dictionary<string, int>();
+            int checkedCount = 0, total = 0, noFit = 0;
             ThingDef material = SiteFinder.Materials(map)[0];
+            var kinds = DefDatabase<RoomKindDef>.AllDefsListForReading;
             for (int a = 0; a < anchors.Count; a++)
             {
                 var finder = new SiteFinder(map, anchors[a]);
                 var validator = new RoomValidator(map, anchors[a], finder.weights.maxWalk);
-                var candidates = finder.Candidates(RoomKind.Bedroom);
-                total += candidates.Count;
-                // Every candidate from the base centre; a random sample from the other anchors.
-                IEnumerable<RoomPlan> sample = a == 0 ? candidates : candidates.InRandomOrder().Take(StressSamplePerAnchor);
-                foreach (var plan in sample)
+                foreach (var (sw, sh) in SiteFinder.Shapes)
                 {
-                    checkedCount++;
-                    foreach (var failure in validator.Check(plan, material))
+                    var candidates = finder.Candidates(sw, sh);
+                    total += candidates.Count;
+                    int sample = a == 0 ? StressSampleAtCentre : 1;
+                    foreach (var kind in kinds)
                     {
-                        string rule = failure.Substring(0, 2);
-                        perRule.TryGetValue(rule, out int n);
-                        perRule[rule] = n + 1;
-                        if (!examples.TryGetValue(rule, out var list))
-                            examples[rule] = list = new List<string>();
-                        if (list.Count < 2)
-                            list.Add($"{failure} (anchor {anchors[a].x},{anchors[a].z}), {plan.TermsText()}\n{TextMap.Draw(plan)}");
+                        if (!kind.Fits(sw, sh))
+                            continue;
+                        foreach (var c in candidates.InRandomOrder().Take(sample))
+                        {
+                            var plan = finder.Plan(c, kind);
+                            if (plan == null)
+                            {
+                                noFit++;
+                                continue;
+                            }
+                            checkedCount++;
+                            perKind.TryGetValue(kind.label, out int k);
+                            perKind[kind.label] = k + 1;
+                            foreach (var failure in validator.Check(plan, material))
+                            {
+                                string rule = failure.Substring(0, 2);
+                                perRule.TryGetValue(rule, out int n);
+                                perRule[rule] = n + 1;
+                                if (!examples.TryGetValue(rule, out var list))
+                                    examples[rule] = list = new List<string>();
+                                if (list.Count < 2)
+                                    list.Add($"{failure} (anchor {anchors[a].x},{anchors[a].z}), {plan.TermsText()}\n{TextMap.Draw(plan)}");
+                            }
+                        }
                     }
                 }
             }
             clock.Stop();
 
-            report.AppendLine($"== Stress test: {anchors.Count} anchors, {total} candidates, {checkedCount} validated, {clock.ElapsedMilliseconds} ms");
+            report.AppendLine($"== Stress test: {anchors.Count} anchors, {SiteFinder.Shapes.Count} sizes, {kinds.Count} kinds, {total} candidates, " +
+                              $"{checkedCount} validated ({string.Join(", ", perKind.Select(kv => $"{kv.Key} {kv.Value}"))}), {noFit} where the kind's items didn't fit, {clock.ElapsedMilliseconds} ms");
             if (perRule.Count == 0)
                 report.AppendLine("Zero validator failures.");
             foreach (var kv in perRule.OrderBy(kv => kv.Key))
@@ -194,46 +284,30 @@ namespace AIPawnControl
             return perRule.Count == 0 ? $"stress test zero failures in {checkedCount}" : $"stress test {perRule.Values.Sum()} FAILURES in {checkedCount}";
         }
 
+        /// <summary>A float menu of kinds; the chosen one goes at the best site, 5×5, in the most-stocked material.</summary>
         public static void PlaceBest(Pawn pawn)
+        {
+            var options = DefDatabase<RoomKindDef>.AllDefsListForReading
+                .Select(kind => new FloatMenuOption(kind.LabelCap, () => PlaceBest(pawn, kind)))
+                .ToList();
+            Find.WindowStack.Add(new FloatMenu(options));
+        }
+
+        public static void PlaceBest(Pawn pawn, RoomKindDef kind)
         {
             Map map = pawn.Map;
             IntVec3 center = SiteFinder.BaseCenter(map);
             var finder = new SiteFinder(map, center);
             var materials = SiteFinder.Materials(map);
             var validator = new RoomValidator(map, center, finder.weights.maxWalk);
-            var top = SiteFinder.TopSites(finder.Candidates(RoomKind.Bedroom), 1, validator, materials[0]);
-            if (top.Count == 0)
+            var sites = finder.Sites(validator, materials[0], out _);
+            RoomPlan plan = sites.Count > 0 ? finder.Fit(sites[0], kind, SiteFinder.StandardSize, SiteFinder.StandardSize, validator, materials[0], out _) : null;
+            if (plan == null)
             {
-                Messages.Message("No site passes.", MessageTypeDefOf.RejectInput, false);
+                Messages.Message($"No site fits a {kind.label}.", MessageTypeDefOf.RejectInput, false);
                 return;
             }
-            Place(pawn, top[0], materials[0], validator, finder.Describe(top[0], 'A', materials));
-        }
-
-        /// <summary>Re-validates, then places every entry as an ordinary player blueprint and records the project.</summary>
-        public static bool Place(Pawn pawn, RoomPlan plan, ThingDef material, RoomValidator validator, string description)
-        {
-            var failures = validator.Check(plan, material);
-            if (failures.Count > 0)
-            {
-                ModLog.Warning($"Not placed, the validator failed: {string.Join("; ", failures)}\n{TextMap.Draw(plan)}");
-                return false;
-            }
-            plan.ApplyMaterial(material);
-            foreach (var e in plan.entries)
-                GenConstruct.PlaceBlueprintForBuild(e.def, e.cell, plan.map, e.rot, Faction.OfPlayer, e.stuff);
-            BuildManager.Instance.Add(new BuildProject
-            {
-                pawn = pawn,
-                map = plan.map,
-                kind = plan.kind.label,
-                footprint = plan.footprint,
-                entries = plan.entries,
-                material = material,
-                placedTick = Find.TickManager.TicksGame,
-            });
-            ModLog.Message($"{pawn.LabelShort} laid out a {plan.kind.label} in {material.label}: {description}\n{TextMap.Draw(plan)}");
-            return true;
+            BuildManager.Instance.Place(pawn, plan, materials[0], validator, finder.Where(plan));
         }
 
         /// <summary>God-mode build of every entry plus a roof, to test done and bed claiming.</summary>
@@ -254,7 +328,7 @@ namespace AIPawnControl
             }
             foreach (var c in project.footprint.ContractedBy(1))
                 map.roofGrid.SetRoof(c, RoofDefOf.RoofConstructed);
-            ModLog.Message($"Finished {project.pawn.LabelShort}'s {project.kind} instantly.");
+            ModLog.Message($"Finished {project.pawn.LabelShort}'s {project.Kind} instantly.");
         }
 
         public static void Cancel(BuildProject project)
@@ -264,7 +338,7 @@ namespace AIPawnControl
                     if (t is Blueprint)
                         t.Destroy(DestroyMode.Cancel);
             project.state = BuildProject.State.Abandoned;
-            ModLog.Message($"Cancelled {project.pawn.LabelShort}'s {project.kind}.");
+            ModLog.Message($"Cancelled {project.pawn.LabelShort}'s {project.Kind} (dev, no memory event).");
         }
     }
 }
