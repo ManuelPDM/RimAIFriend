@@ -52,9 +52,15 @@ namespace AIPawnControl
 
         /// <param name="messages">(role, content) pairs.</param>
         /// <param name="schema">JSON schema object for structured output, or null for free text.</param>
-        public static LlmRequest Send(string callType, List<KeyValuePair<string, string>> messages, object schema, Action<LlmResult> onResult)
+        public static LlmRequest Send(string callType, List<KeyValuePair<string, string>> messages, object schema, Action<LlmResult> onResult) =>
+            Send(callType, messages, schema, 0, onResult);
+
+        /// <param name="maxTokens">The reply budget; 0 = the setting.</param>
+        public static LlmRequest Send(string callType, List<KeyValuePair<string, string>> messages, object schema, int maxTokens, Action<LlmResult> onResult)
         {
             var settings = AIPawnControlMod.Settings;
+            if (maxTokens <= 0)
+                maxTokens = settings.maxTokens;
             var request = new LlmRequest(callType);
             string url = settings.endpoint.TrimEnd('/') + "/chat/completions";
             int timeoutSeconds = settings.timeoutSeconds;
@@ -68,7 +74,7 @@ namespace AIPawnControl
                 ["model"] = settings.model,
                 ["messages"] = messageList,
                 ["temperature"] = settings.temperature,
-                ["max_tokens"] = settings.thinking ? settings.maxTokens * 4 : settings.maxTokens,
+                ["max_tokens"] = settings.thinking ? maxTokens * 4 : maxTokens,
                 ["stream"] = false,
             };
             // Only reasoning_effort=none turns Qwen thinking off in LM Studio (/no_think and enable_thinking are ignored).

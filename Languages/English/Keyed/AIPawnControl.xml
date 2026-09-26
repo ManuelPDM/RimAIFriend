@@ -23,6 +23,15 @@
   <AIPawnControl_ChatBubbles>Chat bubbles</AIPawnControl_ChatBubbles>
   <AIPawnControl_ChatBubblesTip>Her replies in the Mind tab chat also appear as a speech bubble over her.</AIPawnControl_ChatBubblesTip>
   <AIPawnControl_ReloadPrompts>Reload prompts</AIPawnControl_ReloadPrompts>
+  <AIPawnControl_Memory>Memory</AIPawnControl_Memory>
+  <AIPawnControl_MemoryTip>Off: no nightly reflection and no recalled memories in prompts. What happens is still noted, and promises are still kept (they expire each morning).</AIPawnControl_MemoryTip>
+  <AIPawnControl_EmbedEndpoint>Embedding endpoint (empty: same as above)</AIPawnControl_EmbedEndpoint>
+  <AIPawnControl_EmbedModel>Embedding model</AIPawnControl_EmbedModel>
+  <AIPawnControl_TestEmbeddings>Test embeddings</AIPawnControl_TestEmbeddings>
+  <AIPawnControl_EmbedTestOk>OK in {0}s: the model makes {1}-number vectors; memories store {2}.</AIPawnControl_EmbedTestOk>
+  <AIPawnControl_EmbedTestFailed>No working embedding model there: {0}. Memories still work, found by people, place, importance and recency only.</AIPawnControl_EmbedTestFailed>
+  <AIPawnControl_EmbedDetected>Detected: {0}-number vectors.</AIPawnControl_EmbedDetected>
+  <AIPawnControl_EmbedNotTested>Not tested with this model yet.</AIPawnControl_EmbedNotTested>
   <AIPawnControl_PromptsReloaded>Prompts will be re-read from {0}</AIPawnControl_PromptsReloaded>
 
   <!-- Pawn -->
@@ -39,6 +48,10 @@
   <AIPawnControl_TabManualOff>Manual work priorities are off: work types can only be switched on or off.</AIPawnControl_TabManualOff>
   <AIPawnControl_TabPersona>persona</AIPawnControl_TabPersona>
   <AIPawnControl_TabNote>player's note</AIPawnControl_TabNote>
+  <AIPawnControl_TabLately>lately</AIPawnControl_TabLately>
+  <AIPawnControl_TabGoals>goals</AIPawnControl_TabGoals>
+  <AIPawnControl_TabPromise>(promised)</AIPawnControl_TabPromise>
+  <AIPawnControl_TabDiary>latest diary entry</AIPawnControl_TabDiary>
   <AIPawnControl_TabIntent>today's intent</AIPawnControl_TabIntent>
   <AIPawnControl_TabSchedule>schedule</AIPawnControl_TabSchedule>
   <AIPawnControl_TabPriorities>work priorities</AIPawnControl_TabPriorities>
@@ -55,4 +68,11 @@
   <AIPawnControl_ChatThinking>{0} is thinking...</AIPawnControl_ChatThinking>
   <AIPawnControl_ChatWaiting>{0} is unconscious and will answer after coming to.</AIPawnControl_ChatWaiting>
   <AIPawnControl_ChatUnreachable>(Couldn't reach {0}'s mind: {1})</AIPawnControl_ChatUnreachable>
+
+  <!-- Memories -->
+  <AIPawnControl_MemoriesButton>Memories</AIPawnControl_MemoriesButton>
+  <AIPawnControl_MemoriesTitle>What {0} remembers</AIPawnControl_MemoriesTitle>
+  <AIPawnControl_MemoriesMemories>memories ({0}), newest first</AIPawnControl_MemoriesMemories>
+  <AIPawnControl_MemoriesPeople>people ({0})</AIPawnControl_MemoriesPeople>
+  <AIPawnControl_MemoriesEvents>events, last 7 days ({0}), newest first: when · kind · source · importance · people · place</AIPawnControl_MemoriesEvents>
 </LanguageData>

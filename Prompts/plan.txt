@@ -9,6 +9,6 @@ Plan your day. It's {time}.
 [My schedule now] {schedule}
 
 Decide:
-- intent: one short sentence about what today is for.
+- intent: one short sentence about what today is for. Your goals and promises, if you have any, can shape it.
 - schedule: 24 entries, one per hour from 0 to 23. Options: {scheduleoptions}. "work" hours block recreation and naps, "joy" hours are for recreation, and "anything" lets you work, rest or have fun as needed. Plan enough sleep and some recreation time.
 - a priority for every work type listed, based on your skills, passions, mood and what the colony needs. Don't just copy the current values: rank what matters most to you today as 1, and use 2-4 for the rest.

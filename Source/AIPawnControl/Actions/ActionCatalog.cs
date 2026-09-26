@@ -148,6 +148,7 @@ namespace AIPawnControl
             public string Label;
             public Func<string, string> Apply; // runs on the main thread when chosen, gets her cleaned "say"; returns a readable result
             public bool IsTalk; // "say" is her opening line; for anything else it's a remark out loud
+            public Pawn Target; // who she talks to, for a talk
         }
 
         /// <summary>Every action valid for this pawn right now, numbered. The schema only allows these ids.</summary>
@@ -167,6 +168,7 @@ namespace AIPawnControl
                 {
                     Id = options.Count + 1,
                     Label = $"talk to {other.LabelShort}: {interaction.label}",
+                    Target = other,
                     Apply = say => MindActions.TalkTo(mind, other, interaction, say),
                     IsTalk = true,
                 });
@@ -198,7 +200,8 @@ namespace AIPawnControl
         /// <summary>Caps rambling (a confused model once wrote 3,000 characters). Constrained decoding enforces it.</summary>
         private static Dictionary<string, object> ReasonSchema() => new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 400 };
 
-        public static Dictionary<string, object> ActSchema(List<ActOption> menu) => new Dictionary<string, object>
+        /// <param name="memories">The memory ids shown in [On my mind]; "memory" names the one she drew on, or 0.</param>
+        public static Dictionary<string, object> ActSchema(List<ActOption> menu, List<int> memories) => new Dictionary<string, object>
         {
             ["type"] = "object",
             ["properties"] = new Dictionary<string, object>
@@ -206,10 +209,14 @@ namespace AIPawnControl
                 ["reason"] = ReasonSchema(),
                 ["choice"] = new Dictionary<string, object> { ["type"] = "integer", ["enum"] = menu.Select(o => (object)o.Id).ToList() },
                 ["say"] = SaySchema(),
+                ["memory"] = MemorySchema(memories),
             },
-            ["required"] = new List<object> { "reason", "choice", "say" },
+            ["required"] = new List<object> { "reason", "choice", "say", "memory" },
             ["additionalProperties"] = false,
         };
+
+        private static Dictionary<string, object> MemorySchema(List<int> memories) =>
+            new Dictionary<string, object> { ["type"] = "integer", ["enum"] = new List<object> { 0 }.Concat(memories.Select(id => (object)id)).ToList() };
 
         /// <summary>
         /// Never offered: their workers assume prisoners, slaves, animals, rituals or roles, or they change
@@ -313,7 +320,7 @@ namespace AIPawnControl
         public const int MaxChatReply = 300;
 
         /// <summary>Chat reply: what she says back, an optional action from the current menu (0 = none), and a note for later.</summary>
-        public static Dictionary<string, object> ChatSchema(List<ActOption> menu) => new Dictionary<string, object>
+        public static Dictionary<string, object> ChatSchema(List<ActOption> menu, List<int> memories) => new Dictionary<string, object>
         {
             ["type"] = "object",
             ["properties"] = new Dictionary<string, object>
@@ -321,8 +328,9 @@ namespace AIPawnControl
                 ["reply"] = new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = MaxChatReply + 60 },
                 ["act"] = new Dictionary<string, object> { ["type"] = "integer", ["enum"] = new List<object> { 0 }.Concat(menu.Select(o => (object)o.Id)).ToList() },
                 ["note"] = new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 120 },
+                ["memory"] = MemorySchema(memories),
             },
-            ["required"] = new List<object> { "reply", "act", "note" },
+            ["required"] = new List<object> { "reply", "act", "note", "memory" },
             ["additionalProperties"] = false,
         };
 

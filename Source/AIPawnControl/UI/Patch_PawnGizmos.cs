@@ -106,6 +106,76 @@ namespace AIPawnControl
             };
             yield return new Command_Action
             {
+                defaultLabel = "DEV: Reflect now",
+                defaultDesc = "Runs Reflect over the last 24 hours, whatever the time (twice in a row tests the dedup).",
+                icon = MindIcon,
+                action = () =>
+                {
+                    if (!mind.ReflectNow())
+                        Messages.Message("Can't reflect now: " + (mind.Thinking ? "already thinking" : "no persona yet"), MessageTypeDefOf.RejectInput, false);
+                },
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Show retrieval",
+                defaultDesc = "Logs the ranked memories for her current situation, with each score part, and what [On my mind] would get.",
+                icon = MindIcon,
+                action = mind.ShowRetrieval,
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Fake a year of memories",
+                defaultDesc = "Adds 305 fake memories and 60 diary entries with random vectors, for the size and speed test. Only on a test save.",
+                icon = MindIcon,
+                action = () => Messages.Message(FakeMemories.Fill(mind), MessageTypeDefOf.NeutralEvent, false),
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Chat: ask about a memory",
+                defaultDesc = "Asks about her most important memory without giving it away: who it was with, or her worst day here.",
+                icon = MindIcon,
+                action = () =>
+                {
+                    var top = mind.memory.memories.Where(m => !m.archived).OrderByDescending(m => m.importance).FirstOrDefault();
+                    string who = top?.people.FirstOrDefault(n => n != PersonFile.Player);
+                    string question = who != null ? $"Do you remember what happened with {who}?" : "Do you remember your worst day here so far?";
+                    MainThread.Post(() => mind.PlayerSays(question));
+                },
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Chat: ask about a made-up event",
+                defaultDesc = "Asks about something that never happened, to check she doesn't invent it.",
+                icon = MindIcon,
+                action = () => MainThread.Post(() => mind.PlayerSays("Do you remember the trader with the blue parrot who visited us last week?")),
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Chat: be rude",
+                defaultDesc = "Sends a fixed rude order as the player.",
+                icon = MindIcon,
+                action = () => MainThread.Post(() => mind.PlayerSays("Stop wasting time and go haul something. Now.")),
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Chat: apologise",
+                defaultDesc = "Sends a fixed apology as the player.",
+                icon = MindIcon,
+                action = () => MainThread.Post(() => mind.PlayerSays("Hey, I'm sorry for how I talked to you earlier. That wasn't fair of me.")),
+            };
+            foreach (bool near in new[] { true, false })
+            {
+                yield return new Command_Action
+                {
+                    defaultLabel = near ? "DEV: Others talk nearby" : "DEV: Others talk far away",
+                    defaultDesc = "Teleports two other colonists next to each other, " + (near ? "a few cells away in view" : "30+ cells away") +
+                                  ", and makes them chitchat, to test whether she witnesses it.",
+                    icon = MindIcon,
+                    action = () => Messages.Message(OthersTalk(pawn, near), MessageTypeDefOf.NeutralEvent, false),
+                };
+            }
+            yield return new Command_Action
+            {
                 defaultLabel = "DEV: Force plan",
                 icon = MindIcon,
                 action = () =>
@@ -120,6 +190,28 @@ namespace AIPawnControl
                 icon = MindIcon,
                 action = mind.RegeneratePersona,
             };
+        }
+
+        private static string OthersTalk(Pawn me, bool near)
+        {
+            Map map = me.Map;
+            var others = map.mapPawns.FreeColonistsSpawned.Where(p => p != me && p.Awake() && !p.Downed && !p.InMentalState).Take(2).ToList();
+            if (others.Count < 2)
+                return "Need two other awake colonists.";
+            bool Fits(IntVec3 c) => c.Standable(map) && c.GetFirstPawn(map) == null && (c + IntVec3.East).Standable(map) && (c + IntVec3.East).GetFirstPawn(map) == null;
+            bool found = near
+                ? CellFinder.TryFindRandomCellNear(me.Position, map, 5, c => Fits(c) && c.DistanceTo(me.Position) >= 3f && GenSight.LineOfSight(me.Position, c, map), out IntVec3 cell)
+                : CellFinder.TryFindRandomCellNear(me.Position, map, 60, c => Fits(c) && c.DistanceTo(me.Position) >= 30f, out cell);
+            if (!found)
+                return "No free spot found.";
+            others[0].Position = cell;
+            others[0].Notify_Teleported();
+            others[1].Position = cell + IntVec3.East;
+            others[1].Notify_Teleported();
+            if (others[0].interactions.InteractedTooRecentlyToInteract())
+                return $"{others[0].LabelShort} talked too recently; try again in a moment.";
+            bool ok = others[0].interactions.TryInteractWith(others[1], InteractionDefOf.Chitchat);
+            return $"{others[0].LabelShort} → {others[1].LabelShort} at {(int)cell.DistanceTo(me.Position)} cells: " + (ok ? "chitchat happened" : "the interaction was refused");
         }
     }
 }

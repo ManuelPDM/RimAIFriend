@@ -8,7 +8,7 @@ using Verse;
 
 namespace AIPawnControl
 {
-    /// <summary>Builds the labelled text the LLM sees. Main thread only: most of these getters touch caches.</summary>
+    /// <summary>The live facts the LLM sees (PromptBuilder assembles them). Main thread only: most of these getters touch caches.</summary>
     public static class SnapshotBuilder
     {
         private const int MaxThoughts = 8;
@@ -41,55 +41,33 @@ namespace AIPawnControl
             return sb.ToString().TrimEnd();
         }
 
-        public static string Build(Pawn pawn, PawnMind mind)
+        /// <summary>The live snapshot as section name → text; null means leave it out. PromptBuilder labels and orders them.</summary>
+        public static Dictionary<string, string> Sections(Pawn pawn, PawnMind mind)
         {
             Map map = pawn.Map;
-            var sb = new StringBuilder();
-
             string ideo = pawn.Ideo != null ? $" Ideo: {pawn.Ideo.name}." : "";
-            sb.AppendLine($"[Me] {pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
-                          $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.{ideo}");
-
-            sb.AppendLine($"[Time] {TimeString(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
-                          $"I'm in: {RoomLabel(pawn)}. Schedule now: {pawn.timetable?.CurrentAssignment?.label ?? "anything"}.");
-
-            sb.AppendLine("[Condition] " + Condition(pawn));
-
             var needs = pawn.needs?.AllNeeds
                 .Where(n => n.ShowOnNeedList && !(n is Need_Mood))
                 .Select(n => $"{n.LabelCap} {n.CurLevelPercentage.ToStringPercent()}");
-            if (needs != null)
-                sb.AppendLine("[Needs] " + string.Join(", ", needs));
-
-            string feelings = Feelings(pawn);
-            if (feelings != null)
-                sb.AppendLine("[Feelings] " + feelings);
-
-            string skills = Skills(pawn);
-            if (skills != null)
-                sb.AppendLine("[Skills] " + skills);
-
-            sb.AppendLine("[Doing now] " + (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + "."); // null between jobs, e.g. as a mental break starts
-
-            if (!string.IsNullOrEmpty(mind.intent))
-                sb.AppendLine($"[My plan] {mind.intent}");
-            if (mind.notes.Count > 0)
-                sb.AppendLine("[I promised the player] " + string.Join(" · ", mind.notes));
-
-            string people = People(pawn);
-            if (people != null)
-                sb.AppendLine("[People nearby] " + people);
-
-            sb.AppendLine("[Colony] " + Colony(map));
-            sb.AppendLine("[Colony stores] " + Stores(map));
-            string rooms = Rooms(map);
-            if (rooms != null)
-                sb.AppendLine("[Rooms] " + rooms);
-
-            if (mind.decisions.Count > 0)
-                sb.AppendLine("[Recent] " + string.Join(" · ", mind.decisions.Skip(Math.Max(0, mind.decisions.Count - 5))));
-
-            return sb.ToString().TrimEnd();
+            return new Dictionary<string, string>
+            {
+                ["Me"] = $"{pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
+                         $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.{ideo}",
+                ["Time"] = $"{TimeString(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
+                           $"I'm in: {RoomLabel(pawn)}. Schedule now: {pawn.timetable?.CurrentAssignment?.label ?? "anything"}.",
+                ["Condition"] = Condition(pawn),
+                ["Needs"] = needs != null ? string.Join(", ", needs) : null,
+                ["Feelings"] = Feelings(pawn),
+                ["Skills"] = Skills(pawn),
+                ["Doing now"] = (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + ".", // null between jobs, e.g. as a mental break starts
+                ["My plan"] = string.IsNullOrEmpty(mind.intent) ? null : mind.intent,
+                ["I promised the player"] = mind.memory.Promises,
+                ["People nearby"] = People(pawn),
+                ["Colony"] = Colony(map),
+                ["Colony stores"] = Stores(map),
+                ["Rooms"] = Rooms(map),
+                ["Recent"] = mind.decisions.Count > 0 ? string.Join(" · ", mind.decisions.Skip(Math.Max(0, mind.decisions.Count - 5))) : null,
+            };
         }
 
         public static string TimeString(Map map)
@@ -107,7 +85,7 @@ namespace AIPawnControl
             return parts.Count > 0 ? string.Join(", ", parts) + ". " : "";
         }
 
-        private static string RoomLabel(Pawn pawn)
+        internal static string RoomLabel(Pawn pawn)
         {
             Room room = pawn.GetRoom();
             if (room == null || room.PsychologicallyOutdoors)

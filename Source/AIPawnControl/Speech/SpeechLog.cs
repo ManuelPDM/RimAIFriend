@@ -156,7 +156,11 @@ namespace AIPawnControl
     [HarmonyPatch(typeof(PlayLog), nameof(PlayLog.Add))]
     internal static class Patch_PlayLog_Add
     {
-        private static void Postfix(LogEntry entry) => SpeechLog.OnPlayLogAdd(entry);
+        private static void Postfix(LogEntry entry)
+        {
+            SpeechLog.OnPlayLogAdd(entry);
+            MemoryCapture.OnPlayLog(entry); // after the line is registered, so her own line is recorded
+        }
     }
 
     /// <summary>Every reader (social log, Log tab, Interaction Bubbles) goes through here. Skipping the original avoids

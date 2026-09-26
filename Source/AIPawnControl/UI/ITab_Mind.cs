@@ -45,17 +45,25 @@ namespace AIPawnControl
             Section(sb, "AIPawnControl_TabPersona", mind.persona ?? "…");
             if (!string.IsNullOrWhiteSpace(mind.note))
                 Section(sb, "AIPawnControl_TabNote", mind.note);
+            if (!string.IsNullOrEmpty(mind.memory.lately))
+                Section(sb, "AIPawnControl_TabLately", mind.memory.lately);
+            if (mind.memory.goals.Count > 0)
+                Section(sb, "AIPawnControl_TabGoals", string.Join("\n", mind.memory.goals.Select(g => (g.source == Goal.Promise ? "AIPawnControl_TabPromise".Translate() + " " : "") + g.text)));
             Section(sb, "AIPawnControl_TabIntent", mind.intent ?? "…");
             Section(sb, "AIPawnControl_TabSchedule", ActionCatalog.DescribeSchedule(mind.pawn));
             Section(sb, "AIPawnControl_TabPriorities", ActionCatalog.DescribePriorities(mind.pawn));
             Section(sb, "AIPawnControl_TabReason", mind.lastReason ?? "…");
             Section(sb, "AIPawnControl_TabRecent", mind.decisions.Count > 0 ? string.Join("\n", Enumerable.Reverse(mind.decisions)) : "…");
+            if (mind.memory.diary.Count > 0)
+                Section(sb, "AIPawnControl_TabDiary", mind.memory.diary[mind.memory.diary.Count - 1].text);
             sb.AppendLine("AIPawnControl_TabBudget".Translate(Mathf.Max(0, mind.ActsLeft), mind.ExtraPlansLeft).ToString());
 
             Rect inner = new Rect(0f, 0f, size.x, size.y).ContractedBy(12f);
             inner.yMin += 20f; // leave room for the tab's close button
             Rect outRect = new Rect(inner.x, inner.y, inner.width, inner.height - ChatHeight - 8f);
             Rect viewRect = new Rect(0f, 0f, outRect.width - 16f, lastHeight);
+            if (Widgets.ButtonText(new Rect(inner.xMax - 110f, inner.y, 110f, 26f), "AIPawnControl_MemoriesButton".Translate()))
+                Find.WindowStack.Add(new Dialog_Memories(mind));
             Widgets.BeginScrollView(outRect, ref scroll, viewRect);
             string text = sb.ToString().TrimEnd();
             lastHeight = Text.CalcHeight(text, viewRect.width);

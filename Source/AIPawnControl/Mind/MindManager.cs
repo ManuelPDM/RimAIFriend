@@ -20,6 +20,8 @@ namespace AIPawnControl
 
         public SpokenLines Lines => lines;
 
+        public List<PawnMind> Minds => minds;
+
         public MindManager(Game game)
         {
             this.game = game;

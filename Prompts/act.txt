@@ -9,3 +9,5 @@ Also write "say": what you say out loud, or "" to stay silent.
 - If you pick a "talk to" option, "say" is your opening line to that person. Match the kind of talk: chitchat is light, a deep talk is personal, a slight or insult stings.
 - For anything else, only say something if you'd really say it out loud right now: a remark, a grumble, a word to someone nearby. Silence is fine.
 - 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks. Only speak to people who are nearby; you can talk about anyone.
+
+Also write "memory": the M-number from [On my mind] if that memory shaped your choice or your words, otherwise 0.

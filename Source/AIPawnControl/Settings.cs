@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using RimWorld;
 using UnityEngine;
 using Verse;
@@ -17,8 +18,14 @@ namespace AIPawnControl
         public int actsPerDay = 10;
         public bool speakLines = true;
         public bool chatBubbles = true;
+        public bool memoryEnabled = true; // off: no Reflect and no retrieval; events and goals are still kept
+        public string embedEndpoint = ""; // empty: same as the chat endpoint
+        public string embedModel = "google/embedding-gemma-300m";
+        public int embedDims;              // the model's own size, as detected by "Test embeddings"
+        public string embedDimsModel;      // the model embedDims was detected for
 
         private string testStatus;
+        private string embedTestStatus;
         private string periodicBuffer;
         private string actsBuffer;
         private string timeoutBuffer;
@@ -37,7 +44,14 @@ namespace AIPawnControl
             Scribe_Values.Look(ref actsPerDay, "actsPerDay", 10);
             Scribe_Values.Look(ref speakLines, "speakLines", true);
             Scribe_Values.Look(ref chatBubbles, "chatBubbles", true);
+            Scribe_Values.Look(ref memoryEnabled, "memoryEnabled", true);
+            Scribe_Values.Look(ref embedEndpoint, "embedEndpoint", "");
+            Scribe_Values.Look(ref embedModel, "embedModel", "google/embedding-gemma-300m");
+            Scribe_Values.Look(ref embedDims, "embedDims");
+            Scribe_Values.Look(ref embedDimsModel, "embedDimsModel");
         }
+
+        public string EmbedEndpoint => string.IsNullOrWhiteSpace(embedEndpoint) ? endpoint : embedEndpoint;
 
         public void DoWindowContents(Rect rect)
         {
@@ -67,6 +81,30 @@ namespace AIPawnControl
             }
             if (testStatus != null)
                 list.Label(testStatus);
+
+            list.GapLine();
+            list.CheckboxLabeled("AIPawnControl_Memory".Translate(), ref memoryEnabled, "AIPawnControl_MemoryTip".Translate());
+            embedEndpoint = list.TextEntryLabeled("AIPawnControl_EmbedEndpoint".Translate(), embedEndpoint);
+            embedModel = list.TextEntryLabeled("AIPawnControl_EmbedModel".Translate(), embedModel);
+            if (list.ButtonText("AIPawnControl_TestEmbeddings".Translate()))
+            {
+                embedTestStatus = "AIPawnControl_Testing".Translate();
+                string testedModel = embedModel;
+                EmbedClient.Embed(new List<string> { "We survived our first winter together." }, query: false, r =>
+                {
+                    if (!r.Ok)
+                    {
+                        embedTestStatus = "AIPawnControl_EmbedTestFailed".Translate(r.Error);
+                        return;
+                    }
+                    embedDims = r.NativeDims;
+                    embedDimsModel = testedModel;
+                    embedTestStatus = "AIPawnControl_EmbedTestOk".Translate(r.Seconds.ToString("0.0"), r.NativeDims, r.Vectors[0].Length);
+                });
+            }
+            list.Label(embedTestStatus ?? (embedDimsModel == embedModel && embedDims > 0
+                ? "AIPawnControl_EmbedDetected".Translate(embedDims).ToString()
+                : "AIPawnControl_EmbedNotTested".Translate().ToString()));
 
             list.Gap();
             if (list.ButtonText("AIPawnControl_ReloadPrompts".Translate()))
