@@ -1,0 +1,16 @@
+# Site-scoring weights for building (PHASE4.md §2). Re-read on every scan: edit, then run
+# "Run building checks" again. No rebuild or restart needed. Missing keys keep their defaults.
+
+maxWalk        = 60     # tiles from the base centre a door may be
+walk           = -1     # per tile from the base centre to the door
+sharedWallCell = 1      # per reused wall cell
+sharedSide     = 4      # per side with reused walls (a notch wins, the base stays compact)
+alignedSide    = 1.5    # per side continuing an existing wall line within 10 cells
+sliverCell     = -1     # per ring cell with a 1-cell gap to an existing wall
+fertility      = -0.5   # per cell, per 0.1 fertility above plain soil's 1.0 (rich soil 1.4 = 4)
+shelter        = 0.2    # per tile farther from the map edge than the base centre (capped at 15)
+nearEdge       = -1     # per tile closer than 15 to the map edge
+tree           = -2     # per tree to cut
+item           = -0.5   # per item to haul
+home           = 5      # inside the home area
+bigRoom        = 4      # the 5x5 size over 4x4
