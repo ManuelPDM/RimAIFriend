@@ -69,10 +69,12 @@ namespace AIPawnControl
             if (skills != null)
                 sb.AppendLine("[Skills] " + skills);
 
-            sb.AppendLine("[Doing now] " + pawn.GetJobReport().TrimEnd('.') + ".");
+            sb.AppendLine("[Doing now] " + (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + "."); // null between jobs, e.g. as a mental break starts
 
             if (!string.IsNullOrEmpty(mind.intent))
                 sb.AppendLine($"[My plan] {mind.intent}");
+            if (mind.notes.Count > 0)
+                sb.AppendLine("[I promised the player] " + string.Join(" · ", mind.notes));
 
             string people = People(pawn);
             if (people != null)
@@ -115,7 +117,10 @@ namespace AIPawnControl
 
         private static string Condition(Pawn pawn)
         {
-            var parts = new List<string> { $"Health {pawn.health.summaryHealth.SummaryHealthPercent.ToStringPercent()}" };
+            var parts = new List<string>();
+            if (pawn.InMentalState)
+                parts.Add($"I'm in a mental break right now: {pawn.MentalStateDef.label}" + (pawn.MentalState.causedByMood ? " (my mood snapped)" : ""));
+            parts.Add($"Health {pawn.health.summaryHealth.SummaryHealthPercent.ToStringPercent()}");
             var injuries = pawn.health.hediffSet.hediffs
                 .Where(h => h.Visible && h.def.isBad)
                 .Select(h => h.Part != null ? $"{h.LabelCap} ({h.Part.Label})" : h.LabelCap.ToString())
@@ -183,7 +188,8 @@ namespace AIPawnControl
             {
                 string relation = pawn.GetMostImportantRelation(p)?.GetGenderSpecificLabel(p) ?? "colonist";
                 int opinion = pawn.relations?.OpinionOf(p) ?? 0;
-                string mood = p.needs?.mood != null ? p.needs.mood.MoodString : "";
+                string mood = p.InMentalState ? $"in a mental break: {p.MentalStateDef.label}" // MoodString would just say "mental state"
+                    : p.needs?.mood != null ? p.needs.mood.MoodString : "";
                 int dist = (int)p.Position.DistanceTo(pawn.Position);
                 string asleep = p.Awake() ? "" : ", asleep";
                 return $"{p.LabelShort} ({relation}, opinion {opinion:+0;-0;0}, {mood}{asleep}, {dist} tiles)";

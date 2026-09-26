@@ -19,6 +19,9 @@ namespace AIPawnControl
         private const int MinTicksBetweenThinks = GenDate.TicksPerHour;
         private const float MinRealSecondsBetweenThinks = 10f;
         private const int IdleTicksBeforeAct = GenDate.TicksPerHour;
+        private const int MaxChatLines = 16; // 8 turns
+        private const int ChatForgetTicks = 6 * GenDate.TicksPerHour;
+        private const int MaxNotes = 3;
 
         // Saved
         public Pawn pawn;
@@ -36,6 +39,11 @@ namespace AIPawnControl
         private int wakeAtTick = -1;
         private Dictionary<string, int> lastInteractionTicks = new Dictionary<string, int>(); // "defName|targetThingId" → tick
         private int lastNegativeTick = -99999999;
+        public List<ChatLine> chat = new List<ChatLine>();
+        private int lastChatTick = -1;
+        private bool chatPending; // unanswered player messages, e.g. while unconscious or while another call was running
+        private bool chatWhileOut;
+        public List<string> notes = new List<string>(); // promises made in chat, for [My plan]; cleared by the morning plan
 
         // Not saved
         private LlmRequest current;
@@ -50,12 +58,19 @@ namespace AIPawnControl
         private int lastInjuryCount;
         private readonly HashSet<int> ourJobIds = new HashSet<int>(); // jobs we ordered, to tell them apart from the player's
         private List<ActionCatalog.ActOption> pendingMenu;
+        private int talkLineJobId = -1;
+        private string talkLine;
+        private bool chatWokeHer;
+        private bool chatThinking;
 
         public bool Thinking => current != null;
         public float ThinkingSeconds => UnityEngine.Time.realtimeSinceStartup - requestStartedRealtime;
         public bool Unreachable => failures >= FailuresBeforeBackoff;
         public int ExtraPlansLeft => LocalDay == extraPlansDay ? ExtraPlansPerDay - extraPlansToday : ExtraPlansPerDay;
         public int ActsLeft => AIPawnControlMod.Settings.actsPerDay - (LocalDay == actsDay ? actsToday : 0);
+        public bool ChatThinking => chatThinking && Thinking;
+        public bool ChatWaitingForWake => chatPending && !CanBeAwake;
+        private bool CanBeAwake => pawn.health.capacities.CanBeAwake;
 
         public PawnMind() { }
 
@@ -82,10 +97,17 @@ namespace AIPawnControl
             Scribe_Values.Look(ref wakeAtTick, "wakeAtTick", -1);
             Scribe_Collections.Look(ref lastInteractionTicks, "lastInteractionTicks", LookMode.Value, LookMode.Value);
             Scribe_Values.Look(ref lastNegativeTick, "lastNegativeTick", -99999999);
+            Scribe_Collections.Look(ref chat, "chat", LookMode.Deep);
+            Scribe_Values.Look(ref lastChatTick, "lastChatTick", -1);
+            Scribe_Values.Look(ref chatPending, "chatPending");
+            Scribe_Values.Look(ref chatWhileOut, "chatWhileOut");
+            Scribe_Collections.Look(ref notes, "notes", LookMode.Value);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 decisions = decisions ?? new List<string>();
                 lastInteractionTicks = lastInteractionTicks ?? new Dictionary<string, int>();
+                chat = chat ?? new List<ChatLine>();
+                notes = notes ?? new List<string>();
             }
         }
 
@@ -108,9 +130,22 @@ namespace AIPawnControl
 
         public void RememberOurJob(Job job) => ourJobIds.Add(job.loadID);
 
+        /// <summary>The opening line for one talk job. Not saved: a reload mid-walk just falls back to vanilla text.</summary>
+        public void SetTalkLine(Job job, string line)
+        {
+            talkLineJobId = job.loadID;
+            talkLine = line;
+        }
+
+        public string TalkLine(Job job) => job.loadID == talkLineJobId ? talkLine : null;
+
         /// <summary>Called by MindManager every check interval.</summary>
         public void CheckTriggers()
         {
+            if (chat.Count > 0 && !chatPending && Find.TickManager.TicksGame - lastChatTick > ChatForgetTicks)
+                chat.Clear(); // long chat histories make small models drift; memory across conversations is Phase 3
+            if (chatPending)
+                return; // answered from UpdateChat, which also runs while paused
             if (Thinking || Find.TickManager.TicksGame < backoffUntilTick || pawn == null || !pawn.Spawned)
                 return;
             // Only danger or a new injury may wake a sleeper's mind; a mood drop while asleep just confuses the model.
@@ -211,7 +246,7 @@ namespace AIPawnControl
         private static string InteractionKey(InteractionDef def, Pawn target) => def.defName + "|" + target.ThingID;
 
         /// <summary>Called by JobDriver_AITalkTo when the conversation happened or was given up.</summary>
-        public void OnTalkFinished(Pawn target, InteractionDef def, bool success, string failure)
+        public void OnTalkFinished(Pawn target, InteractionDef def, bool success, string failure, string line)
         {
             if (success)
             {
@@ -221,6 +256,8 @@ namespace AIPawnControl
                     lastNegativeTick = now;
             }
             string text = success ? $"Talked to {target.LabelShort} ({def.label})." : $"Didn't get to talk to {target.LabelShort}: {failure}.";
+            if (success && line != null && AIPawnControlMod.Settings.speakLines)
+                text += $" I said: \"{line}\"";
             AddDecision(text);
             ModLog.Message($"{pawn.LabelShort}: {text}");
         }
@@ -272,10 +309,16 @@ namespace AIPawnControl
                 Fail($"act reply chose {choice}, which isn't on the menu");
                 return;
             }
+            string say = SpeechLog.Clean(reply.TryGetValue("say", out object sayRaw) ? sayRaw as string : null);
             string result;
             try
             {
-                result = option.Apply();
+                result = option.Apply(say);
+                if (!option.IsTalk && say != null && AIPawnControlMod.Settings.speakLines)
+                {
+                    SpeechLog.Say(pawn, say);
+                    result += $" Said: \"{say}\"";
+                }
             }
             catch (Exception e)
             {
@@ -286,10 +329,122 @@ namespace AIPawnControl
             ModLog.Message($"{pawn.LabelShort} act: {option.Label} | {result} | Reason: {lastReason}");
         }
 
+        // ---------- Player chat ----------
+
+        /// <summary>From the Mind tab, via the main-thread pump. Wakes a sleeper (with vanilla's disturbed-sleep cost).</summary>
+        public void PlayerSays(string text)
+        {
+            AddChat(ChatLine.From.Player, text);
+            lastChatTick = Find.TickManager.TicksGame;
+            chatPending = true;
+            if (!CanBeAwake)
+            {
+                chatWhileOut = true;
+                return; // answered when she comes to
+            }
+            if (!pawn.Awake())
+            {
+                RestUtility.WakeUp(pawn);
+                pawn.needs?.mood?.thoughts.memories.TryGainMemory(ThoughtDefOf.SleepDisturbed);
+                chatWokeHer = true;
+            }
+            UpdateChat();
+        }
+
+        /// <summary>Called every frame by MindManager (also while paused): answers pending messages once she can.</summary>
+        public void UpdateChat()
+        {
+            if (!chatPending || Thinking || pawn == null || !pawn.Spawned || !CanBeAwake)
+                return;
+            chatPending = false;
+            RequestChat();
+        }
+
+        private void RequestChat()
+        {
+            string cantAct = PausedReason(ignoreSleep: true);
+            var menu = cantAct == null ? ActionCatalog.BuildActMenu(pawn, this) : new List<ActionCatalog.ActOption>();
+            int lastAnswer = chat.FindLastIndex(l => l.from == ChatLine.From.Mind);
+            var unanswered = chat.Skip(lastAnswer + 1).Where(l => l.from == ChatLine.From.Player).Select(l => l.text).ToList();
+            var earlier = chat.Take(lastAnswer + 1).Where(l => l.from != ChatLine.From.System)
+                .Select(l => (l.from == ChatLine.From.Player ? "Player: " : "Me: ") + l.text).ToList();
+            string situation = chatWhileOut ? "You just came to after being unconscious. While you were out, the player spoke to you."
+                : chatWokeHer ? "The player's message just woke you up."
+                : "The player is talking to you.";
+            chatWhileOut = false;
+            chatWokeHer = false;
+            var values = new Dictionary<string, string>
+            {
+                ["time"] = SnapshotBuilder.TimeString(pawn.Map),
+                ["situation"] = situation,
+                ["snapshot"] = SnapshotBuilder.Build(pawn, this),
+                ["history"] = earlier.Count > 0 ? string.Join("\n", earlier) : "(this is the start of the conversation)",
+                ["message"] = string.Join("\n", unanswered),
+                ["menu"] = cantAct == null ? ActionCatalog.DescribeMenu(menu) : $"(you can't do anything else right now: {cantAct})",
+            };
+            var messages = new List<KeyValuePair<string, string>>
+            {
+                new KeyValuePair<string, string>("system", SystemPrompt()),
+                new KeyValuePair<string, string>("user", Prompts.Fill("chat", values)),
+            };
+            Send("chat", messages, ActionCatalog.ChatSchema(menu), reply => OnChat(reply, menu),
+                stillValid: () => pawn == null || pawn.Destroyed || pawn.Dead || !pawn.Spawned ? "gone" : null,
+                onError: error =>
+                {
+                    chatThinking = false;
+                    AddChat(ChatLine.From.System, "AIPawnControl_ChatUnreachable".Translate(pawn.LabelShort, error));
+                });
+            chatThinking = true; // after Send, whose Cancel() clears it
+        }
+
+        private void OnChat(Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu)
+        {
+            chatThinking = false;
+            string text = SpeechLog.Clean(reply.TryGetValue("reply", out object r) ? r as string : null, ActionCatalog.MaxChatReply) ?? "...";
+            AddChat(ChatLine.From.Mind, text);
+            lastChatTick = Find.TickManager.TicksGame;
+            if (AIPawnControlMod.Settings.chatBubbles)
+                SpeechLog.Say(pawn, text);
+
+            string note = reply.TryGetValue("note", out object n) ? (n as string)?.Trim() : null;
+            if (!string.IsNullOrEmpty(note))
+            {
+                notes.Add(note);
+                while (notes.Count > MaxNotes)
+                    notes.RemoveAt(0);
+                AddDecision($"Promised the player: {note}");
+            }
+
+            int choice = reply.TryGetValue("act", out object a) && a is double d ? (int)d : 0;
+            var option = PausedReason(ignoreSleep: true) == null ? menu.FirstOrDefault(o => o.Id == choice) : null;
+            if (option == null)
+                return;
+            string result;
+            try
+            {
+                result = option.Apply(null);
+            }
+            catch (Exception e)
+            {
+                result = "That went wrong: " + e.Message;
+                ModLog.Error($"{pawn.LabelShort}: applying \"{option.Label}\" from chat threw: {e}");
+            }
+            AddDecision($"Asked by the player: {option.Label}: {result}");
+            ModLog.Message($"{pawn.LabelShort} chat act: {option.Label} | {result}");
+        }
+
+        private void AddChat(ChatLine.From from, string text)
+        {
+            chat.Add(new ChatLine(from, text));
+            while (chat.Count > MaxChatLines)
+                chat.RemoveAt(0);
+        }
+
         public void Cancel()
         {
             current?.Cancel();
             current = null;
+            chatThinking = false;
         }
 
         public void RegeneratePersona()
@@ -340,13 +495,22 @@ namespace AIPawnControl
             bool first = !decisions.Any();
             persona = text.Trim();
             AddDecision(first ? "I got a mind of my own." : "Persona rewritten.");
+            string say = SpeechLog.Clean(reply.TryGetValue("say", out object sayRaw) ? sayRaw as string : null);
+            if (first && say != null && AIPawnControlMod.Settings.speakLines)
+            {
+                SpeechLog.Say(pawn, say);
+                AddDecision($"Said: \"{say}\"");
+            }
             ModLog.Message($"{pawn.LabelShort} persona: {persona}");
         }
 
         private void RequestPlan(bool morning)
         {
             if (morning)
+            {
                 lastMorningPlanDay = LocalDay; // one morning plan per day, even if it fails
+                notes.Clear(); // yesterday's promises: today's plan is where she should have acted on them
+            }
             var workTypes = ActionCatalog.PlannableWorkTypes(pawn);
             bool manual = ActionCatalog.ManualPriorities;
             if (!manual)
@@ -398,8 +562,9 @@ namespace AIPawnControl
         }
 
         /// <param name="maxAgeTicks">Drop the reply if more game time than this passed while waiting (e.g. at ultrafast speed).</param>
+        /// <param name="stillValid">Replaces the usual pause check when the reply arrives; returns why to drop it, or null.</param>
         private void Send(string callType, List<KeyValuePair<string, string>> messages, object schema, Action<Dictionary<string, object>> onReply,
-                          int maxAgeTicks = int.MaxValue)
+                          int maxAgeTicks = int.MaxValue, Func<string> stillValid = null, Action<string> onError = null)
         {
             Cancel();
             int sentTick = Find.TickManager.TicksGame;
@@ -414,7 +579,7 @@ namespace AIPawnControl
                 if (request != current || Current.Game != requestGame)
                     return;
                 current = null;
-                string paused = PausedReason(ignoreSleep: true);
+                string paused = stillValid != null ? stillValid() : PausedReason(ignoreSleep: true);
                 if (paused == null && Find.TickManager.TicksGame - sentTick > maxAgeTicks)
                     paused = "the situation changed while I was thinking";
                 if (paused != null)
@@ -425,6 +590,7 @@ namespace AIPawnControl
                 if (!result.Ok)
                 {
                     Fail(result.Error);
+                    onError?.Invoke(result.Error);
                     return;
                 }
                 Dictionary<string, object> reply;
@@ -435,6 +601,7 @@ namespace AIPawnControl
                 catch (Exception e)
                 {
                     Fail("reply wasn't valid JSON: " + e.Message);
+                    onError?.Invoke("the reply wasn't valid JSON");
                     return;
                 }
                 failures = 0;

@@ -146,14 +146,15 @@ namespace AIPawnControl
         {
             public int Id;
             public string Label;
-            public Func<string> Apply; // runs on the main thread when chosen; returns a readable result
+            public Func<string, string> Apply; // runs on the main thread when chosen, gets her cleaned "say"; returns a readable result
+            public bool IsTalk; // "say" is her opening line; for anything else it's a remark out loud
         }
 
         /// <summary>Every action valid for this pawn right now, numbered. The schema only allows these ids.</summary>
         public static List<ActOption> BuildActMenu(Pawn pawn, PawnMind mind)
         {
             var options = new List<ActOption>();
-            void Add(string label, Func<string> apply) => options.Add(new ActOption { Id = options.Count + 1, Label = label, Apply = apply });
+            void Add(string label, Func<string> apply) => options.Add(new ActOption { Id = options.Count + 1, Label = label, Apply = _ => apply() });
 
             foreach (int hours in KeepGoingHours)
                 Add($"keep going, check back in {hours}h", () => mind.KeepGoing(hours));
@@ -162,7 +163,13 @@ namespace AIPawnControl
                 Add("rest now", () => MindActions.Rest(mind));
 
             foreach (var (other, interaction) in AvailableInteractions(pawn, mind))
-                Add($"talk to {other.LabelShort}: {interaction.label}", () => MindActions.TalkTo(mind, other, interaction));
+                options.Add(new ActOption
+                {
+                    Id = options.Count + 1,
+                    Label = $"talk to {other.LabelShort}: {interaction.label}",
+                    Apply = say => MindActions.TalkTo(mind, other, interaction, say),
+                    IsTalk = true,
+                });
 
             foreach (var joy in AvailableRecreation(pawn))
                 Add("recreation: " + JoyLabel(joy), () => MindActions.Recreation(mind, joy));
@@ -172,7 +179,7 @@ namespace AIPawnControl
                          .OrderBy(p => p.Position.DistanceToSquared(pawn.Position))
                          .Take(MaxGoToPawns)
                          .ToList())
-                Add("go to " + other.LabelShort, () => MindActions.GoTo(mind, other));
+                Add("walk over to " + other.LabelShort + " (no conversation)", () => MindActions.GoTo(mind, other));
 
             foreach (var room in NotableRooms(pawn))
                 Add("go to the " + room.GetRoomRoleLabel(), () => MindActions.GoTo(mind, room));
@@ -185,6 +192,9 @@ namespace AIPawnControl
 
         public static string DescribeMenu(List<ActOption> menu) => string.Join("\n", menu.Select(o => $"{o.Id}: {o.Label}"));
 
+        /// <summary>Looser than the 160 characters we show, because maxLength cuts mid-sentence (SpeechLog.Clean trims to a sentence end).</summary>
+        public static Dictionary<string, object> SaySchema() => new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 220 };
+
         /// <summary>Caps rambling (a confused model once wrote 3,000 characters). Constrained decoding enforces it.</summary>
         private static Dictionary<string, object> ReasonSchema() => new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 400 };
 
@@ -195,8 +205,9 @@ namespace AIPawnControl
             {
                 ["reason"] = ReasonSchema(),
                 ["choice"] = new Dictionary<string, object> { ["type"] = "integer", ["enum"] = menu.Select(o => (object)o.Id).ToList() },
+                ["say"] = SaySchema(),
             },
-            ["required"] = new List<object> { "reason", "choice" },
+            ["required"] = new List<object> { "reason", "choice", "say" },
             ["additionalProperties"] = false,
         };
 
@@ -299,11 +310,31 @@ namespace AIPawnControl
                 .ToList();
         }
 
+        public const int MaxChatReply = 300;
+
+        /// <summary>Chat reply: what she says back, an optional action from the current menu (0 = none), and a note for later.</summary>
+        public static Dictionary<string, object> ChatSchema(List<ActOption> menu) => new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["properties"] = new Dictionary<string, object>
+            {
+                ["reply"] = new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = MaxChatReply + 60 },
+                ["act"] = new Dictionary<string, object> { ["type"] = "integer", ["enum"] = new List<object> { 0 }.Concat(menu.Select(o => (object)o.Id)).ToList() },
+                ["note"] = new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 120 },
+            },
+            ["required"] = new List<object> { "reply", "act", "note" },
+            ["additionalProperties"] = false,
+        };
+
         public static Dictionary<string, object> PersonaSchema() => new Dictionary<string, object>
         {
             ["type"] = "object",
-            ["properties"] = new Dictionary<string, object> { ["persona"] = new Dictionary<string, object> { ["type"] = "string" } },
-            ["required"] = new List<object> { "persona" },
+            ["properties"] = new Dictionary<string, object>
+            {
+                ["persona"] = new Dictionary<string, object> { ["type"] = "string" },
+                ["say"] = SaySchema(),
+            },
+            ["required"] = new List<object> { "persona", "say" },
             ["additionalProperties"] = false,
         };
     }

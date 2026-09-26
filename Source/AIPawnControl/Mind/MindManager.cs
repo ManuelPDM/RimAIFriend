@@ -9,10 +9,22 @@ namespace AIPawnControl
         private const int CheckInterval = 250;
 
         private List<PawnMind> minds = new List<PawnMind>();
+        private SpokenLines lines = new SpokenLines();
 
-        public static MindManager Instance => Current.Game?.GetComponent<MindManager>();
+        private static MindManager instance;
 
-        public MindManager(Game game) { }
+        /// <summary>Cached, because the log text patch asks for it on every log draw.</summary>
+        public static MindManager Instance => instance != null && instance.game == Current.Game ? instance : null;
+
+        private readonly Game game;
+
+        public SpokenLines Lines => lines;
+
+        public MindManager(Game game)
+        {
+            this.game = game;
+            instance = this;
+        }
 
         public PawnMind MindOf(Pawn pawn)
         {
@@ -48,14 +60,25 @@ namespace AIPawnControl
                 mind.CheckTriggers();
         }
 
+        /// <summary>Runs every frame, also while paused, so the player can chat with the game paused.</summary>
+        public override void GameComponentUpdate()
+        {
+            foreach (var mind in minds)
+                mind.UpdateChat();
+        }
+
         public override void ExposeData()
         {
             Scribe_Collections.Look(ref minds, "minds", LookMode.Deep);
+            Scribe_Deep.Look(ref lines, "spokenLines");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 minds = minds ?? new List<PawnMind>();
                 minds.RemoveAll(m => m.pawn == null);
+                lines = lines ?? new SpokenLines();
             }
         }
+
+        public override void LoadedGame() => lines.Prune();
     }
 }

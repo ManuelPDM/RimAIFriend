@@ -63,7 +63,8 @@ namespace AIPawnControl
                     JumpToToil(gotoTarget); // they walked off: follow
                     return;
                 }
-                if (pawn.interactions.TryInteractWith(Target, job.interaction))
+                string line = MindManager.Instance?.MindOf(pawn)?.TalkLine(job);
+                if (SpeechLog.WithLine(pawn, line, () => pawn.interactions.TryInteractWith(Target, job.interaction)))
                 {
                     Report(true, null);
                     EndJobWith(JobCondition.Succeeded);
@@ -91,7 +92,10 @@ namespace AIPawnControl
             return true;
         }
 
-        private void Report(bool success, string failure) =>
-            MindManager.Instance?.MindOf(pawn)?.OnTalkFinished(Target, job.interaction, success, failure);
+        private void Report(bool success, string failure)
+        {
+            var mind = MindManager.Instance?.MindOf(pawn);
+            mind?.OnTalkFinished(Target, job.interaction, success, failure, mind.TalkLine(job));
+        }
     }
 }

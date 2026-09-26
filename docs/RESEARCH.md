@@ -100,6 +100,128 @@ and the docs.
 - Runs float-menu options via `option.Chosen(...)` after checking `!Disabled`. For an in-process mod we can
   call `GetOptions` directly instead of faking clicks.
 
+## Long-term memory for LLM agents (web research, 2026-09-26)
+Papers and repos, checked against the arXiv page or the source unless marked **[unverified]**. The goal was
+ideas for one pawn on a local ~30B model with about 12 calls a day. We don't import libraries.
+
+### The systems, in one line each
+- **Generative Agents** (Park 2023, arxiv.org/abs/2304.03442):
+  - a memory stream of observations, each with an LLM importance score from 1 to 10;
+  - retrieval score = recency (`0.995^hours`) + importance + cosine relevance, each normalised, weights 1;
+  - reflection fires when recent importance adds up to more than 150. It asks 3 questions and writes insights
+    that cite their source memories.
+  - Ablation: full 29.9 > no reflection 26.9 > no reflection or plan 25.6 > no memory 21.2. Every part mattered.
+  - Failures: embellishment (made-up details that fit the facts), retrieval misses, over-polite speech.
+- **AI Town** (a16z, `convex/agent/memory.ts`): writes one LLM summary per conversation, not a memory per
+  observation. It over-fetches 10× from the vector store and re-ranks 1:1:1. Reflections link to memory ids.
+- **MemGPT / Letta:**
+  - **core memory blocks** (persona, human) with a character cap, always in the prompt;
+  - a searchable message log, and archival memory in a vector store.
+  - **Sleep-time compute** (2025): a background agent rewrites the blocks ("integrate new facts, replace
+    outdated ones, avoid redundancy"), outside the request that needs a fast answer.
+  - Letta found a plain "history in files + grep" agent scored 74% on LoCoMo, beating fancier systems.
+- **Mem0** (arxiv.org/abs/2504.19413): extracts candidate facts. For each one, it retrieves similar
+  memories and the LLM picks **ADD / UPDATE / DELETE / NOOP**. It scored below full context on LoCoMo (67 vs 73)
+  but used about 90% fewer tokens.
+- **Zep / Graphiti** (arxiv.org/abs/2501.13956):
+  - keeps raw **episodes** (never lost) plus extracted entity/fact edges;
+  - **bi-temporal facts:** each fact records when it was true in the world and when the system learned or
+    dropped it;
+  - contradicted facts are **invalidated, not deleted**.
+  - Biggest gains on temporal reasoning, multi-session questions and preferences.
+- **MemoryBank:** Ebbinghaus forgetting, `R = e^(-t/S)`, with strength growing on each recall (the exact
+  update rule is **[unverified]**).
+- **Lyfe Agents** (arxiv.org/abs/2310.02172):
+  - a small working memory with a running "self-monitoring summary";
+  - consolidation clusters memories by embedding and summarises each cluster, and drops near-duplicates;
+  - the LLM picks a high-level option and cheap loops run it;
+  - 10–100× cheaper than Generative Agents.
+- **TiMem** (Jan 2026, arxiv.org/abs/2601.02845): a five-level time tree (fact → session → **day → week →
+  month profile**). Good scores with 52% less recalled text.
+- **LightMem** (Oct 2025), **MemoryOS** (2025): an offline "sleep" update; hot memories are promoted into a
+  profile. LightMem was tested on Qwen.
+- **Mantella** (Skyrim): each NPC gets a timestamped summary of each conversation, from **its own point of
+  view, covering only what it was present for**.
+- **Stanford 1,000 People** (arxiv.org/abs/2411.10109): a rich, grounded backstory beats a short persona for
+  consistency.
+
+### What the evidence says
+- **Keep the raw event and index extracted facts.** Facts alone lose nuance; raw text alone retrieves badly.
+  LongMemEval (arxiv.org/abs/2410.10813) got +4% recall from adding facts to the index key.
+- **Time and updates are where memory helps most, and where plain RAG fails.** Filtering by a time range
+  gave +7–11% recall on time questions. Knowledge updates need an explicit update or invalidate step, or stale
+  facts win because they have more copies.
+- **Consolidate periodically and offline ("sleep").** It's cheaper and better (Generative Agents' ablation,
+  TiMem, LightMem, Letta).
+- **Full context is a strong baseline.** While a memory is small, a pinned summary plus recent events matches
+  fancy retrieval. The LoCoMo benchmark itself is noisy (about 6% of its answer key is wrong).
+- **Heavy retrieval can hurt decisions** (arxiv.org/abs/2608.15008): memory pulls attention from the next
+  action. Action calls should get less memory than dialogue calls.
+- **Show memory grouped by topic, not as one flat list.** This cuts memories leaking into unrelated replies
+  (arxiv.org/abs/2608.08300).
+- **Memory can make the model sycophantic** (arxiv.org/abs/2607.01071): retrieved beliefs make it agree
+  instead of reason. Live game state must always win over memory.
+- **Persona drift:**
+  - Instruction drift shows within about 8 turns (arxiv.org/abs/2402.10962).
+  - It's triggered by emotional talk and by the model reflecting on itself (arxiv.org/abs/2601.10387).
+  - Agents on the same model pull each other toward one voice (arxiv.org/abs/2606.30571). That matters for
+    the village.
+  - Fixes available at inference time: a pinned identity block, re-stating 1–2 voice rules near the end of
+    the prompt, and wiping chat history (RimTalk).
+
+### Ideas to steal (source in brackets)
+1. **Two stores: events and beliefs.** Raw event records with structured metadata (tick, participants, place,
+   type, mood change) are the log that's never lost. Beliefs are extracted facts with `validFrom`, `validTo`
+   and a **source** (saw it / told by X). [Zep, Mem0]
+2. **Importance from game signals, not the LLM:** thought mood offset, letter type, relation changes,
+   injuries, and whether it's a first. [cost; Generative Agents uses an LLM call per memory]
+3. **One nightly consolidation call** that writes:
+   - the diary (a day summary);
+   - belief operations (ADD / UPDATE / INVALIDATE);
+   - impression updates for each person;
+   - reflections that **must cite event ids** (a reflection that cites none is dropped). [Letta sleep-time,
+     Mem0, Generative Agents]
+4. **A time hierarchy on game time:** event → day → quadrum → year. The coarse levels run rarely. [TiMem]
+5. **Core blocks with character caps, always in the prompt, rewritten only at night:** identity, lately, and
+   one line per important person. [Letta]
+6. **A stable prompt prefix first** (system, persona, core blocks), with volatile parts last, so LM Studio's
+   prefix cache can skip re-encoding the stable part. [inference, not measured]
+7. **Retrieval:**
+   - over-fetch from Qdrant with filters (participant, time window, `tick <= now`);
+   - re-rank by relevance + importance + recency;
+   - remove near-duplicates, then send 3–6 memories.
+   - nomic-embed needs the `search_document:` / `search_query:` prefixes. [AI Town, Zep, LongMemEval]
+8. **A memory budget per call type:** Act gets core blocks plus at most 2 memories; Chat gets the person's
+   impression plus 3–5 memories. [arxiv.org/abs/2608.15008]
+9. **One impression per person:**
+   - a short summary, the game's opinion value (don't invent a second number), open threads ("owes me");
+   - "what I've told them", so she doesn't repeat stories;
+   - second-hand knowledge is kept with its source. [Mantella, gossip/reputation work]
+10. **Forgetting limits what reaches the prompt, not what's stored.** Delete near-duplicates only when
+    consolidating. Aggregate repetitive events before storing them ("hauled ×12"). [MemoryBank, Lyfe]
+11. **Anti-repetition:**
+    - recency counts from **creation** time, never from last access;
+    - a reuse cooldown;
+    - a "you already mentioned X today" line in the prompt.
+
+    Generative Agents and AI Town reward recall with recency, which is a feedback loop. [PawnDiary]
+12. **Unprompted recall:**
+    - query memory with the current situation (the person present, the place, an item, an anniversary);
+    - offer the result as an optional "on my mind" line;
+    - gate it with a cooldown and a chance. [Generative Agents, made cheap]
+
+### Pitfalls
+- Letting the model edit its memory during decision calls: small models write junk. Edit only at night, as a
+  list of operations.
+- Reflections without evidence lead to embellishment.
+- Retrieved memory outranking the live snapshot.
+- Summaries of summaries drifting: keep raw events so a level can be rebuilt.
+- Too much memory in action prompts, and long histories making a 27B model purple and repetitive.
+- Over-engineering for benchmarks: start with core blocks, the event log and Qdrant top-k. Add a graph only
+  if per-person questions fail.
+- **Later, for the village:** each pawn keeps its own point of view. A shared event is stored once, with
+  separate impressions per pawn.
+
 ## Confirmed RimWorld 1.6 APIs (checked by reflection on Assembly-CSharp.dll)
 - `FloatMenuMakerMap.GetOptions(List<Pawn>, Vector3, out FloatMenuContext)`, `GetAutoTakeOption`, `providers`
 - `FloatMenuContext(List<Pawn>, Vector3, Map)`: `ClickedCell`, `ClickedThings`, `ClickedPawns`, `FirstSelectedPawn`
@@ -194,6 +316,34 @@ Bubbles is Workshop 1516158345, packageId `Jaxe.Bubbles`, "© Jaxe" with no lice
 
   If the mod is removed, the lines revert to vanilla chitchat text. `PlayLog.Add` applies no thoughts; if we
   want any, apply them ourselves.
+- **What Phase 2 actually built** (`Speech/SpeechLog.cs`; this refines the list above):
+  - Keyed by `LogEntry.LogID` (an int from `UniqueIDsManager`), not `GetUniqueLoadID()`, so no string is
+    built on each log draw.
+  - A **prefix** (not a postfix) on `ToGameStringFromPOV` returns our text and skips the original. That
+    avoids resolving grammar we'd throw away, and vanilla's "POV who isn't initiator" error for solo entries.
+    The method caches `cachedString`; skipping it is harmless.
+  - The talk entry is captured by a `PlayLog.Add` **postfix** while a `[ThreadStatic]` pending line is set
+    around `TryInteractWith`. It checks the entry's `initiator` field (`AccessTools.FieldRefAccess`).
+  - **Solo entries** (`PlayLogEntry_InteractionSinglePawn` with the Chitchat def) are taken out of
+    `PlayLog.entries` in a `PlayLog.ExposeData` prefix while saving, and put back at the same positions in
+    the postfix. That covers manual saves and autosaves. Every base-game Chitchat rule needs a recipient, so
+    saved solo entries would break without the mod.
+  - The social-log name prefix uses a flag set around `InteractionCardUtility.DrawInteractionsLog(Rect, Pawn,
+    List<LogEntry>, int)` (confirmed name; called from `SocialCardUtility.cs:177`). The Log tab
+    (`ITab_Pawn_Log`) doesn't go through it.
+
+#### Other APIs confirmed while building Phase 2
+- **`Pawn_InteractionsTracker.TryInteractWith`** (`RimWorld\Pawn_InteractionsTracker.cs:176-250`): it adds
+  exactly one `PlayLogEntry_Interaction`. If the interaction sends a letter (romance, proposal), the letter
+  text comes from `entry.ToGameStringFromPOV(initiator)`, so our line would appear in the letter.
+- **`GameComponent.GameComponentUpdate`** runs every frame from `Game.UpdatePlay`, **also while paused**
+  (`Verse\Game.cs:678`). Chat uses it so the player can talk with the game paused.
+- **Waking a pawn:** `RestUtility.WakeUp(pawn)` ends a `LayDown` job (`RestUtility.cs:549`). The vanilla
+  disturbed-sleep thought is `ThoughtDefOf.SleepDisturbed`. `Pawn.CheckForDisturbedSleep` is private, so we
+  add the memory ourselves.
+- **Unconscious vs asleep:** `pawn.health.capacities.CanBeAwake` is false under anesthetic or a bad injury;
+  `pawn.Awake()` is false for plain sleep.
+- **Debug:** `pawn.health.AddHediff(HediffDefOf.Anesthetic)` knocks a pawn out for about 6 in-game hours.
 
 #### Player orders vs ours
 - **`Pawn_JobTracker.TryTakeOrderedJob` (`Verse.AI\Pawn_JobTracker.cs:889-959`)**

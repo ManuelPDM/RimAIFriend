@@ -54,7 +54,7 @@ namespace AIPawnControl
             yield return new Command_Action
             {
                 defaultLabel = "DEV: Try a talk",
-                defaultDesc = "Skips the LLM: starts the first offered talk option (chitchat preferred) to test the talk job.",
+                defaultDesc = "Skips the LLM: starts the first offered talk option (chitchat preferred) with a fixed test line, to test the talk job and the speech display.",
                 icon = MindIcon,
                 action = () =>
                 {
@@ -67,9 +67,42 @@ namespace AIPawnControl
                     var (target, def) = options.FirstOrDefault(o => o.Item2 == InteractionDefOf.Chitchat);
                     if (target == null)
                         (target, def) = options[0];
-                    string result = MindActions.TalkTo(mind, target, def);
+                    string result = MindActions.TalkTo(mind, target, def, $"Test line from {pawn.LabelShort}. Can you read this, {target.LabelShort}?");
                     mind.AddDecision($"(dev) talk to {target.LabelShort}: {def.label}: {result}");
                 },
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Say a test line",
+                defaultDesc = "Skips the LLM: a solo remark bubble with a fixed line, to test solo entries (they must never be saved).",
+                icon = MindIcon,
+                action = () => SpeechLog.Say(pawn, $"Solo test line from {pawn.LabelShort}, said out loud."),
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Chat: ask for a talk",
+                defaultDesc = "Sends a fixed chat message as the player (\"Could you go talk to <nearest colonist>?\"), like the Mind tab's Send button.",
+                icon = MindIcon,
+                action = () =>
+                {
+                    Pawn other = pawn.Map.mapPawns.FreeColonistsSpawned.Where(p => p != pawn).OrderBy(p => p.Position.DistanceToSquared(pawn.Position)).FirstOrDefault();
+                    string message = other != null ? $"Could you go talk to {other.LabelShort}? I think they could use some company." : "How are you doing?";
+                    MainThread.Post(() => mind.PlayerSays(message));
+                },
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Chat: ask for later",
+                defaultDesc = "Sends a fixed chat message as the player asking for something later, to test the chat note.",
+                icon = MindIcon,
+                action = () => MainThread.Post(() => mind.PlayerSays("No rush, but some time later today, could you check in on the others and see how they're holding up?")),
+            };
+            yield return new Command_Action
+            {
+                defaultLabel = "DEV: Knock out",
+                defaultDesc = "Gives anesthetic, to test that chat waits until they come to.",
+                icon = MindIcon,
+                action = () => pawn.health.AddHediff(HediffDefOf.Anesthetic),
             };
             yield return new Command_Action
             {

@@ -53,7 +53,8 @@ namespace AIPawnControl
             return Order(mind, job) ? $"Started {ActionCatalog.JoyLabel(def)}." : $"Couldn't start {ActionCatalog.JoyLabel(def)}.";
         }
 
-        public static string TalkTo(PawnMind mind, Pawn target, InteractionDef interaction)
+        /// <param name="line">Her opening line, shown instead of vanilla's text when the interaction fires. May be null.</param>
+        public static string TalkTo(PawnMind mind, Pawn target, InteractionDef interaction, string line)
         {
             if (!target.Spawned || target.Map != mind.pawn.Map || target.Downed || !target.Awake())
                 return $"Couldn't talk to {target.LabelShort}: they're not available.";
@@ -61,6 +62,7 @@ namespace AIPawnControl
                 return $"I've done \"{interaction.label}\" too recently.";
             Job job = JobMaker.MakeJob(AIPC_JobDefOf.AIPC_TalkTo, target);
             job.interaction = interaction;
+            mind.SetTalkLine(job, line);
             return Order(mind, job) ? $"Going over to {target.LabelShort}." : $"Couldn't go talk to {target.LabelShort}.";
         }
 

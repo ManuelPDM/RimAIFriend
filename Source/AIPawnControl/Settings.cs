@@ -15,6 +15,8 @@ namespace AIPawnControl
         public bool logPrompts = true;
         public int periodicHours = 4;
         public int actsPerDay = 10;
+        public bool speakLines = true;
+        public bool chatBubbles = true;
 
         private string testStatus;
         private string periodicBuffer;
@@ -33,6 +35,8 @@ namespace AIPawnControl
             Scribe_Values.Look(ref logPrompts, "logPrompts", true);
             Scribe_Values.Look(ref periodicHours, "periodicHours", 4);
             Scribe_Values.Look(ref actsPerDay, "actsPerDay", 10);
+            Scribe_Values.Look(ref speakLines, "speakLines", true);
+            Scribe_Values.Look(ref chatBubbles, "chatBubbles", true);
         }
 
         public void DoWindowContents(Rect rect)
@@ -50,6 +54,8 @@ namespace AIPawnControl
             list.CheckboxLabeled("AIPawnControl_LogPrompts".Translate(), ref logPrompts, "AIPawnControl_LogPromptsTip".Translate());
             list.TextFieldNumericLabeled("AIPawnControl_PeriodicHours".Translate(), ref periodicHours, ref periodicBuffer, 1, 24);
             list.TextFieldNumericLabeled("AIPawnControl_ActsPerDay".Translate(), ref actsPerDay, ref actsBuffer, 0, 100);
+            list.CheckboxLabeled("AIPawnControl_SpeakLines".Translate(), ref speakLines, "AIPawnControl_SpeakLinesTip".Translate());
+            list.CheckboxLabeled("AIPawnControl_ChatBubbles".Translate(), ref chatBubbles, "AIPawnControl_ChatBubblesTip".Translate());
 
             list.Gap();
             if (list.ButtonText("AIPawnControl_TestConnection".Translate()))

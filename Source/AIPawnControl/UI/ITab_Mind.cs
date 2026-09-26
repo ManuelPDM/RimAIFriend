@@ -6,15 +6,24 @@ using Verse;
 
 namespace AIPawnControl
 {
-    /// <summary>Inspector tab: status, persona, plan, last reasoning and recent decisions. Only shown for pawns with a mind.</summary>
+    /// <summary>Inspector tab: status, persona, plan, last reasoning, recent decisions, and a chat with the pawn at the bottom.
+    /// Only shown for pawns with a mind.</summary>
     public class ITab_Mind : ITab
     {
+        private const float ChatHeight = 230f;
+        private const float InputHeight = 30f;
+        private const int ShownChatLines = 8;
+        private const string InputControl = "AIPC_ChatInput";
+
         private Vector2 scroll;
         private float lastHeight;
+        private Vector2 chatScroll;
+        private int lastChatCount;
+        private string input = "";
 
         public ITab_Mind()
         {
-            size = new Vector2(460f, 480f);
+            size = new Vector2(460f, 700f);
             labelKey = "AIPawnControl_MindTab";
         }
 
@@ -43,14 +52,65 @@ namespace AIPawnControl
             Section(sb, "AIPawnControl_TabRecent", mind.decisions.Count > 0 ? string.Join("\n", Enumerable.Reverse(mind.decisions)) : "…");
             sb.AppendLine("AIPawnControl_TabBudget".Translate(Mathf.Max(0, mind.ActsLeft), mind.ExtraPlansLeft).ToString());
 
-            Rect outRect = new Rect(0f, 0f, size.x, size.y).ContractedBy(12f);
-            outRect.yMin += 20f; // leave room for the tab's close button
+            Rect inner = new Rect(0f, 0f, size.x, size.y).ContractedBy(12f);
+            inner.yMin += 20f; // leave room for the tab's close button
+            Rect outRect = new Rect(inner.x, inner.y, inner.width, inner.height - ChatHeight - 8f);
             Rect viewRect = new Rect(0f, 0f, outRect.width - 16f, lastHeight);
             Widgets.BeginScrollView(outRect, ref scroll, viewRect);
             string text = sb.ToString().TrimEnd();
             lastHeight = Text.CalcHeight(text, viewRect.width);
             Widgets.Label(new Rect(0f, 0f, viewRect.width, lastHeight), text);
             Widgets.EndScrollView();
+
+            DrawChat(mind, new Rect(inner.x, inner.yMax - ChatHeight, inner.width, ChatHeight));
+        }
+
+        private void DrawChat(PawnMind mind, Rect rect)
+        {
+            Widgets.DrawLineHorizontal(rect.x, rect.y, rect.width);
+            string name = mind.pawn.LabelShort;
+            Widgets.Label(new Rect(rect.x, rect.y + 4f, rect.width, 24f),
+                "AIPawnControl_TabChat".Translate(name).CapitalizeFirst().Colorize(ColoredText.TipSectionTitleColor));
+
+            string you = "AIPawnControl_ChatYou".Translate();
+            var lines = mind.chat.Skip(Mathf.Max(0, mind.chat.Count - ShownChatLines)).Select(l =>
+                l.from == ChatLine.From.Player ? you + ": " + l.text
+                : l.from == ChatLine.From.Mind ? name + ": " + l.text
+                : l.text.Colorize(ColoredText.SubtleGrayColor)).ToList();
+            if (mind.ChatThinking)
+                lines.Add("AIPawnControl_ChatThinking".Translate(name).Colorize(ColoredText.SubtleGrayColor));
+            else if (mind.ChatWaitingForWake)
+                lines.Add("AIPawnControl_ChatWaiting".Translate(name).Colorize(ColoredText.SubtleGrayColor));
+
+            Rect outRect = new Rect(rect.x, rect.y + 28f, rect.width, rect.height - 28f - InputHeight - 6f);
+            Widgets.DrawMenuSection(outRect);
+            outRect = outRect.ContractedBy(4f);
+            string text = string.Join("\n", lines);
+            float width = outRect.width - 16f;
+            Rect viewRect = new Rect(0f, 0f, width, Text.CalcHeight(text, width));
+            if (lines.Count != lastChatCount)
+            {
+                lastChatCount = lines.Count;
+                chatScroll.y = float.MaxValue; // follow new messages
+            }
+            Widgets.BeginScrollView(outRect, ref chatScroll, viewRect);
+            Widgets.Label(viewRect, text);
+            Widgets.EndScrollView();
+
+            Rect inputRect = new Rect(rect.x, rect.yMax - InputHeight, rect.width - 90f, InputHeight);
+            bool enter = Event.current.type == EventType.KeyDown && GUI.GetNameOfFocusedControl() == InputControl
+                         && (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter);
+            if (enter)
+                Event.current.Use();
+            GUI.SetNextControlName(InputControl);
+            input = Widgets.TextField(inputRect, input, 300);
+            bool send = Widgets.ButtonText(new Rect(inputRect.xMax + 6f, inputRect.y, 84f, InputHeight), "AIPawnControl_ChatSend".Translate());
+            if ((send || enter) && !string.IsNullOrWhiteSpace(input))
+            {
+                string message = input.Trim();
+                input = "";
+                MainThread.Post(() => mind.PlayerSays(message)); // game changes (waking her) happen in the pump, never in OnGUI
+            }
         }
 
         private static string Status(PawnMind mind)

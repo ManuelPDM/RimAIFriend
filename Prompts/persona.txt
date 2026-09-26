@@ -5,3 +5,5 @@ Ground it in the facts below. Don't invent family, places, events, implants or p
 {identity}
 
 Player's note about this character (follow it if present): {note}
+
+Also write "say": the first thing this colonist mutters to themselves right now, as they take stock of their life in the colony. One short sentence in their voice, under 100 characters, no narration or *actions*.
