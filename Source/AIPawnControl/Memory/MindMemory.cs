@@ -151,14 +151,16 @@ namespace AIPawnControl
         /// [Today so far]: the day's most important events, oldest first, as "14:05 text". Her own decisions and chat
         /// turns are left out: [Recent] and the chat history already show them.
         /// </summary>
-        public string TodaySoFar(Pawn pawn, int max)
+        /// <summary>Today's most important events. Decisions are left out ([Recent] has them); chat only for the Chat call,
+        /// which already shows the conversation, so every other call hears what the player said today.</summary>
+        public string TodaySoFar(Pawn pawn, int max, bool withChat)
         {
             Map map = pawn.Map;
             if (map == null)
                 return null;
             int dayStart = Find.TickManager.TicksGame - GenLocalDate.DayTick(map);
             var top = events
-                .Where(e => e.lastTick >= dayStart && e.kind != "decision" && e.kind != "chat")
+                .Where(e => e.lastTick >= dayStart && e.kind != "decision" && (withChat || e.kind != "chat"))
                 .OrderByDescending(e => e.importance).ThenByDescending(e => e.lastTick)
                 .Take(max)
                 .OrderBy(e => e.tick)

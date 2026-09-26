@@ -15,6 +15,8 @@ namespace AIPawnControl
         private const int MaxSkills = 8;
         private const int MaxPeople = 6;
         private const int MaxAlerts = 6;
+        private const int MaxRooms = 12;
+        private const int MaxRoomItems = 4;
 
         public static string Identity(Pawn pawn)
         {
@@ -67,7 +69,7 @@ namespace AIPawnControl
                 ["People nearby"] = People(pawn),
                 ["Colony"] = Colony(map),
                 ["Colony stores"] = Stores(map),
-                ["Rooms"] = Rooms(map),
+                ["Rooms"] = Rooms(pawn),
                 ["Recent"] = mind.decisions.Count > 0 ? string.Join(" · ", mind.decisions.Skip(Math.Max(0, mind.decisions.Count - 5))) : null,
             };
         }
@@ -210,14 +212,85 @@ namespace AIPawnControl
         }
 
         /// <summary>The kinds of rooms the colony has, e.g. "bedroom ×2, kitchen", or that it has none yet.</summary>
-        private static string Rooms(Map map)
+        /// <summary>
+        /// Every indoor room on the map, read fresh each call so it never goes stale (PHASE4.md §7): the room she's in in
+        /// detail, then one short phrase per other room with its notable furniture. Her own and her built rooms first.
+        /// </summary>
+        private static string Rooms(Pawn pawn)
         {
-            var roles = map.regionGrid.AllRooms
-                .Where(r => !r.PsychologicallyOutdoors && !r.Fogged && r.Role != null && r.Role != RoomRoleDefOf.None)
-                .GroupBy(r => r.GetRoomRoleLabel())
-                .Select(g => g.Count() > 1 ? $"{g.Key} ×{g.Count()}" : g.Key)
+            Map map = pawn.Map;
+            Room here = pawn.GetRoom();
+            if (here != null && (here.PsychologicallyOutdoors || here.Fogged || here.IsDoorway || here.Role == null || here.Role == RoomRoleDefOf.None))
+                here = null; // a door cell is a one-cell "room" of its own
+            var built = new HashSet<Room>(BuildManager.Instance?.ProjectsOf(pawn)
+                .Where(p => p.state == BuildProject.State.Done && p.map == map)
+                .Select(p => p.Room).Where(r => r != null) ?? Enumerable.Empty<Room>());
+            var rooms = map.regionGrid.AllRooms
+                .Where(r => r != here && !r.PsychologicallyOutdoors && !r.Fogged && r.Role != null && r.Role != RoomRoleDefOf.None)
+                .OrderByDescending(r => r.Owners.Contains(pawn))
+                .ThenByDescending(r => built.Contains(r))
                 .ToList();
-            return roles.Count > 0 ? string.Join(", ", roles) : "no proper rooms yet";
+
+            var parts = new List<string>();
+            int empty = 0;
+            foreach (var room in rooms)
+            {
+                var items = Furniture(room);
+                if (items.Count == 0)
+                    empty++;
+                else
+                    parts.Add($"{RoomName(room, pawn)} ({BuildManager.Impressiveness(room)}): {ItemList(items, MaxRoomItems)}");
+            }
+            if (parts.Count > MaxRooms)
+                parts = parts.Take(MaxRooms).Append($"{parts.Count - MaxRooms} more rooms").ToList();
+            if (empty > 0)
+                parts.Add(empty == 1 ? "an empty room" : $"{empty} empty rooms");
+
+            string others = parts.Count > 0 ? string.Join(" · ", parts) : null;
+            if (here == null)
+                return others ?? "no proper rooms yet";
+            var hereItems = Furniture(here);
+            string name = RoomName(here, pawn);
+            string detail = $"I'm in {(here.Owners.Any() ? name : "the " + name)}: {RoomFeel(here, pawn)}. " +
+                            (hereItems.Count > 0 ? $"Has: {ItemList(hereItems, int.MaxValue)}." : "Nothing in it.");
+            return others != null ? $"{detail} Other rooms: {others}" : detail;
+        }
+
+        /// <summary>"my bedroom" for hers, vanilla's label otherwise ("Mo's bedroom", "kitchen").</summary>
+        private static string RoomName(Room room, Pawn pawn) =>
+            room.Owners.Contains(pawn) ? "my " + room.Role.label : room.GetRoomRoleLabel();
+
+        /// <summary>Notable furniture inside the room: no walls, doors, floors, conduits or lights.</summary>
+        private static List<Thing> Furniture(Room room) =>
+            room.ContainedAndAdjacentThings
+                .Where(t => t.def.category == ThingCategory.Building && room.ContainsCell(t.Position)
+                            && t.def.designationCategory != null && !HiddenCategories.Contains(t.def.designationCategory.defName)
+                            && !t.def.HasComp(typeof(CompGlower)))
+                .Distinct()
+                .ToList();
+
+        private static readonly HashSet<string> HiddenCategories = new HashSet<string> { "Structure", "Floors", "Power", "Security" };
+
+        /// <summary>"bed, 3 stools, end table": same items grouped, the most valuable first, then "and N more".</summary>
+        private static string ItemList(List<Thing> items, int max)
+        {
+            var groups = items.GroupBy(t => t.def)
+                .OrderByDescending(g => g.Max(t => t.MarketValue))
+                .Select(g => g.Count() > 1 ? $"{g.Count()} {Find.ActiveLanguageWorker.Pluralize(g.Key.label, g.Count())}" : g.Key.label)
+                .ToList();
+            return groups.Count > max ? string.Join(", ", groups.Take(max)) + $" and {groups.Count - max} more" : string.Join(", ", groups);
+        }
+
+        /// <summary>How the room feels, in vanilla's own stat words: "5×5, awful, cramped, ugly, clean, dark".</summary>
+        private static string RoomFeel(Room room, Pawn pawn)
+        {
+            CellRect extents = room.ExtentsClose;
+            var words = new List<string> { extents.Area == room.CellCount ? $"{extents.Width}×{extents.Height}" : $"{room.CellCount} cells" };
+            foreach (var stat in new[] { RoomStatDefOf.Impressiveness, RoomStatDefOf.Space, RoomStatDefOf.Beauty, RoomStatDefOf.Cleanliness })
+                words.Add(stat.GetScoreStage(room.GetStat(stat)).label);
+            if (pawn.Map.glowGrid.PsychGlowAt(pawn.Position) == PsychGlow.Dark)
+                words.Add("dark");
+            return string.Join(", ", words.Where(w => !string.IsNullOrEmpty(w)));
         }
 
         private static string Alerts()

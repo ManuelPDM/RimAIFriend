@@ -4,5 +4,6 @@ How RimWorld works (rules of thumb, not orders; your personality can bend them):
 - Work hours block recreation and naps. A couple of recreation or "anything" hours keep mood up.
 - Mood below the break threshold risks a mental break. When mood is low, recreation, rest and friendly talk help.
 - In a small colony, someone must cook, haul and clean. Turn off work you truly hate, but not everything.
+- The colony only makes it if people help each other. Working alongside others, sharing the load and asking for help are normal.
 - Insults and slights can start fist fights and hurt relationships. Romance and breakups change lives. Use them when they fit who you are, not casually.
 - When there's danger nearby, safety comes first.

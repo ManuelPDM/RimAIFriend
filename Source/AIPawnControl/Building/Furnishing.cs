@@ -37,16 +37,17 @@ namespace AIPawnControl
             var manager = BuildManager.Instance;
             if (manager == null || manager.CantPlanReason(pawn) != null)
                 return result;
+            // Ranked across all her rooms, so the first room doesn't take both slots.
+            var ranked = new List<(BuildProject project, Room room, ThingDef def, ThingDef stuff, float value, float price)>();
             foreach (var project in manager.ProjectsOf(pawn).Where(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == pawn.Map).ToList())
             {
                 Room room = project.Room;
                 if (room == null || !room.ProperRoom || room.PsychologicallyOutdoors)
                     continue;
                 var present = new HashSet<ThingDef>(room.ContainedAndAdjacentThings.Select(t => t is Blueprint || t is Frame ? t.def.entityDefToBuild as ThingDef : t.def));
-                var ranked = new List<(ThingDef def, ThingDef stuff, float value)>();
                 foreach (var def in Candidates)
                 {
-                    if (present.Contains(def) || !RoomKindDef.Buildable(def))
+                    if (present.Contains(def) || present.Any(p => SameKind(p, def)) || !RoomKindDef.Buildable(def))
                         continue;
                     ThingDef stuff = RoomPlan.StuffFor(def, project.material);
                     var cost = def.CostListAdjusted(stuff);
@@ -55,22 +56,34 @@ namespace AIPawnControl
                     if (project.kindDef?.role != null && !KeepsRole(room, def))
                         continue;
                     float beauty = def.GetStatValueAbstract(StatDefOf.Beauty, stuff);
-                    ranked.Add((def, stuff, beauty / (1 + cost.Sum(c => c.count))));
-                }
-                foreach (var (def, stuff, _) in ranked.OrderByDescending(r => r.value))
-                {
-                    if (result.Count >= MaxOptions)
-                        return result;
-                    var entry = Slot(project, room, def);
-                    if (entry == null)
-                        continue;
-                    entry.stuff = stuff;
-                    string where = project.kindDef != null && project.kindDef.owned ? $"my {project.Kind}" : $"the {project.Kind} I built";
-                    string cost = string.Join(", ", def.CostListAdjusted(stuff).Select(c => $"{c.count} {c.thingDef.label}"));
-                    result.Add(new Option { room = project, entry = entry, label = $"add to {where}: {def.label} ({cost})" });
+                    // Ties (most furniture has beauty 0) go to the pricier item: wealth raises impressiveness too.
+                    ranked.Add((project, room, def, stuff, beauty / (1 + cost.Sum(c => c.count)), def.GetStatValueAbstract(StatDefOf.MarketValue, stuff)));
                 }
             }
+            foreach (var r in ranked.OrderByDescending(r => r.value).ThenByDescending(r => r.price))
+            {
+                if (result.Count >= MaxOptions)
+                    break;
+                if (result.Any(o => o.room == r.project && SameKind(o.entry.def, r.def)))
+                    continue;
+                var entry = Slot(r.project, r.room, r.def);
+                if (entry == null)
+                    continue;
+                entry.stuff = r.stuff;
+                string where = r.project.kindDef != null && r.project.kindDef.owned ? $"my {r.project.Kind}" : $"the {r.project.Kind} I built";
+                string cost = string.Join(", ", r.def.CostListAdjusted(r.stuff).Select(c => $"{c.count} {c.thingDef.label}"));
+                result.Add(new Option { room = r.project, entry = entry, label = $"add to {where}: {r.def.label} ({cost})" });
+            }
             return result;
+        }
+
+        /// <summary>Variants of one item (outfit stand / kid outfit stand): one's special building class is, or derives
+        /// from, the other's. Plain buildings share the base class, so they never count as the same kind.</summary>
+        private static bool SameKind(ThingDef a, ThingDef b)
+        {
+            if (a == null || b == null || a.thingClass == typeof(Building) || b.thingClass == typeof(Building))
+                return false;
+            return a.thingClass.IsAssignableFrom(b.thingClass) || b.thingClass.IsAssignableFrom(a.thingClass);
         }
 
         /// <summary>Vanilla's role workers: the room's winning role stays the same with the item in it.</summary>
@@ -144,8 +157,8 @@ namespace AIPawnControl
                 byMind = true,
                 furnishing = true,
             });
-            ModLog.Message($"{pawn.LabelShort} is adding a {e.def.label} {where} at ({e.cell.x},{e.cell.z}) rot {e.rot}; impressiveness now {room.Room?.GetStat(RoomStatDefOf.Impressiveness):0.0}.");
-            return $"Planned to add a {e.def.label} {where}.";
+            ModLog.Message($"{pawn.LabelShort} is adding {where}: {e.def.label} at ({e.cell.x},{e.cell.z}) rot {e.rot}; impressiveness now {room.Room?.GetStat(RoomStatDefOf.Impressiveness):0.0}.");
+            return $"Planned to add {where}: {e.def.label}.";
         }
     }
 }

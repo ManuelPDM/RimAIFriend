@@ -103,6 +103,22 @@ namespace AIPawnControl
         [DebugAction("AI Pawn Control", "Build test colony", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         public static void BuildTestColonyAction() => TestColony.Build(Find.CurrentMap);
 
+        /// <summary>"Place site A now" for the selected pawn, one child per kind, so RimBridge can pick a kind by path
+        /// (it can't click a float menu).</summary>
+        [DebugAction("AI Pawn Control", "Place site A now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static List<DebugActionNode> PlaceBestAction()
+        {
+            return DefDatabase<RoomKindDef>.AllDefsListForReading
+                .Select(kind => new DebugActionNode(kind.LabelCap, DebugActionType.Action, () =>
+                {
+                    if (Find.Selector.SingleSelectedThing is Pawn pawn && BuildManager.Instance.ActiveProject(pawn) == null)
+                        PlaceBest(pawn, kind);
+                    else
+                        Messages.Message("Select one colonist with no active project.", MessageTypeDefOf.RejectInput, false);
+                }))
+                .ToList();
+        }
+
         /// <summary>Site options + stress test + heatmap, written to one report file (and a short log line).</summary>
         public static void RunChecks(Map map)
         {

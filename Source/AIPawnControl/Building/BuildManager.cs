@@ -104,7 +104,7 @@ namespace AIPawnControl
                 ModLog.Message($"{pawn.LabelShort}'s {(furnishing ? entries[0].def.label + " " + where : Kind)} is done: {room.Role.label}, {room.CellCount} cells, impressiveness {room.GetStat(RoomStatDefOf.Impressiveness):0.0} ({BuildManager.Impressiveness(room)}).");
                 Messages.Message($"{pawn.LabelShort}'s new {Kind} is finished.", pawn, MessageTypeDefOf.PositiveEvent, false);
                 if (furnishing)
-                    Remember($"I added a {entries[0].def.label} {where}.", 4);
+                    Remember($"Added {where}: {entries[0].def.label}.", 4);
                 else
                     Remember($"The {Kind} I designed is finished ({SizeLabel}, {material?.label}) {where}.", 6);
             }
@@ -245,8 +245,10 @@ namespace AIPawnControl
     public class BuildManager : GameComponent
     {
         private const int CheckInterval = 250;
-        /// <summary>No new project this long after one is placed, and no new try this long after a scan found nothing (§5, §8).</summary>
-        public const int CooldownTicks = 2 * GenDate.TicksPerDay;
+        /// <summary>No new project this long after one is placed (§8); one active project at a time still applies.</summary>
+        public const int CooldownTicks = 2 * GenDate.TicksPerHour;
+        /// <summary>No new try this long after a scan found nothing (§5): the map needs time to change.</summary>
+        public const int EmptyScanRetryTicks = 2 * GenDate.TicksPerDay;
 
         private List<BuildProject> projects = new List<BuildProject>();
         private Dictionary<Pawn, int> emptyScans = new Dictionary<Pawn, int>();
@@ -289,8 +291,8 @@ namespace AIPawnControl
             if (ActiveProject(pawn) != null)
                 return "a project is already running";
             if (now - LastPlacedTick(pawn) < CooldownTicks)
-                return "a project was placed less than 2 days ago";
-            if (emptyScans.TryGetValue(pawn, out int empty) && now - empty < CooldownTicks)
+                return "a project was placed less than 2 hours ago";
+            if (emptyScans.TryGetValue(pawn, out int empty) && now - empty < EmptyScanRetryTicks)
                 return "no site was found less than 2 days ago";
             if (!RoomKindDef.Plain.BuildableNow(pawn.Map))
                 return "walls or doors can't be built";

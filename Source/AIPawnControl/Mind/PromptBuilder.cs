@@ -66,7 +66,7 @@ namespace AIPawnControl
         public static List<KeyValuePair<string, string>> Build(string call, PawnMind mind, Dictionary<string, string> task, Dictionary<string, string> recalled = null)
         {
             var texts = SnapshotBuilder.Sections(mind.pawn, mind);
-            texts["Today so far"] = mind.memory.TodaySoFar(mind.pawn, call == "act" ? 3 : 5);
+            texts["Today so far"] = mind.memory.TodaySoFar(mind.pawn, call == "act" ? 3 : 5, withChat: call != "chat");
             if (recalled != null)
                 foreach (var pair in recalled)
                     texts[pair.Key] = pair.Value;
