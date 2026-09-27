@@ -17,6 +17,8 @@ namespace AIPawnControl
         public static IEnumerable<ChoreOption> StockOptions(ChoreScan scan)
         {
             Map map = scan.map;
+            if (map.resourceCounter.GetCountIn(ThingCategoryDefOf.StoneBlocks) >= ChoreOptions.StockCap)
+                yield break;
             foreach (var table in map.listerBuildings.allBuildingsColonist.Where(b => b is IBillGiver giver && giver.BillStack != null))
             {
                 var recipe = table.def.AllRecipes.FirstOrDefault(r => GoalOf(r) == Goal.Blocks);
@@ -105,6 +107,22 @@ namespace AIPawnControl
                     return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// Raises a mind's "until N" order so it covers more (a second room waiting on the same blocks). The player's
+        /// orders stay as they are; one that already covers it, or runs forever, needs nothing. Null when nothing changed.
+        /// </summary>
+        public static string Raise(Bill_Production bill, int target)
+        {
+            string table = (bill.billStack.billGiver as Thing)?.def.label ?? "table";
+            if (ChoreManager.Instance?.OwnerOf(bill) == null)
+                return $"There's already an order at the {table}: {bill.recipe.label}.";
+            if (bill.repeatMode != BillRepeatModeDefOf.TargetCount || bill.targetCount >= target)
+                return null;
+            bill.targetCount = target;
+            ModLog.Message($"Raised the order at the {table}: {bill.recipe.label}, until there are {target}.");
+            return $"Raised the order at the {table}: {bill.recipe.label}, until there are {target}.";
         }
 
         /// <summary>Re-validates, then adds the bill (count = "until N", repeat = "×N", neither = forever) and records it as her chore.</summary>

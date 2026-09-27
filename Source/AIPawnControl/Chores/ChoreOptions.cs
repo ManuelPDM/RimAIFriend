@@ -127,6 +127,9 @@ namespace AIPawnControl
             return growth * health >= MinYieldShare;
         }
 
+        /// <summary>Stock-ups stop once storage holds this much of a material (wood, steel, stone blocks): the user's cap.</summary>
+        public const int StockCap = 1000;
+
         /// <summary>Food shortage as a usefulness bonus: 2 when under 4 days, 1 under 8 or unknown.</summary>
         public static float FoodNeed(ChoreScan scan) => scan.foodDays < 0f ? 1f : scan.foodDays < 4f ? 2f : scan.foodDays < 8f ? 1f : 0f;
 

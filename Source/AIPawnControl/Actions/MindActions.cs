@@ -79,57 +79,26 @@ namespace AIPawnControl
             return $"Set my work by my passions ({changed} changed): {ActionCatalog.DescribePriorities(pawn)}.";
         }
 
-        public static readonly string[] Feelings = { "love", "dislike", "refuse", "raise", "lower" };
-
-        /// <summary>How she feels about the work (shown in [Me]); raise and lower are one step for the colony's need (FURNISHING.md §6).</summary>
-        public static bool IsFeeling(string change) => change == "love" || change == "dislike" || change == "refuse";
+        public static readonly string[] Priorities = { "1", "2", "3", "4", "off" };
 
         /// <summary>
-        /// Reflect's one work change: love → first (1, or on), dislike → last (4), refuse → off. A refusal is ignored when
-        /// nobody else here could do that work. Returns the result line, or why it didn't change.
+        /// Reflect's one work change (FURNISHING.md §6): set one kind of work straight to 1-4 or off, for what the colony
+        /// needs or how she feels about it. The value it already has is a no-op, not an error. Returns the result line.
         /// </summary>
-        public static string ApplyWorkFeeling(Pawn pawn, WorkTypeDef work, string feeling)
+        public static string ChangePriority(Pawn pawn, WorkTypeDef work, string priority)
         {
             if (pawn.WorkTypeIsDisabled(work) || ActionCatalog.ProtectedWorkTypes.Contains(work.defName))
                 return $"I can't change how I do {work.labelShort}.";
-            bool manual = ActionCatalog.ManualPriorities;
-            switch (feeling)
-            {
-                case "love":
-                    pawn.workSettings.SetPriority(work, 1);
-                    return $"I'll put {work.labelShort} first.";
-                case "dislike":
-                    if (!manual)
-                        return $"I'll keep doing {work.labelShort}, grudgingly.";
-                    pawn.workSettings.SetPriority(work, 4);
-                    return $"I'll do {work.labelShort} last.";
-                case "refuse":
-                    bool others = pawn.Map != null && pawn.Map.mapPawns.FreeColonistsSpawned
-                        .Any(p => p != pawn && p.workSettings != null && !p.WorkTypeIsDisabled(work) && p.workSettings.GetPriority(work) > 0);
-                    if (!others)
-                        return $"I'd rather not do {work.labelShort}, but nobody else can, so I'll keep at it.";
-                    pawn.workSettings.SetPriority(work, 0);
-                    return $"I won't do {work.labelShort} anymore.";
-                case "raise":
-                {
-                    int p = pawn.workSettings.GetPriority(work);
-                    int to = !manual ? 3 : p == 0 ? 4 : Math.Max(1, p - 1);
-                    if (to == p || (!manual && p > 0))
-                        return $"I already do {work.labelShort} as much as I can.";
-                    pawn.workSettings.SetPriority(work, to);
-                    return p == 0 ? $"I'll take on {work.labelShort}." : $"I'll do more {work.labelShort}.";
-                }
-                case "lower":
-                {
-                    int p = pawn.workSettings.GetPriority(work);
-                    if (!manual || p == 0 || p == 4)
-                        return $"I'll keep {work.labelShort} where it is.";
-                    pawn.workSettings.SetPriority(work, p + 1);
-                    return $"I'll do less {work.labelShort}.";
-                }
-                default:
-                    return null;
-            }
+            int p = pawn.workSettings.GetPriority(work);
+            int to = priority == "off" ? 0 : int.Parse(priority);
+            if (!ActionCatalog.ManualPriorities && to > 0)
+                to = 3; // without manual priorities work is only on (3) or off
+            if ((to > 0) == (p > 0) && (to == p || !ActionCatalog.ManualPriorities))
+                return $"I'll keep {work.labelShort} where it is.";
+            pawn.workSettings.SetPriority(work, to);
+            return to == 0 ? $"I'll stop doing {work.labelShort}."
+                : p == 0 ? $"I'll take on {work.labelShort} ({to})."
+                : to < p ? $"I'll do more {work.labelShort} ({to})." : $"I'll do less {work.labelShort} ({to}).";
         }
     }
 }

@@ -118,7 +118,7 @@ namespace AIPawnControl
                 });
 
             if (BaseCall.AnythingToDo(pawn))
-                options.Add(new ActOption { Id = options.Count + 1, Label = BaseCall.MenuLabel(pawn.Map), Apply = _ => BaseCall.Start(mind), OwnRemark = true });
+                options.Add(new ActOption { Id = options.Count + 1, Label = BaseCall.MenuLabel(pawn), Apply = _ => BaseCall.Start(mind), OwnRemark = true });
 
             return options;
         }

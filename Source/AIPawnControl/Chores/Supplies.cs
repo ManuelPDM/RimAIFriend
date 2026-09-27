@@ -39,7 +39,7 @@ namespace AIPawnControl
                     if (kv.Key == ThingDefOf.WoodLog)
                         results.Add(Wood(pawn, scan, need));
                     else if (kv.Key.IsWithinCategory(ThingCategoryDefOf.StoneBlocks))
-                        results.Add(Blocks(pawn, map, need));
+                        results.Add(Blocks(pawn, map, kv.Key, need));
                     else
                         results.Add(Ore(pawn, scan, kv.Key, need));
                 }
@@ -113,27 +113,37 @@ namespace AIPawnControl
         /// <summary>Walls are wood or stone blocks: steel is for stoves, weapons and components.</summary>
         public static bool IsWallMaterial(ThingDef stuff) => stuff == ThingDefOf.WoodLog || stuff.IsWithinCategory(ThingCategoryDefOf.StoneBlocks);
 
-        /// <summary>A stonecutter's table exists, or can be built (Stonecutting researched).</summary>
+        /// <summary>A stonecutter's table is built (a room can't wait on blocks nothing can cut yet).</summary>
         public static bool CanCutStone(Map map) =>
-            map.listerBuildings.allBuildingsColonist.Any(b => b.def.AllRecipes.Any(r => WorkOrders.GoalOf(r) == WorkOrders.Goal.Blocks))
-            || DefDatabase<ThingDef>.GetNamedSilentFail("TableStonecutter") is ThingDef table && RoomKindDef.Buildable(table);
+            map.listerBuildings.allBuildingsColonist.Any(b => b.def.AllRecipes.Any(r => WorkOrders.GoalOf(r) == WorkOrders.Goal.Blocks));
 
         /// <summary>"steel 480 in storage (~600 more to mine nearby), wood 31 (~40 more from trees nearby)".</summary>
         public static string WallMaterialsLine(List<(ThingDef stuff, int stock, int nearby)> materials) =>
             string.Join(", ", materials.Select(m => $"{m.stuff.label} {m.stock} in storage" +
                 (m.nearby > 0 ? $" (~{m.nearby} more {(m.stuff == ThingDefOf.WoodLog ? "from trees" : "from rock chunks, cut at a stonecutter's table")} nearby)" : " (no more nearby)")));
 
-        private static string Blocks(Pawn pawn, Map map, int need)
+        /// <summary>
+        /// An order for this stone's own blocks (granite blocks for a granite room), until storage has what's short. An
+        /// order for them already there is raised if a mind placed it; the player's is left as it is.
+        /// </summary>
+        private static string Blocks(Pawn pawn, Map map, ThingDef blocks, int need)
         {
+            int target = map.resourceCounter.GetCount(blocks) + need; // need is already beyond storage
+            var existing = WorkOrders.Bills(map).FirstOrDefault(b => b.recipe.ProducedThingDef == blocks);
+            if (existing != null)
+                return WorkOrders.Raise(existing, target);
+            string why = null;
             foreach (var table in map.listerBuildings.allBuildingsColonist.Where(b => b is IBillGiver giver && giver.BillStack != null))
             {
-                var recipe = table.def.AllRecipes.FirstOrDefault(r => WorkOrders.GoalOf(r) == WorkOrders.Goal.Blocks);
-                if (recipe == null || WorkOrders.Check(table, recipe, ingredients: false) != null)
+                var recipe = table.def.AllRecipes.FirstOrDefault(r => r.ProducedThingDef == blocks);
+                if (recipe == null)
                     continue;
-                int target = map.resourceCounter.GetCountIn(ThingCategoryDefOf.StoneBlocks) + need; // need is already beyond storage
-                return WorkOrders.AddBill(pawn, table, recipe, target, 0, $"until there are {target}", ingredients: false);
+                why = WorkOrders.Check(table, recipe, ingredients: false);
+                if (why == null)
+                    return WorkOrders.AddBill(pawn, table, recipe, target, 0, $"until there are {target}", ingredients: false);
+                why = $"couldn't order them at the {table.def.label}: {why}";
             }
-            return $"About {need} stone blocks short: there's no stonecutter's table to cut them.";
+            return $"About {need} {blocks.label} short: {why ?? "there's no stonecutter's table to cut them"}.";
         }
     }
 }

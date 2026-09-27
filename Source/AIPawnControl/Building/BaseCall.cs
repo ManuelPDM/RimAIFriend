@@ -9,7 +9,7 @@ namespace AIPawnControl
 {
     /// <summary>
     /// The Base call (STREAMLINE.md §5): after she picks "work on the base", code lists what the base could get now, in
-    /// groups (the ladder's next rung, food, stock-ups, other rooms, rooms to upgrade), each with code's amounts and sizes. She
+    /// groups (the ladder's next rung, food, stock-ups, other rooms), each with code's amounts and sizes. She
     /// picks one, plus a site and a material for a room, and makes one remark; code applies it. The call is free: picking
     /// the menu line was the decision.
     /// </summary>
@@ -42,11 +42,32 @@ namespace AIPawnControl
             return pawn.Map.haulDestinationManager.AllGroupsListForReading.Count == 0 || FoodOutlook.For(pawn.Map).cellsWanted > 0 || ChoreOptions.All(pawn).Count > 0;
         }
 
-        /// <summary>"work on the base (next: a dining room)".</summary>
-        public static string MenuLabel(Map map)
+        /// <summary>"work on the base (next: a dining room)", or with her project running "work on the base (stock up; my barracks comes first)".</summary>
+        public static string MenuLabel(Pawn pawn)
         {
-            var rung = Ladder.Current(map);
+            if (BuildManager.Instance?.ActiveProject(pawn) is BuildProject project)
+                return $"work on the base (stock up; my {ProjectName(project)} comes first)";
+            var rung = Ladder.Current(pawn.Map);
             return rung != null ? $"work on the base (next: {rung.label})" : "work on the base (stock up, rooms, furniture)";
+        }
+
+        private static string ProjectName(BuildProject project) => project.furnishing ? project.ItemLabel : project.KindFor;
+
+        /// <summary>
+        /// Why she can't start the next rung herself: "after my barracks is finished (it's waiting on 15 wood)", or
+        /// "not yet: a project was placed less than 2 hours ago". Null when she can.
+        /// </summary>
+        private static string Blocker(Pawn pawn)
+        {
+            var manager = BuildManager.Instance;
+            if (manager?.ActiveProject(pawn) is BuildProject project)
+            {
+                var missing = project.Missing();
+                return $"after my {ProjectName(project)} is finished" +
+                       (missing.Count > 0 ? $" (it's waiting on {string.Join(", ", missing.Select(kv => $"{kv.Value} {kv.Key.label}"))})" : "");
+            }
+            string why = manager?.CantPlanReason(pawn);
+            return why != null ? $"not yet: {why}" : null;
         }
 
         /// <summary>Builds the choices and sends the call. Returns the result line for her decisions.</summary>
@@ -87,7 +108,7 @@ namespace AIPawnControl
             }
             if (sites.Count > 0)
             {
-                if (rung != null && rung.waiting == null && RoomChoice(rung.kind, SizeFor(rung.kind, map), "Next for the base", rung.label, finder, validator, sites, materials) is Choice next)
+                if (rung != null && rung.kind != null && rung.waiting == null && RoomChoice(rung.kind, SizeFor(rung.kind, map), "Next for the base", rung.label, finder, validator, sites, materials) is Choice next)
                     choices.Add(next);
                 foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => k != rung?.kind && OtherRoom(k, pawn)))
                     if (RoomChoice(kind, SizeFor(kind, map), "Other rooms", kind == RoomKindDef.Bedroom ? "my own bedroom" : null, finder, validator, sites, materials) is Choice other)
@@ -110,10 +131,16 @@ namespace AIPawnControl
                 && PileChoice(pawn) is Choice pile)
                 choices.Add(pile);
 
-            // One line per room with anything to add (FURNISHING.md §5); the Upgrade call offers the concrete upgrades.
-            if (canPlan)
-                choices.AddRange(Upgrades.Rooms(pawn).Where(r => Upgrades.For(r, pawn).Count > 0)
-                    .Select(r => new Choice { group = "Upgrade a room", label = Upgrades.RoomLine(r, pawn), upgrade = r }));
+            // Past the early base, the ladder's last rung is the room most worth upgrading (the only way upgrades are
+            // offered); the Upgrade call offers the concrete upgrades.
+            Room worst = rung != null && rung.rooms && canPlan
+                ? Upgrades.Worst(Upgrades.Rooms(pawn).Where(r => Upgrades.For(r, pawn).Count > 0), pawn) : null;
+            if (rung != null && rung.rooms)
+                rungText = worst == null && canPlan ? "Next for the base: nothing; every room has what it can get for now." : "Next for the base: better rooms.";
+            if (worst != null)
+                choices.Add(new Choice { group = "Next for the base", label = "upgrade " + Upgrades.RoomLine(worst, pawn), upgrade = worst });
+            if (!canPlan && rung != null && Blocker(pawn) is string blocker)
+                rungText = rungText.TrimEnd('.') + ", " + blocker + ".";
 
             if (choices.Count == 0)
             {
@@ -122,7 +149,7 @@ namespace AIPawnControl
                 return "There's nothing I can do for the base right now.";
             }
             // Numbered in group order, so the list reads as groups.
-            string[] order = { "Next for the base", "Food", "Storage", "Stock up", "Other rooms", "Upgrade a room" };
+            string[] order = { "Next for the base", "Food", "Storage", "Stock up", "Other rooms" };
             choices = choices.OrderBy(c => Array.IndexOf(order, c.group)).ToList();
             var lines = new List<string>();
             string lastGroup = null;
@@ -292,7 +319,7 @@ namespace AIPawnControl
                     result = Fields.Place(pawn, choice.field, choice.crop, choice.fieldWhere);
                 else if (choice.upgrade != null)
                 {
-                    RemarkAndLog(mind, Get("say"), UpgradeCall.Start(mind, choice.upgrade), $"base: upgrade {choice.label}");
+                    RemarkAndLog(mind, Get("say"), UpgradeCall.Start(mind, choice.upgrade), $"base: upgrade {Upgrades.RoomLine(choice.upgrade, mind.pawn)}");
                     return;
                 }
                 else if (choice.group == "Storage")

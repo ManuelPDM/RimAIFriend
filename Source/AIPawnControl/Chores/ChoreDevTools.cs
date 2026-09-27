@@ -34,7 +34,7 @@ namespace AIPawnControl
             var sb = new StringBuilder($"{pawn.LabelShort} stock-up options ({all.Count} found in {ms} ms, limits ignored):\n");
             foreach (var o in all)
                 sb.AppendLine($"  [{o.kind}] {o.useful:0.0} {o.label} | check: {o.check() ?? "ok"}");
-            sb.AppendLine($"The Act menu shows \"{BaseCall.MenuLabel(pawn.Map)}\" (limits applied): " + (BaseCall.AnythingToDo(pawn) ? "yes" : "no"));
+            sb.AppendLine($"The Act menu shows \"{BaseCall.MenuLabel(pawn)}\" (limits applied): " + (BaseCall.AnythingToDo(pawn) ? "yes" : "no"));
             foreach (Chore.Kind kind in System.Enum.GetValues(typeof(Chore.Kind)))
                 sb.AppendLine($"  {kind}: {ChoreManager.Instance?.CantReason(pawn, kind) ?? "may start"}");
             sb.Append("[Colony work] " + ColonyWork.Line(pawn));

@@ -53,13 +53,12 @@ namespace AIPawnControl
             var needs = pawn.needs?.AllNeeds
                 .Where(n => n.ShowOnNeedList && !(n is Need_Mood) && n.CurLevelPercentage < LowNeed)
                 .Select(n => $"{n.LabelCap} low").ToList();
-            string goodAt = GoodAt(pawn);
+            string skills = Skills(pawn);
             return new Dictionary<string, string>
             {
                 ["Me"] = $"{pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
                          $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.{ideo}" +
-                         (goodAt != null ? $" Good at: {goodAt}." : "") +
-                         (mind.WorkFeelingsText() is string work ? " " + work : "") +
+                         (skills != null ? $" Skills: {skills}." : "") +
                          (BuildManager.Instance?.RoomsPhrase(pawn) is string rooms && rooms.Length > 0 ? " " + rooms : ""),
                 ["Time"] = $"{TimeString(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
                            $"I'm in: {RoomLabel(pawn)}.",
@@ -172,14 +171,6 @@ namespace AIPawnControl
             if (mood < minor + 0.1f) return "shaky (a little above breaking)";
             if (mood < 0.65f) return "okay";
             return mood < 0.85f ? "good" : "great";
-        }
-
-        /// <summary>"construction (burning passion), melee (interested)": her skills with a passion, best first.</summary>
-        private static string GoodAt(Pawn pawn)
-        {
-            var skills = pawn.skills?.skills.Where(s => !s.TotallyDisabled && s.passion != Passion.None).OrderByDescending(s => s.Level)
-                .Select(s => $"{s.def.label} ({PassionLabel(s.passion)})").ToList();
-            return skills != null && skills.Count > 0 ? string.Join(", ", skills) : null;
         }
 
         private static string Feelings(Pawn pawn)
@@ -353,17 +344,23 @@ namespace AIPawnControl
 
         /// <summary>
         /// "wood 240, steel 75, 12 corpses, 9 apparel" (FURNISHING.md §3): what vanilla itself lists as needing hauling
-        /// (not in its best storage, not forbidden), in the home area. Resources by name with amounts, the rest one count
+        /// (not in its best storage, not forbidden), anywhere on the map: haulers fetch from anywhere, and wood from trees cut far
+        /// from the base lies outside the home area. Resources by name with amounts, the rest one count
         /// per top-level category. Null when nothing waits.
         /// </summary>
-        public static string WaitingToBeHauled(Map map)
+        public static string WaitingToBeHauled(Map map) => WaitingToBeHauled(map, out _);
+
+        /// <param name="count">How many things wait in all (stack counts), for [Work waiting]'s night-to-night change.</param>
+        public static string WaitingToBeHauled(Map map, out int count)
         {
+            count = 0;
             var named = new Dictionary<ThingDef, int>();
             var grouped = new Dictionary<ThingCategoryDef, int>();
             foreach (var t in map.listerHaulables.ThingsPotentiallyNeedingHauling())
             {
-                if (!t.Spawned || !map.areaManager.Home[t.Position])
+                if (!t.Spawned)
                     continue;
+                count += t.stackCount;
                 if (t.def.CountAsResource)
                 {
                     named.TryGetValue(t.def, out int n);

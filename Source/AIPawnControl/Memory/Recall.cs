@@ -82,7 +82,7 @@ namespace AIPawnControl
                 return recall;
             var memory = mind.memory;
             var names = present.Select(p => p.LabelShort).ToList();
-            recall.Sections["About"] = Retrieval.About(memory, names, 3, 110);
+            recall.Sections["About"] = Retrieval.About(mind, names, 3, 110);
             int now = Find.TickManager.TicksGame;
             if (now - memory.lastOnMindTick < Retrieval.OnMindGapTicks)
                 return recall;
@@ -103,7 +103,7 @@ namespace AIPawnControl
             if (!Enabled)
                 return recall;
             var memory = mind.memory;
-            recall.Sections["About"] = Retrieval.About(memory, new[] { speaker }, 1, 400);
+            recall.Sections["About"] = Retrieval.About(mind, new[] { speaker }, 1, 400);
             var picked = Retrieval.Pick(Retrieval.Rank(memory, query, tag, new List<string> { speaker }, null, new[] { speaker }), 3, Retrieval.MinRemember);
             if (picked.Count == 0)
                 return recall;
@@ -119,7 +119,7 @@ namespace AIPawnControl
             if (!Enabled)
                 return recall;
             var memory = mind.memory;
-            recall.Sections["About"] = Retrieval.About(memory, new[] { PersonFile.Player }.Concat(mentioned), 4, 400);
+            recall.Sections["About"] = Retrieval.About(mind, new[] { PersonFile.Player }.Concat(mentioned), 4, 400);
             var people = mentioned.Concat(new[] { PersonFile.Player }).ToList();
             var picked = Retrieval.Pick(Retrieval.Rank(memory, query, tag, people, null, new[] { PersonFile.Player }), 5, Retrieval.MinRemember);
             if (picked.Count == 0)
@@ -143,7 +143,7 @@ namespace AIPawnControl
                 .Where(n => n != PersonFile.Player && n != PersonFile.Colony);
             if (!string.IsNullOrEmpty(mind.memory.File(PersonFile.Player, create: false)?.threads))
                 names = new[] { PersonFile.Player }.Concat(names);
-            recall.Sections["About"] = Retrieval.About(mind.memory, names, 3, 110);
+            recall.Sections["About"] = Retrieval.About(mind, names, 3, 110);
             return recall;
         }
 

@@ -8,7 +8,7 @@ It's {time}. Time to look back on {period} before sleep.
 [People involved]
 {people}
 
-[Work waiting] (what's waiting, then everyone's priority: 1 first, 4 last, off)
+[Work waiting] (what's waiting, how much now and last night, then everyone's priority (1 first, 4 last, off), skill and passion)
 {workwaiting}
 
 [Memories that may be about the same things]
@@ -19,5 +19,5 @@ Look back, in your own voice (first person):
 - lately: rewrite "who I am lately" in light of {period}: how I've been, what's on my mind, how I get on with people. About me, not what the base needs ([Colony] shows that fresh). Under 600 characters. Drop what no longer fits; don't copy the old one word for word.
 - memories: only the few things (usually 0-5) worth remembering weeks from now; skip routine things. Each is one or two sentences in first person, under 200 characters, with an importance (1 = trivial, 10 = life-changing) and the E-numbers it comes from (in "events", not in the text). If one of the M memories above is about the very same event, use op "update" with its number and write the combined memory; a new event is a new memory, even if it's related. Otherwise use op "add" with id 0.
 - people: only people the day changed my view of. impression: how I see them now, under 240 characters. threads: open matters between us, or "". facts: lasting things I now believe (who they are, what they like; never what they're doing right now) that the game doesn't already show (not our relationship or my opinion; "now:" has those): op "add", id 0. Or a fact that stopped being true: op "end" with its F-number. Source: took_part or saw if I was there, news for colony news, told or player_said if someone only said so (a claim, not proof).
-- work: one change at most, with why in a few words. Its type (one of: {worktypes}), then either how I feel about it, if something in {period} really changed that (I got hurt doing it, I found out I love it): love, dislike or refuse; or raise or lower (one step) when the colony needs it: work waiting that nobody or too few do, or someone asked me to take it on. Otherwise type "none".
+- work: set one kind of work (one of: {worktypes}) to a priority: 1 (done first) to 4 (done last), or off, with why in a few words; otherwise type "none". Work comes in steps: building needs materials, materials need plant cut (trees) or mining, and hauling brings them in. When work is waiting on an earlier step (construct "waiting on wood"), putting it first doesn't help: give more time to the step it waits on (plant cut to 1), or less to the waiting work. Setting work to what it already is changes nothing. Mostly for what the colony needs: a pile in [Work waiting] that grew since last night isn't getting done. How I feel about the work can sway it (I got hurt doing it, I love it). If someone else is better at it, note in their threads to ask them to put it first.
 Use only what's listed above. Don't invent events or details. Call the player "the player" or "they".

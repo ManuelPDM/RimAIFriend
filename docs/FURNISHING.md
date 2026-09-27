@@ -27,7 +27,8 @@ the user's.
   storeroom kind keeps its shelves; a floor stockpile on the free cells is extra.
 - **`[Colony]` gets one "waiting to be hauled" line**, from vanilla's `map.listerHaulables.ThingsPotentiallyNeedingHauling()`
   (what vanilla itself thinks needs hauling: not already in its best storage, not forbidden, so a raid's dropped gear
-  stays out until someone unforbids it), on home-area cells only:
+  stays out until someone unforbids it), anywhere on the map (session 16: home-area-only hid the wood from trees cut
+  far from the base):
   - resources and food **by name with amounts**: `waiting to be hauled: wood 240, steel 75, rice 30`;
   - everything else **one count per vanilla top-level category**: `…, 12 corpses, 9 apparel, 4 weapons`;
   - left out when empty. Enough for a mind to say "someone should haul" or raise its own hauling (§6).

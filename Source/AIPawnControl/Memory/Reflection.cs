@@ -101,7 +101,7 @@ namespace AIPawnControl
                 })),
                 ["people"] = string.Join("\n", names.Select(Describe)),
                 ["worktypes"] = workTypes.Count > 0 ? string.Join(", ", workTypes.Select(w => w.labelShort)) : "(none)",
-                ["workwaiting"] = (map != null ? WorkWaiting.Lines(map) : null) ?? "(nothing waiting)",
+                ["workwaiting"] = (map != null ? WorkWaiting.Lines(map, mind.pawn) : null) ?? "(nothing waiting)",
                 ["memories"] = shown.Count > 0
                     ? string.Join("\n", shown.Select((m, i) => $"M{i + 1} day {GenDate.DaysPassedAt(m.tick) + 1} · importance {m.importance}: {m.text}"))
                     : "(none yet)",
@@ -112,13 +112,10 @@ namespace AIPawnControl
         {
             var file = Memory.File(name, create: false);
             var sb = new List<string>();
-            Pawn pawn = name == PersonFile.Player || name == PersonFile.Colony ? null
-                : mind.pawn.MapHeld?.mapPawns.FreeColonists.FirstOrDefault(p => p.LabelShort == name);
+            Pawn pawn = People.Find(name, mind.pawn.MapHeld);
             if (pawn != null)
-            {
-                string relation = mind.pawn.GetMostImportantRelation(pawn)?.GetGenderSpecificLabel(pawn) ?? "colonist";
-                sb.Add($"now: {relation}, my opinion {mind.pawn.relations.OpinionOf(pawn):+0;-0;0}");
-            }
+                sb.Add("now: " + People.Label(pawn, mind.pawn)
+                       + (pawn.RaceProps.Humanlike && !pawn.Dead ? $", my opinion {mind.pawn.relations.OpinionOf(pawn):+0;-0;0}" : ""));
             if (file == null)
                 sb.Add("no file yet");
             else
@@ -176,9 +173,9 @@ namespace AIPawnControl
             });
             var work = Obj(new Dictionary<string, object>
             {
+                ["why"] = Str(MaxWhy), // first, so the reasoning comes before the pick
                 ["type"] = Enum(new object[] { NoWork }.Concat(workTypes.Select(w => (object)w.labelShort))),
-                ["feeling"] = Enum(MindActions.Feelings.Cast<object>()),
-                ["why"] = Str(MaxWhy),
+                ["priority"] = Enum(MindActions.Priorities.Cast<object>()),
             });
             return Obj(new Dictionary<string, object>
             {
@@ -205,8 +202,7 @@ namespace AIPawnControl
         private readonly List<(string name, Dictionary<string, object> item)> personOps = new List<(string, Dictionary<string, object>)>();
         private string diary, newLately;
         private const string NoWork = "none";
-        private WorkTypeDef workType; // Reflect's one work change, or null
-        private string workFeeling, workWhy;
+        private (WorkTypeDef type, string change, string why) workChange;
         private int dropped, skipped;
 
         private static readonly Regex NumberList = new Regex(@"\s*\([EMFG]\d+(\s*,\s*[EMFG]\d+)*\)|\s+[EMFG]\d+(\s*,\s*[EMFG]\d+)*\s*$");
@@ -257,13 +253,7 @@ namespace AIPawnControl
             foreach (var p in List(reply, "people"))
                 if (p.TryGetValue("name", out object n) && n is string name && names.Contains(name))
                     personOps.Add((name, p));
-            if (reply.TryGetValue("work", out object wk) && wk is Dictionary<string, object> work)
-            {
-                string label = work.TryGetValue("type", out object t) ? t as string : null;
-                workType = workTypes.FirstOrDefault(w => w.labelShort == label);
-                workFeeling = work.TryGetValue("feeling", out object f) ? f as string : null;
-                workWhy = Clean(work.TryGetValue("why", out object y) ? y : null, MaxWhy);
-            }
+            workChange = WorkChange(reply);
         }
 
         /// <summary>Texts to embed after the call: the drafts, the diary, then older memories without a current vector.</summary>
@@ -362,15 +352,25 @@ namespace AIPawnControl
             foreach (var (name, item) in personOps)
                 ApplyPerson(Memory.File(name, create: true), item, now);
 
-            if (workType != null && MindActions.Feelings.Contains(workFeeling))
-                mind.SetWorkFeeling(workType, workFeeling, workWhy);
+            if (workChange.type != null)
+                mind.ChangeWork(workChange.type, workChange.change, workChange.why);
 
             Memory.MarkReflected(seenEventId, seenTick);
             int archived = Memory.Archive(now);
             if (!dev)
                 Memory.lastReflectNight = night;
             return $"{events.Count} events → {drafts.Count} new/updated memories ({merged} merged as saying the same thing, {skipped} skipped as already remembered, {dropped} dropped by the guards), " +
-                   $"{personOps.Count} person files ({factsMerged} repeated facts merged), work: {(workType != null ? workFeeling + " " + workType.labelShort : "no change")}, {archived} archived, vectors: {(haveVectors ? embedded.Tag : "none (" + (embedded?.Error ?? "skipped") + ")")}";
+                   $"{personOps.Count} person files ({factsMerged} repeated facts merged), work: {(workChange.type != null ? $"{workChange.type.labelShort} {workChange.change}" : "no change")}, {archived} archived, vectors: {(haveVectors ? embedded.Tag : "none (" + (embedded?.Error ?? "skipped") + ")")}";
+        }
+
+        private (WorkTypeDef, string, string) WorkChange(Dictionary<string, object> reply)
+        {
+            if (!(reply.TryGetValue("work", out object o) && o is Dictionary<string, object> item))
+                return (null, null, null);
+            string label = item.TryGetValue("type", out object t) ? t as string : null;
+            string change = item.TryGetValue("priority", out object c) ? c?.ToString() : null;
+            var type = workTypes.FirstOrDefault(w => w.labelShort == label);
+            return type != null && MindActions.Priorities.Contains(change) ? (type, change, Clean(item.TryGetValue("why", out object y) ? y : null, MaxWhy)) : (null, null, null);
         }
 
         private void ApplyPerson(PersonFile file, Dictionary<string, object> item, int now)

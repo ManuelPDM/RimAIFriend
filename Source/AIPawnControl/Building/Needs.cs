@@ -15,17 +15,18 @@ namespace AIPawnControl
         public const string Bed = "bed", Seat = "seat", Shelf = "shelf", Accessory = "accessory";
 
         /// <summary>The best def for the need, or null. Accessory needs the anchor it links to (a bed).</summary>
-        public static ThingDef Best(string need, Map map, ThingDef anchor = null) =>
-            Candidates(need, map, anchor).FirstOrDefault();
+        public static ThingDef Best(string need, Map map, ThingDef anchor = null, int count = 1) =>
+            Candidates(need, map, anchor, count).FirstOrDefault();
 
-        public static IEnumerable<ThingDef> Candidates(string need, Map map, ThingDef anchor = null) =>
+        /// <param name="count">How many the room places (a dining room's seats): its own material must cover them all.</param>
+        public static IEnumerable<ThingDef> Candidates(string need, Map map, ThingDef anchor = null, int count = 1) =>
             DefDatabase<ThingDef>.AllDefsListForReading
                 .Where(d => d.category == ThingCategory.Building && d.BuildableByPlayer && Meets(need, d, anchor)
-                            && RoomKindDef.Buildable(d) && OtherCostsInStorage(d, map))
+                            && RoomKindDef.Buildable(d) && OtherCostsInStorage(d, map) && StuffCanBeHad(d, map, count))
                 .OrderByDescending(d => Score(need, d))
                 .ThenBy(d => d.GetStatValueAbstract(StatDefOf.MarketValue, GenStuff.DefaultStuffFor(d)));
 
-        private static bool Meets(string need, ThingDef d, ThingDef anchor)
+        public static bool Meets(string need, ThingDef d, ThingDef anchor)
         {
             var b = d.building;
             if (b == null)
@@ -66,6 +67,10 @@ namespace AIPawnControl
         /// <summary>What a facility adds to what it links to: the sum of its stat offsets (an end table: comfort +0.05).</summary>
         public static float FacilityBonus(ThingDef d) =>
             d.GetCompProperties<CompProperties_Facility>()?.statOffsets?.Sum(s => s.value) ?? 0f;
+
+        /// <summary>Made from a wall material (wood or stone blocks, which the room gets), or its own material is already in storage for every copy (a couch's cloth).</summary>
+        public static bool StuffCanBeHad(ThingDef d, Map map, int count = 1) =>
+            !d.MadeFromStuff || GenStuff.AllowedStuffsFor(d).Any(s => Supplies.IsWallMaterial(s) || map.resourceCounter.GetCount(s) >= d.costStuffCount * count);
 
         /// <summary>Costs other than the room's material are already in storage.</summary>
         public static bool OtherCostsInStorage(ThingDef d, Map map) =>

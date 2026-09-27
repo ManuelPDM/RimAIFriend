@@ -35,7 +35,7 @@ namespace AIPawnControl
         public ThingDef Resolve(Map map, ThingDef anchor = null)
         {
             if (need != null)
-                return Needs.Best(need, map, anchor);
+                return Needs.Best(need, map, anchor, repeat);
             ThingDef first = null;
             foreach (var def in defs)
             {
@@ -91,6 +91,9 @@ namespace AIPawnControl
             public readonly HashSet<IntVec3> taken = new HashSet<IntVec3>();    // furniture
             public readonly HashSet<IntVec3> reserved = new HashSet<IntVec3>(); // walkable, but no furniture
             public readonly List<PlanEntry> placed = new List<PlanEntry>();
+            // A room that already has furniture (PlaceOne): one more item mustn't make it worse. Null for a new room.
+            public HashSet<IntVec3> reachableBefore;              // free cells the door reaches now
+            public HashSet<PlanEntry> boxedInBefore;             // items with no free neighbour already
         }
 
         public static bool Place(RoomPlan plan)
@@ -147,6 +150,10 @@ namespace AIPawnControl
                         s.reserved.Add(c);
                 s.placed.Add(e);
             }
+            // Rooms aren't always laid out by these rules (the player's, older ones, a table ringed with chairs), so
+            // what's already true isn't held against the new item: it only mustn't make things worse.
+            s.reachableBefore = Reachable(s.inner, plan.doorInside, s.taken, CellRect.Empty);
+            s.boxedInBefore = new HashSet<PlanEntry>(existing.Where(e => !HasFreeNeighbour(e.Rect, s, CellRect.Empty)));
             var item = new RoomItem { defs = { def } };
             return (nextTo != null ? NextTo(def, nextTo, s, item) : null) ?? AgainstWall(def, s, item);
         }
@@ -317,9 +324,12 @@ namespace AIPawnControl
             if (!HasFreeNeighbour(rect, s, rect))
                 return false;
             foreach (var p in s.placed)
-                if (!HasFreeNeighbour(p.Rect, s, rect))
+                if (s.boxedInBefore?.Contains(p) != true && !HasFreeNeighbour(p.Rect, s, rect))
                     return false;
-            return AllFreeReachable(s.inner, s.plan.doorInside, s.taken, rect);
+            if (s.reachableBefore == null)
+                return AllFreeReachable(s.inner, s.plan.doorInside, s.taken, rect);
+            var reachable = Reachable(s.inner, s.plan.doorInside, s.taken, rect);
+            return s.reachableBefore.All(c => rect.Contains(c) || reachable.Contains(c));
         }
 
         private static bool HasFreeNeighbour(CellRect of, State s, CellRect extra)
@@ -380,11 +390,17 @@ namespace AIPawnControl
         /// <summary>Every free interior cell can be reached from the cell inside the door (4 neighbours).</summary>
         public static bool AllFreeReachable(CellRect inner, IntVec3 start, HashSet<IntVec3> taken, CellRect extra)
         {
-            bool Blocked(IntVec3 c) => (taken.Contains(c) && c != start) || extra.Contains(c);
             int free = 0;
             foreach (var c in inner)
-                if (!Blocked(c))
+                if ((!taken.Contains(c) || c == start) && !extra.Contains(c))
                     free++;
+            return Reachable(inner, start, taken, extra).Count == free;
+        }
+
+        /// <summary>The free interior cells reached from the cell inside the door (4 neighbours).</summary>
+        private static HashSet<IntVec3> Reachable(CellRect inner, IntVec3 start, HashSet<IntVec3> taken, CellRect extra)
+        {
+            bool Blocked(IntVec3 c) => (taken.Contains(c) && c != start) || extra.Contains(c);
             var seen = new HashSet<IntVec3> { start };
             var queue = new Queue<IntVec3>();
             queue.Enqueue(start);
@@ -398,7 +414,7 @@ namespace AIPawnControl
                         queue.Enqueue(n);
                 }
             }
-            return seen.Count == free;
+            return seen;
         }
     }
 }

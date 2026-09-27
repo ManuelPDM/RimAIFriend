@@ -46,14 +46,28 @@ namespace AIPawnControl
                 .ToList();
         }
 
-        /// <summary>"my bedroom (awful, 102°F)": the temperature only when it's outside her comfortable range.</summary>
+        /// <summary>"my bedroom (awful, dark, 102°F)": dark and the temperature only when they're a problem.</summary>
         public static string RoomLine(Room room, Pawn pawn)
         {
             string line = $"{SnapshotBuilder.RoomName(room, pawn)} ({BuildManager.Impressiveness(room)}";
+            if (Dark(room))
+                line += ", dark";
             if (TooHot(room, pawn) || TooCold(room, pawn))
                 line += ", " + room.Temperature.ToStringTemperature("F0");
             return line + ")";
         }
+
+        /// <summary>
+        /// The room most worth upgrading for her (the ladder's last rung): one vanilla gives a bad mood for (dark, too hot
+        /// or cold) first, then the least impressive, of these rooms (the ones with an upgrade to offer). Null if none.
+        /// </summary>
+        public static Room Worst(IEnumerable<Room> rooms, Pawn pawn) =>
+            rooms.OrderByDescending(r => (Dark(r) ? 1 : 0) + (TooHot(r, pawn) || TooCold(r, pawn) ? 1 : 0))
+                .ThenBy(r => r.GetStat(RoomStatDefOf.Impressiveness))
+                .FirstOrDefault();
+
+        /// <summary>Vanilla's darkness: most of the room is dark to the eye (the "in darkness" mood).</summary>
+        private static bool Dark(Room room) => room.Cells.Count(c => room.Map.glowGrid.PsychGlowAt(c) == PsychGlow.Dark) * 2 > room.CellCount;
 
         private static bool TooHot(Room room, Pawn pawn) => room.Temperature > pawn.GetStatValue(StatDefOf.ComfyTemperatureMax);
         private static bool TooCold(Room room, Pawn pawn) => room.Temperature < pawn.GetStatValue(StatDefOf.ComfyTemperatureMin);
@@ -126,6 +140,17 @@ namespace AIPawnControl
                 var m = materials.FirstOrDefault(x => x.stuff == thing);
                 return (m.stuff != null ? m.stock + m.nearby : map.resourceCounter.GetCount(thing)) >= count;
             }
+
+            /// <summary>What it needs to work once built is there: power from a generator for what draws power, some fuel for what burns it.</summary>
+            public bool CanRun(ThingDef def)
+            {
+                var power = def.GetCompProperties<CompProperties_Power>();
+                if (power != null && power.compClass == typeof(CompPowerTrader) && power.PowerConsumption > 0f
+                    && !map.listerBuildings.allBuildingsColonist.Any(b => b.TryGetComp<CompPowerPlant>()?.PowerOutput > 0f))
+                    return false;
+                var fuel = def.GetCompProperties<CompProperties_Refuelable>();
+                return fuel?.fuelFilter == null || fuel.fuelFilter.AllowedThingDefs.Any(f => CanHave(f, 1));
+            }
         }
 
         // ---------- Candidates ----------
@@ -138,13 +163,13 @@ namespace AIPawnControl
                 yield break; // items go in rectangular rooms only (every room a mind builds is one)
             var present = new HashSet<ThingDef>(ctx.things.Select(t => t is Blueprint || t is Frame ? t.def.entityDefToBuild as ThingDef : t.def));
             bool hot = TooHot(room, ctx.pawn), cold = TooCold(room, ctx.pawn);
-            bool dark = room.Cells.Count(c => ctx.map.glowGrid.PsychGlowAt(c) == PsychGlow.Dark) * 2 > room.CellCount;
+            bool dark = Dark(room);
             foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
                 if (def.category != ThingCategory.Building || !def.BuildableByPlayer || def.IsBed || def.size.x > 3 || def.size.z > 3
                     || def.designationCategory == null || !RoomKindDef.Buildable(def))
                     continue;
-                float heat = Heat(def);
+                float heat = Heat(def, room.Temperature);
                 bool warms = heat != 0f;
                 if (present.Contains(def) && !warms)
                     continue; // one of each item; a hot room may need a second cooler
@@ -152,11 +177,14 @@ namespace AIPawnControl
                     continue;
                 if (def.PlaceWorkers != null && def.PlaceWorkers.Any(w => w is PlaceWorker_Cooler || w is PlaceWorker_Vent))
                     continue; // they sit in a wall: the walls step
-                if (!ctx.CanPay(def, out ThingDef stuff) || !KeepsRole(room, def))
+                if (!ctx.CanPay(def, out ThingDef stuff) || !ctx.CanRun(def) || !KeepsRole(room, def, stuff))
                     continue;
                 var u = new Upgrade { def = def, stuff = stuff, cost = Cost(def, stuff) };
                 Thing anchor = ctx.things.FirstOrDefault(t => LinksTo(def, t));
-                if (warms)
+                // A lamp (vanilla files lights under furniture; a torch warms a little below 23°C) lights a dark room, as
+                // long as the room isn't already too hot for its heat.
+                bool light = dark && def.HasComp(typeof(CompGlower)) && def.designationCategory.defName == "Furniture" && !(hot && heat > 0f);
+                if (warms && !light)
                 {
                     if (!(hot && heat < 0f) && !(cold && heat > 0f))
                         continue;
@@ -171,7 +199,7 @@ namespace AIPawnControl
                     u.value = Needs.FacilityBonus(def);
                     u.label = $"{def.label}{CostText(def, stuff)}: {FacilityText(def)} for the {anchor.def.label}";
                 }
-                else if (dark && def.HasComp(typeof(CompGlower)))
+                else if (light)
                 {
                     // A dark room is vanilla's "in darkness" mood: the cheapest light wins the comfort pick.
                     u.gain = Gain.Comfort;
@@ -336,30 +364,42 @@ namespace AIPawnControl
             def.passability == Traversability.Impassable ? 1.4f * def.size.Area : def.passability == Traversability.PassThroughOnly ? 0.9f * def.size.Area : 0f;
 
         /// <summary>Heat pushed per second: a heat pusher's own, or a temperature control's energy (a heater +, a cooler −). 0 for neither.</summary>
-        private static float Heat(ThingDef def)
+        private static float Heat(ThingDef def, float roomTemperature)
         {
             var pusher = def.GetCompProperties<CompProperties_HeatPusher>();
             if (pusher != null && pusher.heatPerSecond != 0f)
-                return pusher.heatPerSecond;
+                // Vanilla's pusher only works between its limits: a torch stops heating above 23°C.
+                return roomTemperature < pusher.heatPushMaxTemperature && roomTemperature > pusher.heatPushMinTemperature ? pusher.heatPerSecond : 0f;
             var control = def.GetCompProperties<CompProperties_TempControl>();
             return control?.energyPerSecond ?? 0f;
         }
 
-        /// <summary>Vanilla's role workers: the room's winning role stays the same with the item in it.</summary>
-        private static bool KeepsRole(Room room, ThingDef def)
+        /// <summary>
+        /// The room's role stays the same with the item in it. Every role worker scores the room by the same code it uses
+        /// for real rooms, with an unspawned copy of the item counted in (listed in one of the room's regions, then taken
+        /// out). Vanilla's GetScoreDeltaIfBuildingPlaced isn't used: vanilla only asks it for work tables, and several
+        /// workers there test thingClass the wrong way round, scoring a lamp as a bed.
+        /// </summary>
+        private static bool KeepsRole(Room room, ThingDef def, ThingDef stuff)
         {
-            RoomRoleDef best = null;
-            float bestScore = float.MinValue;
-            foreach (var role in DefDatabase<RoomRoleDef>.AllDefsListForReading)
+            RoomRoleDef Best() => DefDatabase<RoomRoleDef>.AllDefsListForReading.MaxBy(r => r.Worker.GetScore(room));
+            var before = Best();
+            Thing probe = ThingMaker.MakeThing(def, stuff);
+            var lister = room.Regions[0].ListerThings;
+            lister.Add(probe);
+            try
             {
-                float score = role.Worker.GetScore(room) + role.Worker.GetScoreDeltaIfBuildingPlaced(room, def);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    best = role;
-                }
+                return Best() == before;
             }
-            return best == room.Role;
+            catch (Exception e)
+            {
+                ModLog.Warning($"Scoring {def.defName} in {room.Role?.defName}: {e.Message}");
+                return false;
+            }
+            finally
+            {
+                lister.Remove(probe);
+            }
         }
 
         private static bool LinksTo(ThingDef facility, Thing anchor)

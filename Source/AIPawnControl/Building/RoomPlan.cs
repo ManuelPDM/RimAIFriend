@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using RimWorld;
 using Verse;
 
@@ -83,21 +84,23 @@ namespace AIPawnControl
         /// <summary>Walls and the door: cells a flood fill can't pass. Reused walls included.</summary>
         public bool IsRingSolid(IntVec3 c) => footprint.IsOnEdge(c) && (reusedWalls.Contains(c) || entries.Exists(e => e.cell == c && (e.def == ThingDefOf.Wall || e.def == ThingDefOf.Door)));
 
-        /// <summary>The material each entry would use: the chosen one where the def allows it, else vanilla's default.</summary>
-        public static ThingDef StuffFor(ThingDef def, ThingDef material)
+        /// <summary>The material each entry would use: the chosen one where the def allows it, else the allowed one storage has most of (leather for a couch when there's no cloth), else vanilla's default.</summary>
+        public static ThingDef StuffFor(ThingDef def, ThingDef material, Map map = null)
         {
             if (!def.MadeFromStuff)
                 return null;
-            foreach (var allowed in GenStuff.AllowedStuffsFor(def))
-                if (allowed == material)
-                    return material;
-            return GenStuff.DefaultStuffFor(def);
+            var allowed = GenStuff.AllowedStuffsFor(def).ToList();
+            if (allowed.Contains(material))
+                return material;
+            var stocked = map == null ? null : allowed.Where(s => map.resourceCounter.GetCount(s) >= def.costStuffCount)
+                .OrderByDescending(s => map.resourceCounter.GetCount(s)).FirstOrDefault();
+            return stocked ?? GenStuff.DefaultStuffFor(def);
         }
 
         public void ApplyMaterial(ThingDef material)
         {
             foreach (var e in entries)
-                e.stuff = StuffFor(e.def, material);
+                e.stuff = StuffFor(e.def, material, map);
         }
 
         /// <summary>Total cost of every new entry in the given material.</summary>
@@ -105,7 +108,7 @@ namespace AIPawnControl
         {
             var total = new Dictionary<ThingDef, int>();
             foreach (var e in entries)
-                foreach (var part in e.def.CostListAdjusted(StuffFor(e.def, material)))
+                foreach (var part in e.def.CostListAdjusted(StuffFor(e.def, material, map)))
                 {
                     total.TryGetValue(part.thingDef, out int n);
                     total[part.thingDef] = n + part.count;

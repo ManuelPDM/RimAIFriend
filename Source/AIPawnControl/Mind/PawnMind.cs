@@ -29,7 +29,6 @@ namespace AIPawnControl
         public List<string> decisions = new List<string>();
         public List<int> decisionTicks = new List<int>(); // parallel to decisions, for the day labels in [Recent]
         private bool prioritiesSet; // work priorities from her passions, once (STREAMLINE.md §8)
-        public Dictionary<string, string> workFeelings = new Dictionary<string, string>(); // work type defName → "refuse: why" (Reflect)
         private int actsDay = -1;
         private int actsToday;
         private int lastThinkTick = -99999;
@@ -50,6 +49,7 @@ namespace AIPawnControl
         private int backoffUntilTick;
         private float lastThinkRealtime = -999f;
         private int idleSinceTick = -1;
+        private int suppliesNight = -1; // not saved: after a reload her project's materials are checked once more
         private int lastDanger = -1;
         private int lastMoodBand;
         private int lastInjuryCount;
@@ -90,7 +90,6 @@ namespace AIPawnControl
             Scribe_Collections.Look(ref decisions, "decisions", LookMode.Value);
             Scribe_Collections.Look(ref decisionTicks, "decisionTicks", LookMode.Value);
             Scribe_Values.Look(ref prioritiesSet, "prioritiesSet");
-            Scribe_Collections.Look(ref workFeelings, "workFeelings", LookMode.Value, LookMode.Value);
             Scribe_Values.Look(ref actsDay, "actsDay", -1);
             Scribe_Values.Look(ref actsToday, "actsToday");
             Scribe_Values.Look(ref lastThinkTick, "lastThinkTick", -99999);
@@ -111,7 +110,6 @@ namespace AIPawnControl
                 lastInteractionTicks = lastInteractionTicks ?? new Dictionary<string, int>();
                 chat = chat ?? new List<ChatLine>();
                 memory = memory ?? new MindMemory();
-                workFeelings = workFeelings ?? new Dictionary<string, string>();
             }
         }
 
@@ -152,6 +150,7 @@ namespace AIPawnControl
                 return; // answered from UpdateChat, which also runs while paused
             if (Thinking || Find.TickManager.TicksGame < backoffUntilTick || pawn == null || !pawn.Spawned)
                 return;
+            RecheckSupplies();
             if (TryReflect())
                 return;
             // Only danger or a new injury may wake a sleeper's mind; a mood drop while asleep just confuses the model.
@@ -627,7 +626,14 @@ namespace AIPawnControl
         // ---------- Nightly Reflect (PHASE3.md §4) ----------
 
         /// <summary>The night that began most recently at 22:00, as a local day index.</summary>
-        private int CurrentNight => GenLocalDate.HourOfDay(pawn.Map) >= 22 ? LocalDay : LocalDay - 1;
+        private int CurrentNight => NightOf(pawn.Map);
+
+        /// <summary>The night that began most recently at 22:00 on this map, as a local day index.</summary>
+        public static int NightOf(Map map)
+        {
+            int day = GenLocalDate.Year(map) * GenDate.DaysPerYear + GenLocalDate.DayOfYear(map);
+            return GenLocalDate.HourOfDay(map) >= 22 ? day : day - 1;
+        }
 
         private bool IsNight
         {
@@ -657,6 +663,25 @@ namespace AIPawnControl
                 return false;
             StartReflect(dev: false, night);
             return true;
+        }
+
+        /// <summary>
+        /// Once a night, her project's materials again (STREAMLINE.md §7). They're marked when it's laid out; one that
+        /// waited on a table or an order that came later, or whose trees and ore ran out, would otherwise wait for good.
+        /// </summary>
+        private void RecheckSupplies()
+        {
+            if (CurrentNight == suppliesNight)
+                return;
+            suppliesNight = CurrentNight;
+            var project = BuildManager.Instance?.ActiveProject(pawn);
+            if (project == null)
+                return;
+            string marked = Supplies.MarkFor(pawn, project);
+            if (string.IsNullOrEmpty(marked))
+                return;
+            AddDecision(marked, importance: 0);
+            ModLog.Message($"{pawn.LabelShort}'s {project.Kind} materials, rechecked: {marked}");
         }
 
         /// <summary>Dev "Reflect now": over the last 24 hours, whatever the time.</summary>
@@ -774,37 +799,13 @@ namespace AIPawnControl
             ModLog.Message($"{pawn.LabelShort}: Reflect paused for the player's message; it runs again later.");
         }
 
-        /// <summary>
-        /// Reflect's one work change (STREAMLINE.md §8): applied, remembered, and shown in [Me]. A refusal nobody else could
-        /// cover isn't applied, so it isn't kept as her stance either.
-        /// </summary>
-        public void SetWorkFeeling(WorkTypeDef work, string feeling, string why)
+        /// <summary>Reflect's one work change (STREAMLINE.md §8): applied and remembered in her decisions.</summary>
+        public void ChangeWork(WorkTypeDef work, string priority, string why)
         {
-            string result = MindActions.ApplyWorkFeeling(pawn, work, feeling);
-            if (result == null)
-                return;
-            bool applied = !result.StartsWith("I can't") && !result.Contains("nobody else can") && !result.StartsWith("I already") && !result.EndsWith("where it is.");
-            if (applied && MindActions.IsFeeling(feeling))
-                workFeelings[work.defName] = why != null ? $"{feeling}: {why}" : feeling;
+            string result = MindActions.ChangePriority(pawn, work, priority);
+            bool applied = !result.StartsWith("I can't") && !result.EndsWith("where it is.");
             AddDecision($"{result}{(why != null ? $" ({why})" : "")}", importance: applied ? 4 : 0);
-            ModLog.Message($"{pawn.LabelShort} work feeling: {feeling} {work.defName} | {result} | why: {why}");
-        }
-
-        /// <summary>For [Me]: "I won't do hauling (got shot out there). I love cooking.", or null.</summary>
-        public string WorkFeelingsText()
-        {
-            var parts = new List<string>();
-            foreach (var kv in workFeelings)
-            {
-                var work = DefDatabase<WorkTypeDef>.GetNamedSilentFail(kv.Key);
-                if (work == null)
-                    continue;
-                string feeling = kv.Value.Split(':')[0];
-                string why = kv.Value.Contains(":") ? kv.Value.Substring(kv.Value.IndexOf(':') + 1).Trim() : null;
-                string phrase = feeling == "refuse" ? $"I won't do {work.labelShort}" : feeling == "love" ? $"I love {work.labelShort}" : $"I dislike {work.labelShort}";
-                parts.Add(phrase + (why != null ? $" ({why})" : "") + ".");
-            }
-            return parts.Count > 0 ? string.Join(" ", parts) : null;
+            ModLog.Message($"{pawn.LabelShort} work: {work.defName} to {priority} | {result} | why: {why}");
         }
 
         private static bool warnedManualOff;

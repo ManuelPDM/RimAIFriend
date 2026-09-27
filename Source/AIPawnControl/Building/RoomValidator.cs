@@ -167,9 +167,9 @@ namespace AIPawnControl
             {
                 if (item.optional)
                     continue;
-                int count = plan.Furniture.Count(e => item.defs.Contains(e.def));
+                int count = plan.Furniture.Count(e => item.need != null ? Needs.Meets(item.need, e.def, null) : item.defs.Contains(e.def));
                 if (count < Math.Min(item.min, item.repeat))
-                    fail.Add($"V5: {count} of the kind's {item.defs[0].label} placed, needs {Math.Min(item.min, item.repeat)}");
+                    fail.Add($"V5: {count} of the kind's {item.need ?? item.defs[0].label} placed, needs {Math.Min(item.min, item.repeat)}");
             }
 
             // V6 footprint, cell by cell (vanilla checks fog only at a thing's centre; blueprints delete zone cells).
@@ -224,7 +224,7 @@ namespace AIPawnControl
             // V8 vanilla: every entry passes CanPlaceBlueprintAt with its material.
             foreach (var e in plan.entries)
             {
-                var report = GenConstruct.CanPlaceBlueprintAt(e.def, e.cell, e.rot, map, stuffDef: RoomPlan.StuffFor(e.def, material));
+                var report = GenConstruct.CanPlaceBlueprintAt(e.def, e.cell, e.rot, map, stuffDef: RoomPlan.StuffFor(e.def, material, map));
                 if (!report.Accepted)
                 {
                     fail.Add($"V8: {e.def.label}: {report.Reason}");

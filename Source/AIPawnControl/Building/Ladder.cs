@@ -20,6 +20,7 @@ namespace AIPawnControl
             public bool met;
             public bool underway;      // someone's project is on it
             public string waiting;     // why it can't be built now, or null
+            public bool rooms;         // the last rung: better rooms, the worst one first; never met
         }
 
         /// <summary>Every rung and its verdict, in order.</summary>
@@ -40,11 +41,12 @@ namespace AIPawnControl
                 new Rung { label = "a workshop", kind = Kind("AIPC_Workshop"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Workshop")) },
                 new Rung { label = "a hospital", kind = Kind("AIPC_Hospital"), met = buildings.OfType<Building_Bed>().Any(b => b.Medical && b.def.building.bed_humanlike) },
                 new Rung { label = "private bedrooms", kind = Kind("AIPC_Bedroom"), met = sleepers.All(p => p.ownership?.OwnedRoom != null) },
+                new Rung { label = "better rooms", rooms = true },
             };
             var active = BuildManager.Instance?.ActiveOn(map).Select(p => p.kindDef).ToList() ?? new List<RoomKindDef>();
             foreach (var rung in rungs)
             {
-                if (rung.met)
+                if (rung.met || rung.rooms)
                     continue;
                 // Beds are underway with any bedroom or barracks project, the rest with a project of their own kind.
                 rung.underway = rung.kind != null && active.Any(k => k == rung.kind || (rungs.IndexOf(rung) == 0 && (k?.defName == "AIPC_Bedroom" || k?.defName == "AIPC_Barracks")));
@@ -53,7 +55,7 @@ namespace AIPawnControl
             return rungs;
         }
 
-        /// <summary>The first rung that's neither met nor underway, or null when the early base is complete.</summary>
+        /// <summary>The first rung that's neither met nor underway; past the early base, better rooms.</summary>
         public static Rung Current(Map map) => Evaluate(map).FirstOrDefault(r => !r.met && !r.underway);
 
         /// <summary>For [Colony]: "beds for 6 of 3 (barracks) · next: a dining room", or "(waiting on research: …)".</summary>
@@ -69,7 +71,7 @@ namespace AIPawnControl
             if (underway.Count > 0)
                 line += " · being built: " + string.Join(", ", underway);
             if (next == null)
-                return line + (underway.Count > 0 ? "" : " · the base has what an early colony needs");
+                return line;
             return line + $" · next: {next.label}" + (next.waiting != null ? $" ({next.waiting})" : "");
         }
 

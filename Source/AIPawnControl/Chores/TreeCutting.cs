@@ -24,6 +24,8 @@ namespace AIPawnControl
             var foci = SiteFinder.NoBuildFoci(map);
             var picked = Candidates(scan, foci);
             int have = scan.Stock(ThingDefOf.WoodLog) + MarkedWood(map);
+            if (map.resourceCounter.GetCount(ThingDefOf.WoodLog) >= ChoreOptions.StockCap)
+                yield break;
             int lastCount = 0;
             foreach (var (purpose, target) in ChoreOptions.WoodTargets(scan.colonists))
             {

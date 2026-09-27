@@ -86,9 +86,9 @@ namespace AIPawnControl
         }
 
         /// <summary>"[About Sheet] impression · threads" lines for the people who have a file, at most max, each cut to lineCap.</summary>
-        public static string About(MindMemory memory, IEnumerable<string> names, int max, int lineCap)
+        public static string About(PawnMind mind, IEnumerable<string> names, int max, int lineCap)
         {
-            var lines = names.Distinct().Select(n => memory.File(n, create: false))
+            var lines = names.Distinct().Select(n => mind.memory.File(n, create: false))
                 .Where(f => f != null && !string.IsNullOrEmpty(f.impression)).Take(max)
                 .Select(f =>
                 {
@@ -98,7 +98,8 @@ namespace AIPawnControl
                         int cut = text.LastIndexOf(' ', lineCap - 1);
                         text = text.Substring(0, cut > 0 ? cut : lineCap - 1) + "…";
                     }
-                    return $"[About {f.name}] {text}";
+                    string who = People.Label(f.name, mind.pawn);
+                    return $"[About {f.name}] {(who != null ? $"({who}) " : "")}{text}";
                 }).ToList();
             return lines.Count > 0 ? string.Join("\n", lines) : null;
         }

@@ -238,6 +238,9 @@ namespace AIPawnControl
 
         private List<Chore> chores = new List<Chore>();
         private static ChoreManager instance;
+        // [Work waiting]'s amounts ("mapId:workType" → how much waits), as first seen tonight and the night before.
+        private Dictionary<string, int> workTonight = new Dictionary<string, int>(), workLastNight = new Dictionary<string, int>();
+        private int workNight = -1;
         private readonly Game game;
 
         public static ChoreManager Instance => instance != null && instance.game == Current.Game ? instance : null;
@@ -246,6 +249,21 @@ namespace AIPawnControl
         {
             this.game = game;
             instance = this;
+        }
+
+        /// <summary>
+        /// Records how much work waits the first time it's asked on a night, and returns the night before's amounts, so
+        /// every mind reflecting tonight compares with the same "last night".
+        /// </summary>
+        public Dictionary<string, int> WorkLastNight(int night, Dictionary<string, int> now)
+        {
+            if (night != workNight)
+            {
+                workLastNight = night == workNight + 1 ? workTonight : new Dictionary<string, int>();
+                workTonight = new Dictionary<string, int>(now);
+                workNight = night;
+            }
+            return workLastNight;
         }
 
         public IEnumerable<Chore> ActiveOf(Pawn pawn) => chores.Where(c => c.pawn == pawn && c.Active);
@@ -324,9 +342,14 @@ namespace AIPawnControl
             if (Scribe.mode == LoadSaveMode.Saving)
                 chores.RemoveAll(c => !c.Active && Find.TickManager.TicksGame - c.placedTick > GenDate.TicksPerDay); // past the cooldown, a closed chore has no use
             Scribe_Collections.Look(ref chores, "chores", LookMode.Deep);
+            Scribe_Collections.Look(ref workTonight, "workTonight", LookMode.Value, LookMode.Value);
+            Scribe_Collections.Look(ref workLastNight, "workLastNight", LookMode.Value, LookMode.Value);
+            Scribe_Values.Look(ref workNight, "workNight", -1);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 chores = chores ?? new List<Chore>();
+                workTonight = workTonight ?? new Dictionary<string, int>();
+                workLastNight = workLastNight ?? new Dictionary<string, int>();
                 chores.RemoveAll(c => c.pawn == null || c.map == null);
             }
         }

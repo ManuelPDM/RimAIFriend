@@ -29,6 +29,8 @@ namespace AIPawnControl
             foreach (var (rock, cells, steps) in Veins(scan))
             {
                 ThingDef resource = rock.building.mineableThing;
+                if (scan.map.resourceCounter.GetCount(resource) >= ChoreOptions.StockCap)
+                    continue;
                 string label = ResourceLabel(rock);
                 bool core = resource == ThingDefOf.Steel || resource == ThingDefOf.ComponentIndustrial || resource == ThingDefOf.Plasteel;
                 bool short_ = (resource == ThingDefOf.Steel && scan.Stock(ThingDefOf.Steel) < 100)
