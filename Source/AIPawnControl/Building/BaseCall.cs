@@ -9,7 +9,7 @@ namespace AIPawnControl
 {
     /// <summary>
     /// The Base call (STREAMLINE.md §5): after she picks "work on the base", code lists what the base could get now, in
-    /// groups (the ladder's next rung, food, stock-ups, other rooms, furniture), each with code's amounts and sizes. She
+    /// groups (the ladder's next rung, food, stock-ups, other rooms, rooms to upgrade), each with code's amounts and sizes. She
     /// picks one, plus a site and a material for a room, and makes one remark; code applies it. The call is free: picking
     /// the menu line was the decision.
     /// </summary>
@@ -25,7 +25,7 @@ namespace AIPawnControl
             public RoomKindDef kind;      // a room, at code's size
             public (int w, int h) size;
             public ChoreOption chore;     // a stock-up
-            public Furnishing.Option furnish;
+            public Room upgrade;          // a room to upgrade: the Upgrade call follows
             public ThingDef crop;         // a field
             public CellRect field;
             public string fieldWhere;
@@ -110,8 +110,10 @@ namespace AIPawnControl
                 && PileChoice(pawn) is Choice pile)
                 choices.Add(pile);
 
+            // One line per room with anything to add (FURNISHING.md §5); the Upgrade call offers the concrete upgrades.
             if (canPlan)
-                choices.AddRange(Furnishing.Options(pawn).Select(f => new Choice { group = "Add to a room", label = f.label, furnish = f }));
+                choices.AddRange(Upgrades.Rooms(pawn).Where(r => Upgrades.For(r, pawn).Count > 0)
+                    .Select(r => new Choice { group = "Upgrade a room", label = Upgrades.RoomLine(r, pawn), upgrade = r }));
 
             if (choices.Count == 0)
             {
@@ -120,7 +122,7 @@ namespace AIPawnControl
                 return "There's nothing I can do for the base right now.";
             }
             // Numbered in group order, so the list reads as groups.
-            string[] order = { "Next for the base", "Food", "Storage", "Stock up", "Other rooms", "Add to a room" };
+            string[] order = { "Next for the base", "Food", "Storage", "Stock up", "Other rooms", "Upgrade a room" };
             choices = choices.OrderBy(c => Array.IndexOf(order, c.group)).ToList();
             var lines = new List<string>();
             string lastGroup = null;
@@ -288,8 +290,11 @@ namespace AIPawnControl
                 }
                 else if (choice.crop != null)
                     result = Fields.Place(pawn, choice.field, choice.crop, choice.fieldWhere);
-                else if (choice.furnish != null)
-                    result = Furnishing.Place(pawn, choice.furnish);
+                else if (choice.upgrade != null)
+                {
+                    RemarkAndLog(mind, Get("say"), UpgradeCall.Start(mind, choice.upgrade), $"base: upgrade {choice.label}");
+                    return;
+                }
                 else if (choice.group == "Storage")
                     result = Stockpiles.Place(pawn, choice.pile, "everything", choice.fieldWhere);
                 else

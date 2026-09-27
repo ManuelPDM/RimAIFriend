@@ -1,6 +1,6 @@
 # Furnishing build: storage, rooms from vanilla concepts, room upgrades, work by colony need
 
-_Approved by the user (session 15, 2026-09-27); being built. Replaces STREAMLINE.md §11 (room improvement)._
+_Approved by the user (session 15, 2026-09-27). Built and checked in the game (§10); not committed. Replaces STREAMLINE.md §11 (room improvement)._
 
 ## 1. Goal
 The early game, done properly and future-proof: the base grows by the villagers' own choices, and it keeps up as
@@ -68,7 +68,7 @@ still guards that an item keeps the room's role.
     role workers, today's `KeepsRole`), in a free slot (`RoomPlacer.PlaceOne`);
   - *a better version*: an item vanilla lets replace one in the room in place (`GenConstruct.CanReplace`: replace tags
     Bed/Chair/Table, or the same item in a better material), placed over it; vanilla does the swap;
-  - *a floor*: the best buildable floor over the whole free interior.
+  - *a floor*: the best buildable wood or stone floor (never steel, like walls) over the whole free interior.
   Materials: stuff from the colony's wall materials (`Supplies.WallMaterials`: storage plus what can be had, marked by
   `Supplies.MarkFor`); anything that isn't stuff (steel, components, gold) must be in storage.
 - **Scoring: three kinds of gain, one pick per kind**, each divided by cost (market value of the cost list):
@@ -105,3 +105,31 @@ Storage (§3) → needs (§4) → improve a room (§5) → work by need (§6), e
 
 ## 9. Open questions
 - None open. Later: bigger rooms (§5), coolers in walls, room kinds' tables and workshop benches still named by defName.
+
+## 10. Build results (session 15)
+0 errors, 0 warnings. Checked on `aipc_society3_day34` with dev buttons (no long runs).
+
+**Code:** `Building/Needs.cs` (bed, seat, shelf, accessory), `Building/Upgrades.cs` (candidates, vanilla-formula scoring,
+placement), `Building/UpgradeCall.cs` + `Prompts/upgrade.txt`, `Chores/WorkWaiting.cs`; `Furnishing.cs` removed.
+`BuildProject` tracks floor upgrades (`floor`, `floorCells`). `Supplies.MarkFor` counts an upgrade's own materials.
+Dev buttons: "Upgrade options" (every room's line and upgrades, plus the prediction check) and "Upgrade call now".
+
+**Built differently from the spec:**
+- Up to 3 options: the best of each kind first, then the next best of any kind (no repeats), so a room with only looks
+  gains still offers a choice. Fillers show their real, small gain ("impressiveness +1.3").
+- A dark room's comfort pick is the cheapest light (vanilla's "in darkness"). Temperature items may repeat (a second
+  passive cooler); other items only once per room.
+- Costs other than the item's material count wood and stone blocks that can be had (they get marked), not only storage.
+- Rooms stay the tables and workshop benches by defName (§9).
+
+**Checks (§7):**
+| # | Result |
+|---|---|
+| 1 | Partly: the rung needs a storeroom and the kitchen gets no stockpile (code); the haul line groups by category (`[Work waiting]` shows "steel 337, lightleather 11, …"). No fresh-colony run yet. |
+| 2 | Needs resolve: bed = bed, seat = couch, shelf = shelf, a bed's accessory = end table. Rooms not re-placed yet. |
+| 3 | Not checked (no better bed researched on the save). |
+| 4 | ✓ One line per room in the Base call; the Upgrade call offered 3; Valentin picked concrete for his bedroom; placed as blueprints and tracked. Hot barracks: a passive cooler; dark barracks: a wall lamp. |
+| 5 | ✓ Floors match vanilla exactly after adding cleanliness and reading fresh stats (e.g. 35.6 = 35.6); items exact in clean rooms (the check lays the floor first, which wipes a dirty room's filth, so later item checks there drift). |
+| 6 | Partly: `[Work waiting]` is in Reflect ("craft (make any stone blocks 0 of 10): Wehner off, Valentin off, Sab 3"); Valentin chose no change that night. |
+
+**Later in session 15:** goals removed entirely; talk offered only for colonists nearby (the deferred talk is gone).

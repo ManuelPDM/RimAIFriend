@@ -2,10 +2,10 @@ It's {time}. {trigger}
 
 {snapshot}
 
-What do you do now? Pick one option by its number. "keep going" means carry on with your day: your work, meals, sleep and recreation happen on their own. Pick something else when it fits the colony's needs, your mood, your goals or who you are better right now.
+What do you do now? Pick one option by its number. "keep going" means carry on with your day: your work, meals, sleep and recreation happen on their own. Pick something else when it fits the colony's needs, your mood or who you are better right now.
 {menu}
 
-If you pick "talk to someone": "with" is who (one of: {talkto}), and "tone" is how: positive (friendly or personal) or negative (a jab or an insult; it hurts the relationship and can start a fight). How you feel about them ([People], [About ...]) and who you are decide it. Someone nearby you talk to now; anyone else, the next time you're near each other. Otherwise "with" is "-" and "tone" is "positive".
+If you pick "talk to someone": "with" is who (one of: {talkto}), and "tone" is how: positive (friendly or personal) or negative (a jab or an insult; it hurts the relationship and can start a fight). How you feel about them ([People], [About ...]) and who you are decide it. Only people nearby can be talked to. Otherwise "with" is "-" and "tone" is "positive".
 
 Also write "say": what you say out loud, or "" to stay silent.
 - If you talk to someone, "say" is your opening line to them, in the tone you picked.

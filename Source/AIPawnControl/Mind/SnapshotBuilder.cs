@@ -310,7 +310,7 @@ namespace AIPawnControl
             }));
         }
 
-        /// <summary>What [People] calls "nearby"; a talk with someone this close starts now, else when they next meet.</summary>
+        /// <summary>What [People] calls "nearby"; only people this close can be talked to.</summary>
         public const int NearbyTiles = 12;
 
         public static bool Nearby(Pawn a, Pawn b) => a.Map == b.Map && a.Position.DistanceTo(b.Position) <= NearbyTiles;
@@ -356,7 +356,7 @@ namespace AIPawnControl
         /// (not in its best storage, not forbidden), in the home area. Resources by name with amounts, the rest one count
         /// per top-level category. Null when nothing waits.
         /// </summary>
-        private static string WaitingToBeHauled(Map map)
+        public static string WaitingToBeHauled(Map map)
         {
             var named = new Dictionary<ThingDef, int>();
             var grouped = new Dictionary<ThingCategoryDef, int>();
@@ -442,11 +442,11 @@ namespace AIPawnControl
         }
 
         /// <summary>"my bedroom" for hers, vanilla's label otherwise ("Mo's bedroom", "kitchen").</summary>
-        private static string RoomName(Room room, Pawn pawn) =>
+        public static string RoomName(Room room, Pawn pawn) =>
             room.Owners.Contains(pawn) ? "my " + room.Role.label : room.GetRoomRoleLabel();
 
         /// <summary>Notable furniture inside the room: no walls, doors, floors, conduits or lights.</summary>
-        private static List<Thing> Furniture(Room room) =>
+        public static List<Thing> Furniture(Room room) =>
             room.ContainedAndAdjacentThings
                 .Where(t => t.def.category == ThingCategory.Building && room.ContainsCell(t.Position)
                             && t.def.designationCategory != null && !HiddenCategories.Contains(t.def.designationCategory.defName)
@@ -457,7 +457,7 @@ namespace AIPawnControl
         private static readonly HashSet<string> HiddenCategories = new HashSet<string> { "Structure", "Floors", "Power", "Security" };
 
         /// <summary>"bed, 3 stools, end table": same items grouped, the most valuable first, then "and N more".</summary>
-        private static string ItemList(List<Thing> items, int max)
+        public static string ItemList(List<Thing> items, int max)
         {
             var groups = items.GroupBy(t => t.def)
                 .OrderByDescending(g => g.Max(t => t.MarketValue))

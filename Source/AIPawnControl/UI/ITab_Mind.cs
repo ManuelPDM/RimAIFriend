@@ -47,8 +47,6 @@ namespace AIPawnControl
                 Section(sb, "AIPawnControl_TabNote", mind.note);
             if (!string.IsNullOrEmpty(mind.memory.lately))
                 Section(sb, "AIPawnControl_TabLately", mind.memory.lately);
-            if (mind.memory.goals.Count > 0)
-                Section(sb, "AIPawnControl_TabGoals", string.Join("\n", mind.memory.goals.Select(g => g.text)));
             Section(sb, "AIPawnControl_TabSchedule", ActionCatalog.DescribeSchedule(mind.pawn));
             Section(sb, "AIPawnControl_TabPriorities", ActionCatalog.DescribePriorities(mind.pawn));
             Section(sb, "AIPawnControl_TabReason", mind.lastReason ?? "…");

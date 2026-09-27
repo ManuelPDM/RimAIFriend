@@ -9,7 +9,7 @@ namespace AIPawnControl
 {
     /// <summary>
     /// One mind's memory, saved with it (PHASE3.md §2): the raw event log (scratch, 7 days) and what Reflect makes of it
-    /// (memories, diary, person files, `lately`), plus goals.
+    /// (memories, diary, person files, `lately`).
     /// </summary>
     public class MindMemory : IExposable
     {
@@ -19,7 +19,6 @@ namespace AIPawnControl
         private const int MergeTicks = 2 * GenDate.TicksPerHour;
         private const int FirstTimeBonus = 2;
         private const int FirstTimeMinImportance = 5;
-        public const int MaxGoals = 3;
         public const int MaxLately = 600;
 
         public List<MemoryEvent> events = new List<MemoryEvent>();
@@ -29,7 +28,6 @@ namespace AIPawnControl
         public List<MemoryRecord> memories = new List<MemoryRecord>();
         public List<DiaryEntry> diary = new List<DiaryEntry>();
         public List<PersonFile> files = new List<PersonFile>();
-        public List<Goal> goals = new List<Goal>();
         public string lately;
         private int nextMemoryId = 1;
         // What the last Reflect saw when it started. Newer events go into the next one, and so does an older event that
@@ -129,24 +127,6 @@ namespace AIPawnControl
             return file;
         }
 
-        /// <summary>At most 3 goals; a new one pushes out the oldest. The same goal twice is kept once.</summary>
-        public void AddGoal(string text, string why, string source)
-        {
-            if (goals.Any(g => string.Equals(g.text, text, StringComparison.OrdinalIgnoreCase)))
-                return;
-            goals.Add(new Goal { text = text, why = why, source = source, since = Find.TickManager.TicksGame });
-            while (goals.Count > MaxGoals)
-                goals.RemoveAt(0);
-        }
-
-        public string OwnGoals => JoinGoals(Goal.Mine);
-
-        private string JoinGoals(string source)
-        {
-            var texts = goals.Where(g => g.source == source).Select(g => g.text).ToList();
-            return texts.Count > 0 ? string.Join(" · ", texts) : null;
-        }
-
         /// <summary>
         /// Adds an event. With merge, a repeat of the same kind, def and people from the last 2 hours only bumps that
         /// event's count. Important events (5+) get +2 the first time their kind and def come up.
@@ -225,7 +205,6 @@ namespace AIPawnControl
             Scribe_Collections.Look(ref memories, "memories", LookMode.Deep);
             Scribe_Collections.Look(ref diary, "diary", LookMode.Deep);
             Scribe_Collections.Look(ref files, "files", LookMode.Deep);
-            Scribe_Collections.Look(ref goals, "goals", LookMode.Deep);
             Scribe_Values.Look(ref lately, "lately");
             Scribe_Values.Look(ref nextMemoryId, "nextMemoryId", 1);
             Scribe_Values.Look(ref lastReflectEventId, "lastReflectEventId");
@@ -239,8 +218,6 @@ namespace AIPawnControl
                 memories = memories ?? new List<MemoryRecord>();
                 diary = diary ?? new List<DiaryEntry>();
                 files = files ?? new List<PersonFile>();
-                goals = goals ?? new List<Goal>();
-                goals.RemoveAll(g => g.source == "promise"); // promises to the player are conversation now (PHASE6.md §2.2)
             }
         }
     }

@@ -1,0 +1,14 @@
+It's {time}. You've decided to upgrade {room}. You choose how; the colony builds it.
+
+{snapshot}
+
+[The room] {roomState}
+
+How you could upgrade it:
+0: never mind, leave it as it is
+{options}
+
+Pick the one that fits what bothers you about the room, what you care about and who you are.
+"choice": the option's number.
+"reason": why this, in your own voice, briefly.
+"say": what you say out loud about it, or "" to stay silent. 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks.

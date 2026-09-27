@@ -24,7 +24,7 @@ namespace AIPawnControl
             Map map = pawn.Map;
             // Every room being built draws on the same storage, so the shortfall is theirs together.
             var total = new Dictionary<ThingDef, int>();
-            foreach (var p in BuildManager.Instance.ActiveOn(map))
+            foreach (var p in BuildManager.Instance.ActiveOn(map).Append(project).Distinct())
                 foreach (var kv in p.Need())
                     total[kv.Key] = (total.TryGetValue(kv.Key, out int had) ? had : 0) + kv.Value;
             var scan = new ChoreScan(pawn);

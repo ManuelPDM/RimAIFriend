@@ -26,7 +26,9 @@ namespace AIPawnControl
         public bool byMind;  // placed by a mind (not a dev tool without one): losing the mind orphans it
         private List<int> builtOnce = new List<int>(); // entry indexes seen built: gone later is a deconstruct, not a cancel
         public bool firstNight;
-        public bool furnishing; // one item added to a room she built (§9)
+        public bool furnishing; // an upgrade to a room: one item, or a floor (FURNISHING.md §5)
+        public TerrainDef floor; // a floor upgrade: this terrain on floorCells (entries is empty)
+        public List<IntVec3> floorCells = new List<IntVec3>();
         public Pawn occupant;   // a bedroom she built for someone with no room of their own (STREAMLINE.md §7); null = her own
         public bool unclaimed;  // nobody's: the bed stays free and vanilla assigns it
         public bool outfitted;  // its bills and stockpile were added once it was done (STREAMLINE.md §7)
@@ -44,6 +46,8 @@ namespace AIPawnControl
 
         public bool Active => state == State.Placed;
         public string Kind => kindDef?.label ?? "room";
+        /// <summary>What an upgrade adds: "end table", "wooden floor".</summary>
+        public string ItemLabel => floor != null ? floor.label : entries.Count > 0 ? entries[0].def.label : Kind;
         public string SizeLabel => $"{footprint.Width - 2}×{footprint.Height - 2}";
         public PawnMind Mind => MindManager.Instance?.MindOf(pawn);
         public PlanEntry Bed => kindDef != null && kindDef.owned && !unclaimed ? entries.Find(e => e.def.IsBed) : null;
@@ -92,6 +96,11 @@ namespace AIPawnControl
                 return;
             }
 
+            if (floor != null)
+            {
+                TickFloor();
+                return;
+            }
             for (int i = 0; i < entries.Count; i++)
             {
                 var e = entries[i];
@@ -121,16 +130,40 @@ namespace AIPawnControl
             if (IsDone(out Room room))
             {
                 state = State.Done;
-                ModLog.Message($"{pawn.LabelShort}'s {(furnishing ? entries[0].def.label + " " + where : Kind)} is done: {room.Role.label}, {room.CellCount} cells, impressiveness {room.GetStat(RoomStatDefOf.Impressiveness):0.0} ({BuildManager.Impressiveness(room)}).");
+                ModLog.Message($"{pawn.LabelShort}'s {(furnishing ? ItemLabel + " " + where : Kind)} is done: {room.Role.label}, {room.CellCount} cells, impressiveness {room.GetStat(RoomStatDefOf.Impressiveness):0.0} ({BuildManager.Impressiveness(room)}).");
                 Messages.Message($"{pawn.LabelShort}'s new {Kind} is finished.", pawn, MessageTypeDefOf.PositiveEvent, false);
                 if (furnishing)
-                    Remember($"Added {where}: {entries[0].def.label}.", 4);
+                    Remember($"Added {where}: {ItemLabel}.", 4);
                 else
                     Remember($"The {KindFor} I designed is finished ({SizeLabel}, {material?.label}) {where}.", 6);
                 if (occupant != null && !OccupantGone(Bed))
                     MindManager.Instance?.MindOf(occupant)?.memory.Record(occupant, "build", kindDef?.defName,
                         $"{pawn.LabelShort} built me a bedroom {where}.", 6, MemoryEvent.TookPart, new[] { pawn.LabelShort });
             }
+        }
+
+        /// <summary>A floor upgrade is done when no cell waits any more (a cancelled cell just isn't floored); off if none got built.</summary>
+        private void TickFloor()
+        {
+            if (floorCells.Any(c => FloorPending(c) != null))
+                return;
+            int built = floorCells.Count(c => c.GetTerrain(map) == floor);
+            if (built == 0)
+            {
+                Abandon(byPlayer: true);
+                return;
+            }
+            state = State.Done;
+            ModLog.Message($"{pawn.LabelShort}'s {floor.label} {where} is done: {built}/{floorCells.Count} cells.");
+            Remember($"Laid {floor.label} {where}.", 4);
+        }
+
+        private Thing FloorPending(IntVec3 c)
+        {
+            foreach (var t in c.GetThingList(map))
+                if ((t is Blueprint || t is Frame) && t.def.entityDefToBuild == floor)
+                    return t;
+            return null;
         }
 
         /// <summary>Everything built, a proper roofed indoor room, vanilla gives it the kind's role, and for her bedroom, the bed is hers.</summary>
@@ -179,6 +212,10 @@ namespace AIPawnControl
         public Dictionary<ThingDef, int> Need()
         {
             var need = new Dictionary<ThingDef, int>();
+            foreach (var c in floorCells)
+                if (floor != null && FloorPending(c) is Thing pendingFloor)
+                    foreach (var cost in pendingFloor is Frame f ? f.TotalMaterialCost() : ((Blueprint)pendingFloor).TotalMaterialCost())
+                        Add(need, cost.thingDef, pendingFloor is Frame fr ? fr.ThingCountNeeded(cost.thingDef) : cost.count);
             foreach (var e in entries)
             {
                 if (Built(e))
@@ -206,6 +243,12 @@ namespace AIPawnControl
         /// </summary>
         public string StatusLine()
         {
+            if (floor != null)
+            {
+                int done = floorCells.Count(c => c.GetTerrain(map) == floor);
+                var short_ = Missing();
+                return $"Laying {floor.label} {where}: {done}/{floorCells.Count} cells" + (short_.Count > 0 ? ", waiting on " + string.Join(", ", short_.Select(kv => $"{kv.Value} {kv.Key.label}")) : "") + ".";
+            }
             var parts = new List<string>();
             foreach (var group in entries.GroupBy(e => e.def == ThingDefOf.Wall ? "walls" : e.def.label)
                          .OrderBy(g => g.Key == "walls" ? 0 : g.First().def == ThingDefOf.Door ? 1 : 2))
@@ -226,7 +269,7 @@ namespace AIPawnControl
                 parts.Add(Bed != null && Owner.ownership?.OwnedBed?.Position != Bed.cell
                     ? (occupant != null ? $"the bed isn't {occupant.LabelShort}'s yet" : "the bed isn't mine yet") : "waiting for the roof");
             if (furnishing)
-                return $"Adding a {entries[0].def.label} ({material?.label ?? "no material"}) {where}: {string.Join(", ", parts)}.";
+                return $"Adding a {ItemLabel} ({material?.label ?? "no material"}) {where}: {string.Join(", ", parts)}.";
             return $"{KindFor.CapitalizeFirst()} ({SizeLabel}, {material?.label}) {where}: {string.Join(", ", parts)}.";
         }
 
@@ -236,16 +279,19 @@ namespace AIPawnControl
             foreach (var e in entries)
                 if (Pending(e) is Blueprint b)
                     b.Destroy(DestroyMode.Cancel);
+            foreach (var c in floorCells)
+                if (floor != null && FloorPending(c) is Blueprint fb)
+                    fb.Destroy(DestroyMode.Cancel);
             state = State.Abandoned;
             if (byPlayer && furnishing)
-                Remember($"Someone cancelled the {entries[0].def.label} I was adding {where}.", 5);
+                Remember($"Someone cancelled the {ItemLabel} I was adding {where}.", 5);
             else if (byPlayer)
             {
                 Remember($"Someone cancelled the blueprints for my {Kind} {where}. The project is off.", 6);
                 Messages.Message($"{pawn.LabelShort}'s {Kind} project was called off: its blueprints were cancelled.", pawn, MessageTypeDefOf.NeutralEvent, false);
             }
             else
-                Remember(furnishing ? $"I gave up on adding a {entries[0].def.label} {where}." : $"I gave up on my {Kind} {where}.", 4);
+                Remember(furnishing ? $"I gave up on adding a {ItemLabel} {where}." : $"I gave up on my {Kind} {where}.", 4);
             ModLog.Message($"{pawn.LabelShort}'s {Kind} abandoned ({(byPlayer ? "the player cancelled a blueprint" : "her choice")}).");
         }
 
@@ -264,6 +310,8 @@ namespace AIPawnControl
             Scribe_Collections.Look(ref builtOnce, "builtOnce", LookMode.Value);
             Scribe_Values.Look(ref firstNight, "firstNight");
             Scribe_Values.Look(ref furnishing, "furnishing");
+            Scribe_Defs.Look(ref floor, "floor");
+            Scribe_Collections.Look(ref floorCells, "floorCells", LookMode.Value);
             Scribe_References.Look(ref occupant, "occupant");
             Scribe_Values.Look(ref unclaimed, "unclaimed");
             Scribe_Values.Look(ref outfitted, "outfitted");
@@ -271,6 +319,7 @@ namespace AIPawnControl
             {
                 kindDef = kindDef ?? RoomKindDef.Bedroom; // saves from before room kinds held only bedrooms
                 builtOnce = builtOnce ?? new List<int>();
+                floorCells = floorCells ?? new List<IntVec3>();
             }
         }
     }
@@ -305,6 +354,9 @@ namespace AIPawnControl
 
         /// <summary>Rooms being built on the map (not furnishing), for the ladder.</summary>
         public IEnumerable<BuildProject> ActiveOn(Map map) => projects.Where(p => p.Active && p.map == map && !p.furnishing);
+
+        /// <summary>Everything being built on the map, upgrades included.</summary>
+        public IEnumerable<BuildProject> ActiveOnAll(Map map) => projects.Where(p => p.Active && p.map == map);
 
         /// <summary>Who designed a finished room, for [Rooms]' credit, or null.</summary>
         public Pawn BuilderOf(Room room) => projects.Find(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == room.Map && p.Room == room)?.pawn;
@@ -356,7 +408,7 @@ namespace AIPawnControl
             if (own != null)
             {
                 var mine = projects.Find(p => p.pawn == pawn && p.state == BuildProject.State.Done && !p.furnishing && p.Bed != null && p.Room == own);
-                parts.Add($"My {own.GetRoomRoleLabel()}: {(mine != null ? mine.SizeLabel : own.CellCount + " cells")}, {Impressiveness(own)}.");
+                parts.Add($"My {own.Role.label}: {(mine != null ? mine.SizeLabel : own.CellCount + " cells")}, {Impressiveness(own)}.");
             }
             else if (bed == null)
                 parts.Add("I have no bed of my own.");

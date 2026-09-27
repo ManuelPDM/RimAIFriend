@@ -9,8 +9,10 @@ namespace AIPawnControl
     /// <summary>One item of a room kind and the rules for where it goes (PHASE4.md §1).</summary>
     public class RoomItem
     {
-        /// <summary>Alternatives: the first one that's buildable is used (dining chair, else stool).</summary>
+        /// <summary>Alternatives: the first one that's buildable is used (a fueled stove). Ignored when there's a need.</summary>
         public List<ThingDef> defs = new List<ThingDef>();
+        /// <summary>What it does instead of named defs (FURNISHING.md §4): bed, seat, shelf, accessory (of the nextTo item).</summary>
+        public string need;
         /// <summary>Against a wall (a bed: its head, Position, against the wall and rotated away). The default placement.</summary>
         public bool backToWall;
         /// <summary>As close to the middle as the other rules allow (a dining table).</summary>
@@ -30,8 +32,10 @@ namespace AIPawnControl
         /// <summary>Free cardinal neighbours to keep around it (a chess table's players).</summary>
         public int clearAround;
 
-        public ThingDef Resolve(Map map)
+        public ThingDef Resolve(Map map, ThingDef anchor = null)
         {
+            if (need != null)
+                return Needs.Best(need, map, anchor);
             ThingDef first = null;
             foreach (var def in defs)
             {
@@ -63,7 +67,7 @@ namespace AIPawnControl
         public static RoomKindDef Bedroom => DefDatabase<RoomKindDef>.GetNamed("AIPC_Bedroom");
         public static RoomKindDef Plain => DefDatabase<RoomKindDef>.GetNamed("AIPC_PlainRoom");
 
-        public static bool Buildable(ThingDef def) => BuildCopyCommandUtility.FindAllowedDesignator(def) != null;
+        public static bool Buildable(BuildableDef def) => BuildCopyCommandUtility.FindAllowedDesignator(def) != null;
 
         /// <summary>Walls and doors are buildable, and every required item has a buildable def.</summary>
         public bool BuildableNow(Map map) =>
@@ -95,9 +99,11 @@ namespace AIPawnControl
             s.reserved.Add(plan.doorInside);
             var firstOf = new List<PlanEntry>();
 
-            foreach (var item in plan.kind.items)
+            var kindItems = plan.kind.items;
+            foreach (var item in kindItems)
             {
-                ThingDef def = item.Resolve(plan.map);
+                ThingDef anchorDef = item.nextTo >= 0 && item.nextTo < kindItems.Count ? kindItems[item.nextTo].Resolve(plan.map) : null;
+                ThingDef def = item.Resolve(plan.map, anchorDef);
                 PlanEntry first = null;
                 int count = 0;
                 if (def != null)

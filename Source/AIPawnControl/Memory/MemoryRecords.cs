@@ -130,23 +130,4 @@ namespace AIPawnControl
             Scribe_Values.Look(ref vectorTag, "vectorTag");
         }
     }
-
-    /// <summary>Something she wants, carried across days.</summary>
-    public class Goal : IExposable
-    {
-        public const string Mine = "me";
-
-        public string text;
-        public string why;
-        public string source;
-        public int since;
-
-        public void ExposeData()
-        {
-            Scribe_Values.Look(ref text, "text");
-            Scribe_Values.Look(ref why, "why");
-            Scribe_Values.Look(ref source, "source");
-            Scribe_Values.Look(ref since, "since");
-        }
-    }
 }

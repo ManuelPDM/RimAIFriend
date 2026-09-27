@@ -20,14 +20,13 @@ namespace AIPawnControl
         private const int MaxFiles = 8;
         private const int MaxReembed = 20;
 
-        public const int MaxDiary = 600, MaxMemoryText = 200, MaxImpression = 240, MaxThreads = 160, MaxFactText = 120, MaxGoalText = 120, MaxWhy = 160;
+        public const int MaxDiary = 600, MaxMemoryText = 200, MaxImpression = 240, MaxThreads = 160, MaxFactText = 120, MaxWhy = 160;
 
         private readonly PawnMind mind;
         private readonly bool dev;
         private readonly List<MemoryEvent> events;
         private List<MemoryRecord> shown = new List<MemoryRecord>(); // M1..
         private readonly List<string> names;                         // allowed person-file names
-        private readonly List<Goal> goalsShown;                      // G1..
         private readonly List<WorkTypeDef> workTypes;                // what "work" may name (STREAMLINE.md §8)
         private readonly int seenEventId, seenTick;                  // what this Reflect covers, for the next one
 
@@ -38,7 +37,6 @@ namespace AIPawnControl
             this.mind = mind;
             this.dev = dev;
             this.events = events;
-            goalsShown = Memory.goals.ToList();
             workTypes = ActionCatalog.PlannableWorkTypes(mind.pawn);
             seenEventId = Memory.LastEventId;
             seenTick = Find.TickManager.TicksGame;
@@ -102,10 +100,8 @@ namespace AIPawnControl
                     return $"E{i + 1} {e.When(map)} · {e.source}{people} · importance {e.importance}: {e.Text}";
                 })),
                 ["people"] = string.Join("\n", names.Select(Describe)),
-                ["goals"] = goalsShown.Count > 0
-                    ? string.Join("\n", goalsShown.Select((g, i) => $"G{i + 1} {g.text}" + (string.IsNullOrEmpty(g.why) ? "" : $" (why: {g.why})")))
-                    : "(none)",
                 ["worktypes"] = workTypes.Count > 0 ? string.Join(", ", workTypes.Select(w => w.labelShort)) : "(none)",
+                ["workwaiting"] = (map != null ? WorkWaiting.Lines(map) : null) ?? "(nothing waiting)",
                 ["memories"] = shown.Count > 0
                     ? string.Join("\n", shown.Select((m, i) => $"M{i + 1} day {GenDate.DaysPassedAt(m.tick) + 1} · importance {m.importance}: {m.text}"))
                     : "(none yet)",
@@ -178,13 +174,6 @@ namespace AIPawnControl
                 ["threads"] = Str(MaxThreads),
                 ["facts"] = Arr(fact, 3),
             });
-            var goal = Obj(new Dictionary<string, object>
-            {
-                ["op"] = Enum(new object[] { "add", "done", "drop" }),
-                ["id"] = Enum(Numbers(goalsShown.Count)),
-                ["text"] = Str(MaxGoalText),
-                ["why"] = Str(MaxWhy),
-            });
             var work = Obj(new Dictionary<string, object>
             {
                 ["type"] = Enum(new object[] { NoWork }.Concat(workTypes.Select(w => (object)w.labelShort))),
@@ -197,7 +186,6 @@ namespace AIPawnControl
                 ["lately"] = Str(MindMemory.MaxLately),
                 ["memories"] = Arr(memory, 8),
                 ["people"] = Arr(person, 6),
-                ["goals"] = Arr(goal, 3),
                 ["work"] = work,
             });
         }
@@ -215,7 +203,6 @@ namespace AIPawnControl
 
         private readonly List<Draft> drafts = new List<Draft>();
         private readonly List<(string name, Dictionary<string, object> item)> personOps = new List<(string, Dictionary<string, object>)>();
-        private readonly List<(string op, int id, string text, string why)> goalOps = new List<(string, int, string, string)>();
         private string diary, newLately;
         private const string NoWork = "none";
         private WorkTypeDef workType; // Reflect's one work change, or null
@@ -277,9 +264,6 @@ namespace AIPawnControl
                 workFeeling = work.TryGetValue("feeling", out object f) ? f as string : null;
                 workWhy = Clean(work.TryGetValue("why", out object y) ? y : null, MaxWhy);
             }
-            foreach (var g in List(reply, "goals"))
-                goalOps.Add((g.TryGetValue("op", out object op) ? op as string : null, Int(g, "id"),
-                    Clean(g.TryGetValue("text", out object t) ? t : null, MaxGoalText), Clean(g.TryGetValue("why", out object w) ? w : null, MaxWhy)));
         }
 
         /// <summary>Texts to embed after the call: the drafts, the diary, then older memories without a current vector.</summary>
@@ -377,16 +361,6 @@ namespace AIPawnControl
 
             foreach (var (name, item) in personOps)
                 ApplyPerson(Memory.File(name, create: true), item, now);
-            foreach (var (op, id, text, why) in goalOps)
-            {
-                if ((op == "done" || op == "drop") && id >= 1 && id <= goalsShown.Count && Memory.goals.Remove(goalsShown[id - 1]))
-                    mind.AddDecision((op == "done" ? "Done: " : "Gave up on: ") + goalsShown[id - 1].text, importance: 0);
-            }
-            foreach (var (op, id, text, why) in goalOps) // after retiring, so a new goal doesn't push out one that was just finished
-            {
-                if (op == "add" && text != null)
-                    Memory.AddGoal(text, why, Goal.Mine);
-            }
 
             if (workType != null && MindActions.Feelings.Contains(workFeeling))
                 mind.SetWorkFeeling(workType, workFeeling, workWhy);
@@ -396,7 +370,7 @@ namespace AIPawnControl
             if (!dev)
                 Memory.lastReflectNight = night;
             return $"{events.Count} events → {drafts.Count} new/updated memories ({merged} merged as saying the same thing, {skipped} skipped as already remembered, {dropped} dropped by the guards), " +
-                   $"{personOps.Count} person files ({factsMerged} repeated facts merged), {goalOps.Count} goal changes, work: {(workType != null ? workFeeling + " " + workType.labelShort : "no change")}, {archived} archived, vectors: {(haveVectors ? embedded.Tag : "none (" + (embedded?.Error ?? "skipped") + ")")}";
+                   $"{personOps.Count} person files ({factsMerged} repeated facts merged), work: {(workType != null ? workFeeling + " " + workType.labelShort : "no change")}, {archived} archived, vectors: {(haveVectors ? embedded.Tag : "none (" + (embedded?.Error ?? "skipped") + ")")}";
         }
 
         private void ApplyPerson(PersonFile file, Dictionary<string, object> item, int now)

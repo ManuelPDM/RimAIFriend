@@ -2,7 +2,8 @@
 <!--
   Room kinds a mind can build (PHASE4.md §1). A kind is the set of items that makes vanilla give a room its role; the
   project is done when vanilla really gives it. Item rules: backToWall (the default), centre, nextTo (index of an
-  earlier item), repeat/min, optional, preferNew, medical, clearAround. minSize: x = the short side, z = the long side.
+  earlier item), repeat/min, optional, preferNew, medical, clearAround. need (bed, seat, shelf, accessory) picks the
+  best buildable def by what it does instead of a defs list (FURNISHING.md §4), so research and mods reach it. minSize: x = the short side, z = the long side.
   size: the interior code builds it at (default 5x5; STREAMLINE.md §7). Order matters: it's the order the kinds are listed
   to the model.
 -->
@@ -10,13 +11,13 @@
   <AIPawnControl.RoomKindDef>
     <defName>AIPC_Bedroom</defName>
     <label>bedroom</label>
-    <description>a bed and an end table</description>
+    <description>a bed and something beside it</description>
     <role>Bedroom</role>
     <owned>true</owned>
     <size>(4,4)</size>
     <items>
-      <li><defs><li>Bed</li></defs><backToWall>true</backToWall></li>
-      <li><defs><li>EndTable</li></defs><nextTo>0</nextTo><optional>true</optional></li>
+      <li><need>bed</need><backToWall>true</backToWall></li>
+      <li><need>accessory</need><nextTo>0</nextTo><optional>true</optional></li>
     </items>
   </AIPawnControl.RoomKindDef>
 
@@ -26,7 +27,7 @@
     <description>beds for several colonists</description>
     <role>Barracks</role>
     <items>
-      <li><defs><li>Bed</li></defs><backToWall>true</backToWall><repeat>6</repeat><min>2</min></li>
+      <li><need>bed</need><backToWall>true</backToWall><repeat>6</repeat><min>2</min></li>
     </items>
   </AIPawnControl.RoomKindDef>
 
@@ -48,7 +49,7 @@
     <role>DiningRoom</role>
     <items>
       <li><defs><li>Table2x2c</li><li>Table1x2c</li></defs><centre>true</centre></li>
-      <li><defs><li>DiningChair</li><li>Stool</li></defs><nextTo>0</nextTo><repeat>4</repeat></li>
+      <li><need>seat</need><nextTo>0</nextTo><repeat>4</repeat></li>
     </items>
   </AIPawnControl.RoomKindDef>
 
@@ -105,7 +106,7 @@
     <description>shelves along the walls</description>
     <role>Storeroom</role>
     <items>
-      <li><defs><li>Shelf</li><li>ShelfSmall</li></defs><backToWall>true</backToWall><repeat>6</repeat></li>
+      <li><need>shelf</need><backToWall>true</backToWall><repeat>6</repeat></li>
     </items>
   </AIPawnControl.RoomKindDef>
 

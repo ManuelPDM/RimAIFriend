@@ -40,7 +40,7 @@ namespace AIPawnControl
         private int lastChatTick = -1;
         private bool chatPending; // unanswered player messages, e.g. while unconscious or while another call was running
         private bool chatWhileOut;
-        public MindMemory memory = new MindMemory(); // events, memories, diary, person files, lately, goals
+        public MindMemory memory = new MindMemory(); // events, memories, diary, person files, lately
 
         // Not saved
         private LlmRequest current;
@@ -143,38 +143,6 @@ namespace AIPawnControl
 
         public string TalkLine(Job job) => job.loadID == talkLineJobId ? talkLine : null;
 
-        private class PendingTalk
-        {
-            public Pawn target;
-            public InteractionDef def;
-            public string line;
-            public int tick;
-        }
-
-        private PendingTalk pendingTalk; // not saved: a reload just drops a talk that hadn't happened yet
-
-        /// <summary>A talk with someone who isn't nearby: it starts the next time they're near each other, until her next decision.</summary>
-        public void TalkWhenWeMeet(Pawn target, InteractionDef def, string line) =>
-            pendingTalk = new PendingTalk { target = target, def = def, line = line, tick = Find.TickManager.TicksGame };
-
-        private void CheckPendingTalk()
-        {
-            var p = pendingTalk;
-            if (p == null)
-                return;
-            if (Find.TickManager.TicksGame - p.tick > ActionCatalog.KeepGoingHours * GenDate.TicksPerHour || p.target.Destroyed || p.target.Dead)
-            {
-                pendingTalk = null;
-                ModLog.Message($"{pawn.LabelShort}: didn't meet {p.target.LabelShort} to talk; dropped quietly."); // not in [Recent]: one line per talk at most
-                return;
-            }
-            if (PausedReason() != null || !p.target.Spawned || !p.target.Awake() || p.target.Downed || !SnapshotBuilder.Nearby(pawn, p.target))
-                return;
-            pendingTalk = null;
-            string result = MindActions.TalkTo(this, p.target, p.def, p.line);
-            ModLog.Message($"{pawn.LabelShort} met {p.target.LabelShort}: {result}");
-        }
-
         /// <summary>Called by MindManager every check interval.</summary>
         public void CheckTriggers()
         {
@@ -182,7 +150,6 @@ namespace AIPawnControl
                 chat.Clear(); // long chat histories make small models drift; memory across conversations is Phase 3
             if (chatPending)
                 return; // answered from UpdateChat, which also runs while paused
-            CheckPendingTalk();
             if (Thinking || Find.TickManager.TicksGame < backoffUntilTick || pawn == null || !pawn.Spawned)
                 return;
             if (TryReflect())
@@ -816,8 +783,8 @@ namespace AIPawnControl
             string result = MindActions.ApplyWorkFeeling(pawn, work, feeling);
             if (result == null)
                 return;
-            bool applied = !result.StartsWith("I can't") && !result.Contains("nobody else can");
-            if (applied)
+            bool applied = !result.StartsWith("I can't") && !result.Contains("nobody else can") && !result.StartsWith("I already") && !result.EndsWith("where it is.");
+            if (applied && MindActions.IsFeeling(feeling))
                 workFeelings[work.defName] = why != null ? $"{feeling}: {why}" : feeling;
             AddDecision($"{result}{(why != null ? $" ({why})" : "")}", importance: applied ? 4 : 0);
             ModLog.Message($"{pawn.LabelShort} work feeling: {feeling} {work.defName} | {result} | why: {why}");

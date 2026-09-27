@@ -131,7 +131,7 @@ namespace AIPawnControl
 
         /// <summary>
         /// Plan: [About X] for the people in today's events, and the player's file first when it has open threads, so a
-        /// conversation from yesterday reaches the new day (PHASE6.md §2.2). Her lately and goals are in the system prompt.
+        /// conversation from yesterday reaches the new day (PHASE6.md §2.2). Her lately is in the system prompt.
         /// </summary>
         public static Recall Plan(PawnMind mind)
         {

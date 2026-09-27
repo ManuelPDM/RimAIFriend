@@ -55,7 +55,8 @@ namespace AIPawnControl
             ["chat"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember" },
             ["reply"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember" }, // Chat, with a colonist in the player's place
             ["base"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
-            ["reflect"] = new HashSet<string> { "Me", "Time" }, // its events, people and goals come in the task values
+            ["reflect"] = new HashSet<string> { "Me", "Time" }, // its events and people come in the task values
+            ["upgrade"] = new HashSet<string> { "Me", "Time", "Condition", "Feelings" }, // small: the Base call just picked the room
         };
 
         /// <summary>Characters the sections of one user prompt may use before droppable ones go.</summary>
@@ -94,9 +95,6 @@ namespace AIPawnControl
             var memory = mind.memory;
             if (!string.IsNullOrEmpty(memory.lately))
                 text += "\n\n[Who I am lately] " + memory.lately;
-            var goals = memory.goals.Where(g => g.source == Goal.Mine).Select(g => string.IsNullOrEmpty(g.why) ? g.text : $"{g.text} ({g.why})").ToList();
-            if (goals.Count > 0)
-                text += "\n[My goals] " + string.Join(" · ", goals);
             return text;
         }
 

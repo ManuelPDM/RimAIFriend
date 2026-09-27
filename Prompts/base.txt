@@ -16,7 +16,7 @@ Pick one:
 - "site": for a room, a site letter from the list. Otherwise "-".
 - "material": for a room, what its walls are made of. Otherwise "-".
 
-Think about what the base needs most ([Colony] says what's next and how the food looks), what the stores can pay for, your mood, your goals and who you are. Stocking up now means the next thing goes up faster.
+Think about what the base needs most ([Colony] says what's next and how the food looks), what the stores can pay for, your mood and who you are. Stocking up now means the next thing goes up faster.
 
 "reason": why this, in your own voice, briefly.
 "say": what you say out loud about it, or "" to stay silent. 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks.

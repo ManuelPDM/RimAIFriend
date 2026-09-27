@@ -53,16 +53,35 @@ namespace AIPawnControl
                     };
                 yield return new Command_Action
                 {
-                    defaultLabel = "DEV: Furnish now",
-                    defaultDesc = "Logs the furnishing options the Base call would show and places the first one. No LLM; the cooldown applies.",
+                    defaultLabel = "DEV: Upgrade options",
+                    defaultDesc = "Logs what each room need resolves to, and every room's upgrade line and its upgrades (FURNISHING.md §4-5). No LLM, places nothing.",
                     icon = icon,
                     action = () =>
                     {
-                        var options = Furnishing.Options(pawn);
-                        ModLog.Message($"{pawn.LabelShort} furnishing options ({BuildManager.Instance.CantPlanReason(pawn) ?? "may build"}): " +
-                                       (options.Count > 0 ? string.Join(" | ", options.Select(o => o.label)) : "none"));
-                        if (options.Count > 0)
-                            ModLog.Message(Furnishing.Place(pawn, options[0]));
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
+                        ModLog.Message("Needs: " + string.Join(", ", new[] { Needs.Bed, Needs.Seat, Needs.Shelf }.Select(n => $"{n} = {Needs.Best(n, pawn.Map)?.label ?? "none"}"))
+                                       + $", accessory for a bed = {Needs.Best(Needs.Accessory, pawn.Map, Needs.Best(Needs.Bed, pawn.Map))?.label ?? "none"}");
+                        foreach (var room in Upgrades.Rooms(pawn))
+                        {
+                            var ups = Upgrades.For(room, pawn);
+                            ModLog.Message($"{Upgrades.RoomLine(room, pawn)}: " + (ups.Count > 0 ? string.Join(" | ", ups.Select(u => $"[{u.gain}] {u.label}")) : "no upgrades"));
+                            foreach (var u in ups.Where(x => x.gain == Upgrades.Gain.Looks))
+                                ModLog.Message($"  check {u.floor?.label ?? u.def.label}: predicted {u.predicted:0.0}, vanilla {Upgrades.TryForReal(room, u):0.0}");
+                        }
+                        ModLog.Message($"Upgrade options took {clock.ElapsedMilliseconds} ms.");
+                    },
+                };
+                yield return new Command_Action
+                {
+                    defaultLabel = "DEV: Upgrade call now",
+                    defaultDesc = "Runs the Upgrade call (FURNISHING.md §5) for the first room with upgrades (her own first), skipping the Base call.",
+                    icon = icon,
+                    action = () =>
+                    {
+                        if (mind?.persona == null)
+                            return;
+                        var room = Upgrades.Rooms(pawn).FirstOrDefault(r => Upgrades.For(r, pawn).Count > 0);
+                        mind.AddDecision("DEV upgrade call now: " + (room != null ? UpgradeCall.Start(mind, room) : "no room to upgrade"), importance: 0);
                     },
                 };
                 yield return new Command_Action

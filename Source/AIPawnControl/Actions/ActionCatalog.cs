@@ -191,7 +191,8 @@ namespace AIPawnControl
             if (pawn.interactions == null || !SocialInteractionUtility.CanInitiateInteraction(pawn))
                 return new List<Pawn>();
             return pawn.Map.mapPawns.FreeColonistsSpawned
-                .Where(p => p != pawn && p.Awake() && !p.Downed && !p.Drafted && p.RaceProps.Humanlike && p.interactions != null)
+                .Where(p => p != pawn && p.Awake() && !p.Downed && !p.Drafted && p.RaceProps.Humanlike && p.interactions != null
+                            && SnapshotBuilder.Nearby(pawn, p)) // only people she can talk to now: no decision spent on someone across the map
                 .OrderBy(p => p.Position.DistanceToSquared(pawn.Position))
                 .Take(MaxTalkTargets)
                 .ToList();

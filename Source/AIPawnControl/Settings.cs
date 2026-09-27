@@ -18,7 +18,7 @@ namespace AIPawnControl
         public int actsPerDay = 10;
         public bool speakLines = true;
         public bool chatBubbles = true;
-        public bool memoryEnabled = true; // off: no Reflect and no retrieval; events and goals are still kept
+        public bool memoryEnabled = true; // off: no Reflect and no retrieval; events are still kept
         public bool allowBuilding = true;  // off: no room projects offered; a running one is left as-is
         public bool allowChores = true;    // off: no colony chores offered (Phase 5); what's set up stays
         public bool mindsAnswer = true;    // off: a talk between two minds carries only the first line (PHASE6.md §4)

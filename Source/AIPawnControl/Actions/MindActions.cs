@@ -47,11 +47,6 @@ namespace AIPawnControl
                 return $"Couldn't talk to {target.LabelShort}: they're not available.";
             if (mind.OnCooldown(interaction, target))
                 return $"I've done \"{interaction.label}\" too recently.";
-            if (!SnapshotBuilder.Nearby(mind.pawn, target))
-            {
-                mind.TalkWhenWeMeet(target, interaction, line);
-                return $"I'll talk to {target.LabelShort} next time we're near each other ({interaction.label}).";
-            }
             Job job = JobMaker.MakeJob(AIPC_JobDefOf.AIPC_TalkTo, target);
             job.interaction = interaction;
             mind.SetTalkLine(job, line);
@@ -84,7 +79,10 @@ namespace AIPawnControl
             return $"Set my work by my passions ({changed} changed): {ActionCatalog.DescribePriorities(pawn)}.";
         }
 
-        public static readonly string[] Feelings = { "love", "dislike", "refuse" };
+        public static readonly string[] Feelings = { "love", "dislike", "refuse", "raise", "lower" };
+
+        /// <summary>How she feels about the work (shown in [Me]); raise and lower are one step for the colony's need (FURNISHING.md §6).</summary>
+        public static bool IsFeeling(string change) => change == "love" || change == "dislike" || change == "refuse";
 
         /// <summary>
         /// Reflect's one work change: love → first (1, or on), dislike → last (4), refuse → off. A refusal is ignored when
@@ -112,6 +110,23 @@ namespace AIPawnControl
                         return $"I'd rather not do {work.labelShort}, but nobody else can, so I'll keep at it.";
                     pawn.workSettings.SetPriority(work, 0);
                     return $"I won't do {work.labelShort} anymore.";
+                case "raise":
+                {
+                    int p = pawn.workSettings.GetPriority(work);
+                    int to = !manual ? 3 : p == 0 ? 4 : Math.Max(1, p - 1);
+                    if (to == p || (!manual && p > 0))
+                        return $"I already do {work.labelShort} as much as I can.";
+                    pawn.workSettings.SetPriority(work, to);
+                    return p == 0 ? $"I'll take on {work.labelShort}." : $"I'll do more {work.labelShort}.";
+                }
+                case "lower":
+                {
+                    int p = pawn.workSettings.GetPriority(work);
+                    if (!manual || p == 0 || p == 4)
+                        return $"I'll keep {work.labelShort} where it is.";
+                    pawn.workSettings.SetPriority(work, p + 1);
+                    return $"I'll do less {work.labelShort}.";
+                }
                 default:
                     return null;
             }
