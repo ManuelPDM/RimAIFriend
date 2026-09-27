@@ -2,11 +2,13 @@ It's {time}. {trigger}
 
 {snapshot}
 
-What do you do now? Pick one option by its number. "keep going" means carry on with your normal day and let your schedule and work priorities guide you. Only pick something else if it fits your needs, mood, plan or personality better right now.
+What do you do now? Pick one option by its number. "keep going" means carry on with your day: your work, meals, sleep and recreation happen on their own. Pick something else when it fits the colony's needs, your mood, your goals or who you are better right now.
 {menu}
 
+If you pick "talk to someone": "with" is who (one of: {talkto}), and "tone" is how: positive (friendly or personal) or negative (a jab or an insult; it hurts the relationship and can start a fight). How you feel about them ([People], [About ...]) and who you are decide it. Someone nearby you talk to now; anyone else, the next time you're near each other. Otherwise "with" is "-" and "tone" is "positive".
+
 Also write "say": what you say out loud, or "" to stay silent.
-- If you pick a "talk to" option, "say" is your opening line to that person. Match the kind of talk: chitchat is light, a deep talk is personal, a slight or insult stings.
+- If you talk to someone, "say" is your opening line to them, in the tone you picked.
 - For anything else, only say something if you'd really say it out loud right now: a remark, a grumble, a word to someone nearby. Silence is fine.
 - 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks. Only speak to people who are nearby; you can talk about anyone.
 

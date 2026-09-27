@@ -8,7 +8,7 @@ using Verse;
 
 namespace AIPawnControl
 {
-    /// <summary>Dev tools for colony chores (PHASE5.md §7), as debug actions so RimBridge can run them by path. No LLM.</summary>
+    /// <summary>Dev tools for the base and colony chores (STREAMLINE.md §10), as debug actions so RimBridge can run them by path.</summary>
     public static class ChoreDevTools
     {
         public static string ReportPath => Path.Combine(GenFilePaths.SaveDataFolderPath, "AIPawnControl", "chore-report.txt");
@@ -21,7 +21,7 @@ namespace AIPawnControl
             return null;
         }
 
-        /// <summary>Logs every option the finders have for the selected colonist, the validator's verdict, and what the menu would show.</summary>
+        /// <summary>Logs every stock-up option for the selected colonist, the validator's verdict, and whether the Act menu shows "work on the base".</summary>
         [DebugAction("AI Pawn Control", "Chore options now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         public static void OptionsNow()
         {
@@ -31,31 +31,26 @@ namespace AIPawnControl
             var clock = System.Diagnostics.Stopwatch.StartNew();
             var all = ChoreOptions.All(pawn, ignoreLimits: true);
             long ms = clock.ElapsedMilliseconds;
-            var sb = new StringBuilder($"{pawn.LabelShort} chore options ({all.Count} found in {ms} ms, limits ignored):\n");
-            foreach (var o in all.Concat(ChoreOptions.Stops(pawn)))
-                sb.AppendLine($"  [{o.kind}] {o.useful:0.0} {o.label}{(o.AmountText() is string amounts ? ". " + amounts : "")} ({o.needs}) | check: {o.check() ?? "ok"}");
-            sb.AppendLine("The Act menu shows \"work on the colony\" (limits applied): " + (ChoreOptions.AnythingToDo(pawn) ? "yes" : "no"));
+            var sb = new StringBuilder($"{pawn.LabelShort} stock-up options ({all.Count} found in {ms} ms, limits ignored):\n");
+            foreach (var o in all)
+                sb.AppendLine($"  [{o.kind}] {o.useful:0.0} {o.label} | check: {o.check() ?? "ok"}");
+            sb.AppendLine($"The Act menu shows \"{BaseCall.MenuLabel(pawn.Map)}\" (limits applied): " + (BaseCall.AnythingToDo(pawn) ? "yes" : "no"));
             foreach (Chore.Kind kind in System.Enum.GetValues(typeof(Chore.Kind)))
                 sb.AppendLine($"  {kind}: {ChoreManager.Instance?.CantReason(pawn, kind) ?? "may start"}");
             sb.Append("[Colony work] " + ColonyWork.Line(pawn));
             ModLog.Message(sb.ToString());
         }
 
-        /// <summary>Applies the most useful option of one kind for the selected colonist, ignoring cooldowns and caps.</summary>
+        /// <summary>Applies the most useful stock-up option of one kind for the selected colonist, ignoring cooldowns and caps. No LLM.</summary>
         [DebugAction("AI Pawn Control", "Apply chore", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         public static List<DebugActionNode> ApplyChore()
         {
-            return System.Enum.GetValues(typeof(Chore.Kind)).Cast<Chore.Kind>()
+            return new[] { Chore.Kind.Cut, Chore.Kind.Mine, Chore.Kind.Bill, Chore.Kind.Hunt, Chore.Kind.Gather }
                 .Select(kind => new DebugActionNode(kind.ToString(), DebugActionType.Action, () =>
                 {
                     Pawn pawn = Selected();
                     if (pawn == null)
                         return;
-                    if (kind == Chore.Kind.Field || kind == Chore.Kind.Stockpile)
-                    {
-                        ModLog.Message($"Apply chore {kind} for {pawn.LabelShort}: {PlaceDefault(pawn, kind)}");
-                        return;
-                    }
                     var option = ChoreOptions.All(pawn, ignoreLimits: true).Where(o => o.kind == kind).OrderByDescending(o => o.useful).FirstOrDefault();
                     if (option == null)
                     {
@@ -63,41 +58,14 @@ namespace AIPawnControl
                         return;
                     }
                     var mind = MindManager.Instance?.MindOf(pawn) ?? new PawnMind(pawn, null);
-                    var choice = new ColonyChoice { size = 1, count = option.counts?[1] ?? 0 };
-                    if (option.needs == ChoreNeeds.Crop)
-                        choice.crop = Fields.Crops(pawn.Map).FirstOrDefault(c => !option.label.Contains(c.label));
-                    ModLog.Message($"Apply chore {kind} for {pawn.LabelShort}: {option.label} (medium) → {option.apply(mind, choice)}");
+                    ModLog.Message($"Apply chore {kind} for {pawn.LabelShort}: {option.label} → {option.apply(mind)}");
                 }))
                 .ToList();
         }
 
-        /// <summary>No LLM: site A, medium, the fastest food crop (field) or "everything" (stockpile).</summary>
-        private static string PlaceDefault(Pawn pawn, Chore.Kind kind)
-        {
-            Map map = pawn.Map;
-            var scan = new ChoreScan(pawn);
-            if (kind == Chore.Kind.Field)
-            {
-                var crop = Fields.Crops(map).FirstOrDefault(c => Fields.Purpose(c) == "food") ?? Fields.Crops(map).FirstOrDefault();
-                var foci = SiteFinder.NoBuildFoci(map);
-                var finder = new ZoneSites(scan, c => Fields.CellOk(c, map, foci), c => Fields.CellScore(c, map));
-                var site = finder.Find(Fields.Sizes).FirstOrDefault();
-                if (crop == null || site == null)
-                    return "no crop or no site";
-                var rect = site.Rect(System.Math.Min(6, site.maxSize));
-                return Fields.Place(pawn, rect, crop, finder.Where(rect, site.steps));
-            }
-            var piles = new ZoneSites(scan, c => Stockpiles.CellOk(c, map), c => Stockpiles.CellScore(c, map));
-            var pile = piles.Find(Stockpiles.Sizes).FirstOrDefault();
-            if (pile == null)
-                return "no site";
-            var r = pile.Rect(System.Math.Min(5, pile.maxSize));
-            return Stockpiles.Place(pawn, r, "everything", piles.Where(r, pile.steps));
-        }
-
-        /// <summary>The real Colony call for the selected mind, ignoring budget, cooldowns and caps.</summary>
-        [DebugAction("AI Pawn Control", "Colony call now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
-        public static void ColonyCallNow()
+        /// <summary>The real Base call for the selected mind, ignoring budget, cooldowns and caps.</summary>
+        [DebugAction("AI Pawn Control", "Base call now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void BaseCallNow()
         {
             Pawn pawn = Selected();
             var mind = pawn != null ? MindManager.Instance?.MindOf(pawn) : null;
@@ -106,7 +74,55 @@ namespace AIPawnControl
                 Messages.Message("Select a colonist with a mind that isn't thinking.", MessageTypeDefOf.RejectInput, false);
                 return;
             }
-            mind.AddDecision("DEV colony call now: " + ColonyCall.Start(mind, dev: true), importance: 0);
+            mind.AddDecision("DEV base call now: " + BaseCall.Start(mind, dev: true), importance: 0);
+        }
+
+        /// <summary>Every ladder rung and its verdict, and the [Colony] line.</summary>
+        [DebugAction("AI Pawn Control", "Ladder now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void LadderNow()
+        {
+            Map map = Find.CurrentMap;
+            var sb = new StringBuilder("Ladder:\n");
+            foreach (var r in Ladder.Evaluate(map))
+                sb.AppendLine($"  {r.label} ({r.kind?.label ?? "-"}): {(r.met ? "met" : r.underway ? "underway" : "NOT MET")}{(r.waiting != null ? " | " + r.waiting : "")}");
+            sb.Append("[Colony] Base: " + Ladder.Line(map));
+            ModLog.Message(sb.ToString());
+        }
+
+        /// <summary>The food outlook's numbers, for checking them by hand.</summary>
+        [DebugAction("AI Pawn Control", "Food outlook now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void FoodOutlookNow()
+        {
+            Map map = Find.CurrentMap;
+            var o = FoodOutlook.For(map);
+            var sb = new StringBuilder($"Food outlook: {o.colonists} colonists, need {o.needPerDay:0.00}/day, fields grow {o.growPerDay:0.00}/day, stores {o.stores:0}\n");
+            foreach (var zone in map.zoneManager.AllZones.OfType<Zone_Growing>())
+            {
+                ThingDef plant = zone.GetPlantDefToGrow();
+                if (plant == null)
+                    continue;
+                float fertility = zone.cells.Average(c => map.fertilityGrid.FertilityAt(c));
+                sb.AppendLine($"  {plant.label}: {zone.cells.Count} cells, fertility {fertility:0.00}, {Fields.Purpose(plant)}, harvest {FoodOutlook.PerHarvest(plant):0.00}/plant " +
+                              $"every {FoodOutlook.CycleDays(plant, fertility):0.0} days → {zone.cells.Count * FoodOutlook.PerCellPerDay(plant, fertility):0.00}/day");
+            }
+            sb.AppendLine($"  crop for a new field: {o.crop?.label ?? "none"} (in season: {o.cropInSeason}), winter: {(o.hasWinter ? $"in {o.daysToWinter} days for {o.winterDays}, cover {o.WinterCover:0}" : "none")}");
+            sb.AppendLine($"  unsown field: {o.unsownField}, a new field: {o.cellsWanted} cells ({o.FieldSide}x{o.FieldSide})");
+            sb.Append("[Colony] Food: " + o.Line());
+            ModLog.Message(sb.ToString());
+        }
+
+        /// <summary>Outfits the selected colonist's finished rooms again (bills and stockpiles they don't have yet).</summary>
+        [DebugAction("AI Pawn Control", "Outfit my rooms now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void OutfitNow()
+        {
+            Pawn pawn = Selected();
+            if (pawn == null || BuildManager.Instance == null)
+                return;
+            foreach (var project in BuildManager.Instance.ProjectsOf(pawn).Where(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == pawn.Map).ToList())
+            {
+                project.outfitted = true;
+                Outfitting.Outfit(project);
+            }
         }
 
         /// <summary>Stops every chore the selected colonist has running (her "stop …" path).</summary>
@@ -142,7 +158,7 @@ namespace AIPawnControl
             }
         }
 
-        /// <summary>Every option on the map (for the first colonist), each checked by its validator; a report file and a summary line.</summary>
+        /// <summary>Every stock-up option on the map (per colonist), each checked by its validator; a report file and a summary line.</summary>
         [DebugAction("AI Pawn Control", "Run chore checks", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         public static void RunChecks()
         {
@@ -160,7 +176,7 @@ namespace AIPawnControl
                     options++;
                     if (check != null)
                         failures++;
-                    sb.AppendLine($"  [{o.kind}] {o.useful:0.0} {o.label}{(o.AmountText() is string amounts ? ". " + amounts : "")}{(check != null ? " | VALIDATOR FAILED: " + check : "")}");
+                    sb.AppendLine($"  [{o.kind}] {o.useful:0.0} {o.label}{(check != null ? " | VALIDATOR FAILED: " + check : "")}");
                 }
                 sb.AppendLine("  [Colony work] " + ColonyWork.Line(pawn));
             }

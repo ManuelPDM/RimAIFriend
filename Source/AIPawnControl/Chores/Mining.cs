@@ -6,7 +6,7 @@ using Verse;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Mine options (PHASE5.md §2): per ore, the vein nearest the base that a miner can reach, up to 20 cells. Never under
+    /// Mine options (STREAMLINE.md §5): per ore, the vein nearest the base that a miner can reach, up to 40 cells. Never under
     /// overhead mountain (infestations, deadly collapses), and every roofed cell nearby must keep a roof holder within
     /// vanilla's 6.9-cell support range once the vein is gone.
     /// </summary>
@@ -26,8 +26,33 @@ namespace AIPawnControl
 
         public static IEnumerable<ChoreOption> Options(ChoreScan scan)
         {
+            foreach (var (rock, cells, steps) in Veins(scan))
+            {
+                ThingDef resource = rock.building.mineableThing;
+                string label = ResourceLabel(rock);
+                bool core = resource == ThingDefOf.Steel || resource == ThingDefOf.ComponentIndustrial || resource == ThingDefOf.Plasteel;
+                bool short_ = (resource == ThingDefOf.Steel && scan.Stock(ThingDefOf.Steel) < 100)
+                              || (resource == ThingDefOf.ComponentIndustrial && scan.Stock(ThingDefOf.ComponentIndustrial) < 5);
+                int amount = (int)(cells.Count * PerCell(rock));
+                yield return new ChoreOption
+                {
+                    kind = Chore.Kind.Mine,
+                    label = $"{label}: the vein {ChoreScan.Near(steps)} (~{cells.Count} spots, +{amount} {label})",
+                    useful = 0.3f + (core ? 0.5f : 0f) + (short_ ? 1.5f : 0f) + scan.PassionFor(SkillDefOf.Mining) * 0.5f,
+                    check = () => cells.Select(c => Check(c, scan.map)).FirstOrDefault(r => r != null) ?? (RoofSafe(scan.map, cells) ? null : "a roof would collapse"),
+                    apply = mind => Apply(mind.pawn, cells, label),
+                };
+            }
+        }
+
+        public static float PerCell(ThingDef rock) => rock.building.EffectiveMineableYield * rock.building.mineableDropChance;
+
+        /// <summary>Per ore, the vein nearest the base that a miner can reach (roof-checked, up to MaxCells cells, nearest first).</summary>
+        public static List<(ThingDef rock, List<IntVec3> cells, int steps)> Veins(ChoreScan scan)
+        {
+            var result = new List<(ThingDef, List<IntVec3>, int)>();
             if (!scan.SomeoneCanDo(WorkTypeDefOf.Mining))
-                yield break;
+                return result;
             Map map = scan.map;
             // The nearest exposed cell of each ore: next to a cell the walk from the base reached.
             var seeds = new Dictionary<ThingDef, (IntVec3 cell, int steps)>();
@@ -55,26 +80,9 @@ namespace AIPawnControl
                     ModLog.Message($"Mining finder: the {ResourceLabel(kv.Key)} vein at {kv.Value.cell} would bring a roof down; not offered.");
                     continue;
                 }
-                ThingDef resource = kv.Key.building.mineableThing;
-                float perCell = kv.Key.building.EffectiveMineableYield * kv.Key.building.mineableDropChance;
-                string label = ResourceLabel(kv.Key);
-                bool core = resource == ThingDefOf.Steel || resource == ThingDefOf.ComponentIndustrial || resource == ThingDefOf.Plasteel;
-                bool short_ = (resource == ThingDefOf.Steel && scan.Stock(ThingDefOf.Steel) < 100)
-                              || (resource == ThingDefOf.ComponentIndustrial && scan.Stock(ThingDefOf.ComponentIndustrial) < 5);
-                var cells = vein;
-                yield return new ChoreOption
-                {
-                    kind = Chore.Kind.Mine,
-                    label = $"mine {label} ({ChoreScan.Near(kv.Value.steps)})",
-                    useful = 0.3f + (core ? 0.5f : 0f) + (short_ ? 1.5f : 0f) + scan.PassionFor(SkillDefOf.Mining) * 0.5f,
-                    needs = ChoreNeeds.Amount,
-                    counts = ChoreOptions.Counts(cells.Count, 10, 20, MaxCells),
-                    describe = k => $"{k} spots, about {(int)(k * perCell)} {label}",
-                    check = () => cells.Select(c => Check(c, map)).FirstOrDefault(r => r != null) ?? (RoofSafe(map, cells) ? null : "a roof would collapse"),
-                    // Fewer cells than the checked vein are just as safe: fewer roof holders go and fewer roofed cells need one.
-                    apply = (mind, choice) => Apply(mind.pawn, cells.Take(choice.count).ToList(), label),
-                };
+                result.Add((kv.Key, vein, kv.Value.steps));
             }
+            return result;
         }
 
         /// <summary>The same rock around the seed, nearest first, up to MaxCells, each passing Check.</summary>
@@ -142,7 +150,7 @@ namespace AIPawnControl
             return true;
         }
 
-        private static string Apply(Pawn pawn, List<IntVec3> cells, string label)
+        public static string Apply(Pawn pawn, List<IntVec3> cells, string label)
         {
             Map map = pawn.Map;
             var marked = cells.Where(c => Check(c, map) == null).ToList();

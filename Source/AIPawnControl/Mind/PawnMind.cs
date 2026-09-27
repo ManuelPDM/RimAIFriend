@@ -14,8 +14,6 @@ namespace AIPawnControl
         private const int MaxDecisions = 10;
         private const int FailuresBeforeBackoff = 3;
         private const int BackoffTicks = 2 * GenDate.TicksPerHour;
-        private const int MorningHour = 5;
-        private const int ExtraPlansPerDay = 2;
         private const int MinTicksBetweenThinks = GenDate.TicksPerHour;
         private const float MinRealSecondsBetweenThinks = 10f;
         private const int IdleTicksBeforeAct = GenDate.TicksPerHour;
@@ -27,14 +25,11 @@ namespace AIPawnControl
         public Pawn pawn;
         public string persona;
         public string note;
-        public string intent;
-        public int intentTick = -1; // when the Plan that wrote it ran: "today's plan" or "yesterday's plan"
         public string lastReason;
         public List<string> decisions = new List<string>();
         public List<int> decisionTicks = new List<int>(); // parallel to decisions, for the day labels in [Recent]
-        private int lastMorningPlanDay = -1;
-        private int extraPlansDay = -1;
-        private int extraPlansToday;
+        private bool prioritiesSet; // work priorities from her passions, once (STREAMLINE.md §8)
+        public Dictionary<string, string> workFeelings = new Dictionary<string, string>(); // work type defName → "refuse: why" (Reflect)
         private int actsDay = -1;
         private int actsToday;
         private int lastThinkTick = -99999;
@@ -73,7 +68,6 @@ namespace AIPawnControl
         public bool Reflecting => reflecting;
         public float ThinkingSeconds => UnityEngine.Time.realtimeSinceStartup - requestStartedRealtime;
         public bool Unreachable => failures >= FailuresBeforeBackoff;
-        public int ExtraPlansLeft => LocalDay == extraPlansDay ? ExtraPlansPerDay - extraPlansToday : ExtraPlansPerDay;
         public int ActsLeft => AIPawnControlMod.Settings.actsPerDay - (LocalDay == actsDay ? actsToday : 0);
         public bool ChatThinking => chatThinking && Thinking;
         public bool ChatWaitingForWake => chatPending && !CanBeAwake;
@@ -92,14 +86,11 @@ namespace AIPawnControl
             Scribe_References.Look(ref pawn, "pawn");
             Scribe_Values.Look(ref persona, "persona");
             Scribe_Values.Look(ref note, "note");
-            Scribe_Values.Look(ref intent, "intent");
-            Scribe_Values.Look(ref intentTick, "intentTick", -1);
             Scribe_Values.Look(ref lastReason, "lastReason");
             Scribe_Collections.Look(ref decisions, "decisions", LookMode.Value);
             Scribe_Collections.Look(ref decisionTicks, "decisionTicks", LookMode.Value);
-            Scribe_Values.Look(ref lastMorningPlanDay, "lastMorningPlanDay", -1);
-            Scribe_Values.Look(ref extraPlansDay, "extraPlansDay", -1);
-            Scribe_Values.Look(ref extraPlansToday, "extraPlansToday");
+            Scribe_Values.Look(ref prioritiesSet, "prioritiesSet");
+            Scribe_Collections.Look(ref workFeelings, "workFeelings", LookMode.Value, LookMode.Value);
             Scribe_Values.Look(ref actsDay, "actsDay", -1);
             Scribe_Values.Look(ref actsToday, "actsToday");
             Scribe_Values.Look(ref lastThinkTick, "lastThinkTick", -99999);
@@ -120,6 +111,7 @@ namespace AIPawnControl
                 lastInteractionTicks = lastInteractionTicks ?? new Dictionary<string, int>();
                 chat = chat ?? new List<ChatLine>();
                 memory = memory ?? new MindMemory();
+                workFeelings = workFeelings ?? new Dictionary<string, string>();
             }
         }
 
@@ -151,6 +143,38 @@ namespace AIPawnControl
 
         public string TalkLine(Job job) => job.loadID == talkLineJobId ? talkLine : null;
 
+        private class PendingTalk
+        {
+            public Pawn target;
+            public InteractionDef def;
+            public string line;
+            public int tick;
+        }
+
+        private PendingTalk pendingTalk; // not saved: a reload just drops a talk that hadn't happened yet
+
+        /// <summary>A talk with someone who isn't nearby: it starts the next time they're near each other, until her next decision.</summary>
+        public void TalkWhenWeMeet(Pawn target, InteractionDef def, string line) =>
+            pendingTalk = new PendingTalk { target = target, def = def, line = line, tick = Find.TickManager.TicksGame };
+
+        private void CheckPendingTalk()
+        {
+            var p = pendingTalk;
+            if (p == null)
+                return;
+            if (Find.TickManager.TicksGame - p.tick > ActionCatalog.KeepGoingHours * GenDate.TicksPerHour || p.target.Destroyed || p.target.Dead)
+            {
+                pendingTalk = null;
+                ModLog.Message($"{pawn.LabelShort}: didn't meet {p.target.LabelShort} to talk; dropped quietly."); // not in [Recent]: one line per talk at most
+                return;
+            }
+            if (PausedReason() != null || !p.target.Spawned || !p.target.Awake() || p.target.Downed || !SnapshotBuilder.Nearby(pawn, p.target))
+                return;
+            pendingTalk = null;
+            string result = MindActions.TalkTo(this, p.target, p.def, p.line);
+            ModLog.Message($"{pawn.LabelShort} met {p.target.LabelShort}: {result}");
+        }
+
         /// <summary>Called by MindManager every check interval.</summary>
         public void CheckTriggers()
         {
@@ -158,6 +182,7 @@ namespace AIPawnControl
                 chat.Clear(); // long chat histories make small models drift; memory across conversations is Phase 3
             if (chatPending)
                 return; // answered from UpdateChat, which also runs while paused
+            CheckPendingTalk();
             if (Thinking || Find.TickManager.TicksGame < backoffUntilTick || pawn == null || !pawn.Spawned)
                 return;
             if (TryReflect())
@@ -175,10 +200,14 @@ namespace AIPawnControl
                 RequestPersona();
                 return;
             }
-            if (pawn.Awake() && lastMorningPlanDay != LocalDay && GenLocalDate.HourOfDay(pawn.Map) >= MorningHour)
+            if (!prioritiesSet)
             {
-                RequestPlan(morning: true);
-                return;
+                prioritiesSet = true;
+                if (!ActionCatalog.ManualPriorities)
+                    WarnManualPrioritiesOff();
+                string set = MindActions.SetPrioritiesFromPassions(pawn);
+                AddDecision(set, importance: 0);
+                ModLog.Message($"{pawn.LabelShort}: {set}");
             }
 
             int now = Find.TickManager.TicksGame;
@@ -245,7 +274,7 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// Code-side anti-spam: normal interactions once per target per day, negative ones once per day in total,
+        /// Code-side anti-spam: normal interactions once per target every 4 hours, negative ones once per day in total,
         /// life-changing ones (romance, proposal, breakup) once per target per week.
         /// </summary>
         public bool OnCooldown(InteractionDef def, Pawn target)
@@ -253,7 +282,7 @@ namespace AIPawnControl
             int now = Find.TickManager.TicksGame;
             if (ActionCatalog.IsNegative(def) && now - lastNegativeTick < GenDate.TicksPerDay)
                 return true;
-            int cooldown = ActionCatalog.LifeChangingInteractions.Contains(def.defName) ? 7 * GenDate.TicksPerDay : GenDate.TicksPerDay;
+            int cooldown = ActionCatalog.LifeChangingInteractions.Contains(def.defName) ? 7 * GenDate.TicksPerDay : 4 * GenDate.TicksPerHour;
             return lastInteractionTicks.TryGetValue(InteractionKey(def, target), out int last) && now - last < cooldown;
         }
 
@@ -323,7 +352,7 @@ namespace AIPawnControl
         private void RequestReply(Heard h)
         {
             bool mayAct = ActsLeft > 0;
-            var menu = mayAct ? ActionCatalog.BuildActMenu(pawn, this) : new List<ActionCatalog.ActOption>();
+            var menu = mayAct ? ActionCatalog.BuildActMenu(pawn, this, inConversation: true) : new List<ActionCatalog.ActOption>();
             string speaker = h.speaker.LabelShort;
             recalling = true;
             Recall.WithQuery(this, $"{h.line} ({speaker})", (vector, tag) =>
@@ -412,11 +441,19 @@ namespace AIPawnControl
                 {
                     ["trigger"] = trigger,
                     ["menu"] = ActionCatalog.DescribeMenu(menu),
+                    ["talkto"] = TalkToText(menu),
                 }, recall.Sections);
                 pendingMenu = menu;
                 pendingRecall = recall;
                 Send("act", messages, ActionCatalog.ActSchema(menu, recall.Shown), OnAct, maxAgeTicks: GenDate.TicksPerHour);
             });
+        }
+
+        /// <summary>"Kira, Bo (nearest first)" for act.txt, or that nobody's around.</summary>
+        public static string TalkToText(List<ActionCatalog.ActOption> menu)
+        {
+            var targets = menu.FirstOrDefault(o => o.TalkTargets != null)?.TalkTargets;
+            return targets != null ? string.Join(", ", targets.Select(p => p.LabelShort)) + " (nearest first)" : "nobody is around to talk to";
         }
 
         /// <summary>Gives today's decision back (a project found no site, §5).</summary>
@@ -441,7 +478,7 @@ namespace AIPawnControl
             string result;
             try
             {
-                result = option.Apply(say);
+                result = option.ApplyReply != null ? option.ApplyReply(reply, say) : option.Apply(say);
                 if (!option.IsTalk && !option.OwnRemark && say != null && AIPawnControlMod.Settings.speakLines)
                 {
                     SpeechLog.Say(pawn, say);
@@ -497,7 +534,7 @@ namespace AIPawnControl
         private void RequestChat()
         {
             string cantAct = PausedReason(ignoreSleep: true);
-            var menu = cantAct == null ? ActionCatalog.BuildActMenu(pawn, this) : new List<ActionCatalog.ActOption>();
+            var menu = cantAct == null ? ActionCatalog.BuildActMenu(pawn, this, inConversation: true) : new List<ActionCatalog.ActOption>();
             int lastAnswer = chat.FindLastIndex(l => l.from == ChatLine.From.Mind);
             var unanswered = chat.Skip(lastAnswer + 1).Where(l => l.from == ChatLine.From.Player).Select(l => l.text).ToList();
             var earlier = chat.Take(lastAnswer + 1).Where(l => l.from != ChatLine.From.System)
@@ -587,23 +624,6 @@ namespace AIPawnControl
             RequestPersona();
         }
 
-        /// <summary>A plan outside the morning one. Dev "force" ignores the daily budget.</summary>
-        public bool TryExtraPlan(bool force)
-        {
-            if (Thinking || PausedReason(ignoreSleep: true) != null)
-                return false;
-            if (!force && ExtraPlansLeft <= 0)
-                return false;
-            if (extraPlansDay != LocalDay)
-            {
-                extraPlansDay = LocalDay;
-                extraPlansToday = 0;
-            }
-            extraPlansToday++;
-            RequestPlan(morning: false);
-            return true;
-        }
-
         private void RequestPersona()
         {
             var values = new Dictionary<string, string>
@@ -635,39 +655,6 @@ namespace AIPawnControl
                 AddDecision($"Said: \"{say}\"");
             }
             ModLog.Message($"{pawn.LabelShort} persona: {persona}");
-        }
-
-        private void RequestPlan(bool morning)
-        {
-            if (morning)
-                lastMorningPlanDay = LocalDay; // one morning plan per day, even if it fails
-            var workTypes = ActionCatalog.PlannableWorkTypes(pawn);
-            bool manual = ActionCatalog.ManualPriorities;
-            if (!manual)
-                WarnManualPrioritiesOff();
-            var messages = PromptBuilder.Build("plan", this, new Dictionary<string, string>
-            {
-                ["worktypes"] = workTypes.Count > 0 ? ActionCatalog.DescribeWorkTypes(pawn, workTypes) : "(none)",
-                ["prioritynote"] = manual
-                    ? ""
-                    : "Manual priorities are OFF in this colony, so you can only turn work types on (1) or off (0), not rank them.",
-                ["schedule"] = ActionCatalog.DescribeSchedule(pawn),
-                ["scheduleoptions"] = string.Join(", ", ActionCatalog.ScheduleOptions()),
-            }, Recall.Plan(this).Sections);
-            Send("plan", messages, ActionCatalog.PlanSchema(workTypes), OnPlan);
-        }
-
-        private void OnPlan(Dictionary<string, object> reply)
-        {
-            string result = MindActions.ApplyPlan(pawn, reply);
-            if (reply.TryGetValue("intent", out object i) && i is string newIntent && !string.IsNullOrWhiteSpace(newIntent))
-            {
-                intent = newIntent.Trim();
-                intentTick = Find.TickManager.TicksGame;
-            }
-            AddDecision($"Plan: {intent} {result}");
-            ModLog.Message($"{pawn.LabelShort} plan: {intent} | {result} | Reason: {lastReason} | " +
-                           $"Now: schedule {ActionCatalog.DescribeSchedule(pawn)}; priorities {ActionCatalog.DescribePriorities(pawn)}");
         }
 
         // ---------- Nightly Reflect (PHASE3.md §4) ----------
@@ -818,6 +805,39 @@ namespace AIPawnControl
             reflecting = false;
             Cancel();
             ModLog.Message($"{pawn.LabelShort}: Reflect paused for the player's message; it runs again later.");
+        }
+
+        /// <summary>
+        /// Reflect's one work change (STREAMLINE.md §8): applied, remembered, and shown in [Me]. A refusal nobody else could
+        /// cover isn't applied, so it isn't kept as her stance either.
+        /// </summary>
+        public void SetWorkFeeling(WorkTypeDef work, string feeling, string why)
+        {
+            string result = MindActions.ApplyWorkFeeling(pawn, work, feeling);
+            if (result == null)
+                return;
+            bool applied = !result.StartsWith("I can't") && !result.Contains("nobody else can");
+            if (applied)
+                workFeelings[work.defName] = why != null ? $"{feeling}: {why}" : feeling;
+            AddDecision($"{result}{(why != null ? $" ({why})" : "")}", importance: applied ? 4 : 0);
+            ModLog.Message($"{pawn.LabelShort} work feeling: {feeling} {work.defName} | {result} | why: {why}");
+        }
+
+        /// <summary>For [Me]: "I won't do hauling (got shot out there). I love cooking.", or null.</summary>
+        public string WorkFeelingsText()
+        {
+            var parts = new List<string>();
+            foreach (var kv in workFeelings)
+            {
+                var work = DefDatabase<WorkTypeDef>.GetNamedSilentFail(kv.Key);
+                if (work == null)
+                    continue;
+                string feeling = kv.Value.Split(':')[0];
+                string why = kv.Value.Contains(":") ? kv.Value.Substring(kv.Value.IndexOf(':') + 1).Trim() : null;
+                string phrase = feeling == "refuse" ? $"I won't do {work.labelShort}" : feeling == "love" ? $"I love {work.labelShort}" : $"I dislike {work.labelShort}";
+                parts.Add(phrase + (why != null ? $" ({why})" : "") + ".");
+            }
+            return parts.Count > 0 ? string.Join(" ", parts) : null;
         }
 
         private static bool warnedManualOff;

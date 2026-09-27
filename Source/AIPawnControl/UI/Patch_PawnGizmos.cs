@@ -54,21 +54,18 @@ namespace AIPawnControl
             yield return new Command_Action
             {
                 defaultLabel = "DEV: Try a talk",
-                defaultDesc = "Skips the LLM: starts the first offered talk option (chitchat preferred) with a fixed test line, to test the talk job and the speech display.",
+                defaultDesc = "Skips the LLM: a positive talk (vanilla's weights pick the kind) with the nearest colonist and a fixed test line, to test the talk job and the speech display.",
                 icon = MindIcon,
                 action = () =>
                 {
-                    var options = ActionCatalog.AvailableInteractions(pawn, mind);
-                    if (options.Count == 0)
+                    Pawn target = ActionCatalog.TalkTargets(pawn).FirstOrDefault();
+                    if (target == null)
                     {
-                        Messages.Message("No talk options right now.", MessageTypeDefOf.RejectInput, false);
+                        Messages.Message("No one to talk to right now.", MessageTypeDefOf.RejectInput, false);
                         return;
                     }
-                    var (target, def) = options.FirstOrDefault(o => o.Item2 == InteractionDefOf.Chitchat);
-                    if (target == null)
-                        (target, def) = options[0];
-                    string result = MindActions.TalkTo(mind, target, def, $"Test line from {pawn.LabelShort}. Can you read this, {target.LabelShort}?");
-                    mind.AddDecision($"(dev) talk to {target.LabelShort}: {def.label}: {result}");
+                    string result = MindActions.Talk(mind, target, true, $"Test line from {pawn.LabelShort}. Can you read this, {target.LabelShort}?");
+                    mind.AddDecision($"(dev) talk to {target.LabelShort}: {result}");
                 },
             };
             yield return new Command_Action
@@ -174,16 +171,6 @@ namespace AIPawnControl
                     action = () => Messages.Message(OthersTalk(pawn, near), MessageTypeDefOf.NeutralEvent, false),
                 };
             }
-            yield return new Command_Action
-            {
-                defaultLabel = "DEV: Force plan",
-                icon = MindIcon,
-                action = () =>
-                {
-                    if (!mind.TryExtraPlan(force: true))
-                        Messages.Message("Can't plan now: " + (mind.Thinking ? "already thinking" : mind.PausedReason(ignoreSleep: true)), MessageTypeDefOf.RejectInput, false);
-                },
-            };
             yield return new Command_Action
             {
                 defaultLabel = "DEV: Regenerate persona",

@@ -18,7 +18,6 @@ namespace AIPawnControl
         private const int MaxEvents = 40;
         private const int MaxShownMemories = 6;
         private const int MaxFiles = 8;
-        private const float DuplicateCosine = 0.92f;
         private const int MaxReembed = 20;
 
         public const int MaxDiary = 600, MaxMemoryText = 200, MaxImpression = 240, MaxThreads = 160, MaxFactText = 120, MaxGoalText = 120, MaxWhy = 160;
@@ -29,6 +28,7 @@ namespace AIPawnControl
         private List<MemoryRecord> shown = new List<MemoryRecord>(); // M1..
         private readonly List<string> names;                         // allowed person-file names
         private readonly List<Goal> goalsShown;                      // G1..
+        private readonly List<WorkTypeDef> workTypes;                // what "work" may name (STREAMLINE.md §8)
         private readonly int seenEventId, seenTick;                  // what this Reflect covers, for the next one
 
         private MindMemory Memory => mind.memory;
@@ -39,6 +39,7 @@ namespace AIPawnControl
             this.dev = dev;
             this.events = events;
             goalsShown = Memory.goals.ToList();
+            workTypes = ActionCatalog.PlannableWorkTypes(mind.pawn);
             seenEventId = Memory.LastEventId;
             seenTick = Find.TickManager.TicksGame;
             names = events.SelectMany(e => e.people)
@@ -104,6 +105,7 @@ namespace AIPawnControl
                 ["goals"] = goalsShown.Count > 0
                     ? string.Join("\n", goalsShown.Select((g, i) => $"G{i + 1} {g.text}" + (string.IsNullOrEmpty(g.why) ? "" : $" (why: {g.why})")))
                     : "(none)",
+                ["worktypes"] = workTypes.Count > 0 ? string.Join(", ", workTypes.Select(w => w.labelShort)) : "(none)",
                 ["memories"] = shown.Count > 0
                     ? string.Join("\n", shown.Select((m, i) => $"M{i + 1} day {GenDate.DaysPassedAt(m.tick) + 1} · importance {m.importance}: {m.text}"))
                     : "(none yet)",
@@ -183,6 +185,12 @@ namespace AIPawnControl
                 ["text"] = Str(MaxGoalText),
                 ["why"] = Str(MaxWhy),
             });
+            var work = Obj(new Dictionary<string, object>
+            {
+                ["type"] = Enum(new object[] { NoWork }.Concat(workTypes.Select(w => (object)w.labelShort))),
+                ["feeling"] = Enum(MindActions.Feelings.Cast<object>()),
+                ["why"] = Str(MaxWhy),
+            });
             return Obj(new Dictionary<string, object>
             {
                 ["diary"] = Str(MaxDiary),
@@ -190,6 +198,7 @@ namespace AIPawnControl
                 ["memories"] = Arr(memory, 8),
                 ["people"] = Arr(person, 6),
                 ["goals"] = Arr(goal, 3),
+                ["work"] = work,
             });
         }
 
@@ -208,11 +217,14 @@ namespace AIPawnControl
         private readonly List<(string name, Dictionary<string, object> item)> personOps = new List<(string, Dictionary<string, object>)>();
         private readonly List<(string op, int id, string text, string why)> goalOps = new List<(string, int, string, string)>();
         private string diary, newLately;
+        private const string NoWork = "none";
+        private WorkTypeDef workType; // Reflect's one work change, or null
+        private string workFeeling, workWhy;
         private int dropped, skipped;
 
-        private static readonly Regex NumberList = new Regex(@"\s*\([EMFG]\d+(\s*,\s*[EMFG]\d+)*\)");
+        private static readonly Regex NumberList = new Regex(@"\s*\([EMFG]\d+(\s*,\s*[EMFG]\d+)*\)|\s+[EMFG]\d+(\s*,\s*[EMFG]\d+)*\s*$");
 
-        private static string Clean(object raw, int max) => SpeechLog.Clean(raw is string s ? NumberList.Replace(s, "") : null, max); // "(E4, M1)" belongs in "events"/"id"
+        private static string Clean(object raw, int max) => SpeechLog.Clean(raw is string s ? NumberList.Replace(s, "") : null, max); // "(E4, M1)" or a trailing "E6, E7" belongs in "events"/"id"
 
         private static int Int(Dictionary<string, object> d, string key) => d.TryGetValue(key, out object v) && v is double n ? (int)n : 0;
 
@@ -258,6 +270,13 @@ namespace AIPawnControl
             foreach (var p in List(reply, "people"))
                 if (p.TryGetValue("name", out object n) && n is string name && names.Contains(name))
                     personOps.Add((name, p));
+            if (reply.TryGetValue("work", out object wk) && wk is Dictionary<string, object> work)
+            {
+                string label = work.TryGetValue("type", out object t) ? t as string : null;
+                workType = workTypes.FirstOrDefault(w => w.labelShort == label);
+                workFeeling = work.TryGetValue("feeling", out object f) ? f as string : null;
+                workWhy = Clean(work.TryGetValue("why", out object y) ? y : null, MaxWhy);
+            }
             foreach (var g in List(reply, "goals"))
                 goalOps.Add((g.TryGetValue("op", out object op) ? op as string : null, Int(g, "id"),
                     Clean(g.TryGetValue("text", out object t) ? t : null, MaxGoalText), Clean(g.TryGetValue("why", out object w) ? w : null, MaxWhy)));
@@ -275,10 +294,24 @@ namespace AIPawnControl
             if (diary != null)
                 texts.Add(diary);
             texts.AddRange(reembed.Select(m => m.text));
+            // Person-file facts: the new ones, and the open ones in the files she's updating that have no current vector.
+            newFacts = personOps.SelectMany(op => List(op.item, "facts"))
+                .Where(f => (f.TryGetValue("op", out object o) ? o as string : null) == "add")
+                .Select(f => Clean(f.TryGetValue("text", out object x) ? x : null, MaxFactText)).Where(t => t != null).Distinct().ToList();
+            factsToEmbed = personOps.Select(op => Memory.File(op.name, create: false)).Where(f => f != null).Distinct()
+                .SelectMany(f => f.facts).Where(f => f.Open && (f.vector == null || f.vectorTag == null || !f.vectorTag.StartsWith(model + "|"))).ToList();
+            texts.AddRange(newFacts);
+            texts.AddRange(factsToEmbed.Select(f => f.text));
             return texts;
         }
 
-        /// <summary>Applies everything. With vectors, a new memory within cosine 0.92 of one about the same people updates that one instead.</summary>
+        private List<string> newFacts = new List<string>();
+        private List<Fact> factsToEmbed = new List<Fact>();
+        private readonly Dictionary<string, string> newFactVectors = new Dictionary<string, string>();
+        private string factTag;
+        private int factsMerged;
+
+        /// <summary>Applies everything. With vectors, memories that say the same thing are then merged (MindMemory.Consolidate).</summary>
         public string Commit(EmbedResult embedded, List<MemoryRecord> reembed, int night)
         {
             int now = Find.TickManager.TicksGame;
@@ -291,16 +324,6 @@ namespace AIPawnControl
             {
                 var cited = events.Where(e => draft.eventIds.Contains(e.id)).ToList();
                 var people = new HashSet<string>(cited.SelectMany(e => e.people));
-                if (draft.target == null && draft.vector != null)
-                {
-                    var twin = Memory.memories.FirstOrDefault(m => !m.archived && m.vectorTag == embedded.Tag && m.vector != null
-                        && new HashSet<string>(m.people).SetEquals(people) && Embedding.Cosine(draft.vector, m.Vector) >= DuplicateCosine);
-                    if (twin != null)
-                    {
-                        draft.target = twin;
-                        merged++;
-                    }
-                }
                 var memory = draft.target;
                 if (memory == null)
                 {
@@ -336,7 +359,19 @@ namespace AIPawnControl
                     reembed[i].vector = Embedding.Pack(embedded.Vectors[offset + i]);
                     reembed[i].vectorTag = embedded.Tag;
                 }
+                offset += reembed.Count;
+                for (int i = 0; i < newFacts.Count; i++)
+                    newFactVectors[newFacts[i]] = Embedding.Pack(embedded.Vectors[offset + i]);
+                offset += newFacts.Count;
+                for (int i = 0; i < factsToEmbed.Count; i++)
+                {
+                    factsToEmbed[i].vector = Embedding.Pack(embedded.Vectors[offset + i]);
+                    factsToEmbed[i].vectorTag = embedded.Tag;
+                }
+                factTag = embedded.Tag;
             }
+            if (haveVectors)
+                merged = Memory.Consolidate(embedded.Tag); // new, updated and old memories that say the same thing become one
             if (newLately != null)
                 Memory.lately = newLately;
 
@@ -353,15 +388,18 @@ namespace AIPawnControl
                     Memory.AddGoal(text, why, Goal.Mine);
             }
 
+            if (workType != null && MindActions.Feelings.Contains(workFeeling))
+                mind.SetWorkFeeling(workType, workFeeling, workWhy);
+
             Memory.MarkReflected(seenEventId, seenTick);
             int archived = Memory.Archive(now);
             if (!dev)
                 Memory.lastReflectNight = night;
-            return $"{events.Count} events → {drafts.Count - merged} new/updated memories ({merged} merged as near-duplicates, {skipped} skipped as already remembered, {dropped} dropped by the guards), " +
-                   $"{personOps.Count} person files, {goalOps.Count} goal changes, {archived} archived, vectors: {(haveVectors ? embedded.Tag : "none (" + (embedded?.Error ?? "skipped") + ")")}";
+            return $"{events.Count} events → {drafts.Count} new/updated memories ({merged} merged as saying the same thing, {skipped} skipped as already remembered, {dropped} dropped by the guards), " +
+                   $"{personOps.Count} person files ({factsMerged} repeated facts merged), {goalOps.Count} goal changes, work: {(workType != null ? workFeeling + " " + workType.labelShort : "no change")}, {archived} archived, vectors: {(haveVectors ? embedded.Tag : "none (" + (embedded?.Error ?? "skipped") + ")")}";
         }
 
-        private static void ApplyPerson(PersonFile file, Dictionary<string, object> item, int now)
+        private void ApplyPerson(PersonFile file, Dictionary<string, object> item, int now)
         {
             string impression = Clean(item.TryGetValue("impression", out object i) ? i : null, MaxImpression);
             if (impression != null)
@@ -378,12 +416,38 @@ namespace AIPawnControl
                 else if (op == "add")
                 {
                     string text = Clean(fact.TryGetValue("text", out object x) ? x : null, MaxFactText);
-                    if (text != null)
-                        file.facts.Add(new Fact { text = text, source = fact.TryGetValue("source", out object s) ? s as string : MemoryEvent.Told, since = now });
+                    if (text == null)
+                        continue;
+                    newFactVectors.TryGetValue(text, out string vector);
+                    if (vector != null && SameAsOpenFact(file, vector) != null)
+                    {
+                        factsMerged++;
+                        continue;
+                    }
+                    file.facts.Add(new Fact { text = text, source = fact.TryGetValue("source", out object s) ? s as string : MemoryEvent.Told, since = now,
+                                              vector = vector, vectorTag = vector != null ? factTag : null });
                 }
             }
+            // Open facts that already repeat each other (older saves): the first one stays.
+            var withVectors = file.facts.Where(f => f.Open && f.vectorTag == factTag && f.vector != null).ToList();
+            for (int a = 0; a < withVectors.Count; a++)
+                for (int j = withVectors.Count - 1; j > a; j--)
+                    if (Embedding.Cosine(Embedding.Unpack(withVectors[a].vector), Embedding.Unpack(withVectors[j].vector)) >= MindMemory.SameMemoryCosine)
+                    {
+                        file.facts.Remove(withVectors[j]);
+                        withVectors.RemoveAt(j);
+                        factsMerged++;
+                    }
             while (file.facts.Count > PersonFile.MaxFacts)
                 file.facts.Remove(file.facts.FirstOrDefault(f => !f.Open) ?? file.facts[0]);
+        }
+
+        /// <summary>An open fact in the file that says the same thing as this vector, or null.</summary>
+        private Fact SameAsOpenFact(PersonFile file, string vector)
+        {
+            var v = Embedding.Unpack(vector);
+            return file.facts.FirstOrDefault(f => f.Open && f.vectorTag == factTag && f.vector != null
+                                                  && Embedding.Cosine(v, Embedding.Unpack(f.vector)) >= MindMemory.SameMemoryCosine);
         }
     }
 }

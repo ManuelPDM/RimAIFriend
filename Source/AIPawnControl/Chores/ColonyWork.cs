@@ -12,7 +12,6 @@ namespace AIPawnControl
     public static class ColonyWork
     {
         private const int MaxFields = 6;
-        private const int MaxStockpiles = 4;
         private const int MaxMarks = 6;
         private const int MaxOrders = 8;
 
@@ -24,9 +23,10 @@ namespace AIPawnControl
 
             var fields = map.zoneManager.AllZones.OfType<Zone_Growing>()
                 .Select(z => Field(z, map) + By(manager?.OwnerOf(z))).ToList();
-            var piles = map.zoneManager.AllZones.OfType<Zone_Stockpile>()
-                .Select(z => Stockpile(z, map) + By(manager?.OwnerOf(z))).ToList();
-            string storage = "Stockpiles: " + Join(piles, MaxStockpiles, "none");
+            // Code lays stockpiles out and picks what they hold (STREAMLINE.md §7): just how many, and how many indoors.
+            var piles = map.zoneManager.AllZones.OfType<Zone_Stockpile>().ToList();
+            int indoors = piles.Count(z => z.cells.Count > 0 && z.cells[0].GetRoom(map) is Room room && !room.PsychologicallyOutdoors);
+            string storage = "Stockpiles: " + (piles.Count == 0 ? "none" : indoors > 0 ? $"{piles.Count} ({indoors} indoors)" : piles.Count.ToString());
             var shelves = map.listerBuildings.allBuildingsColonist.Where(b => b is Building_Storage)
                 .GroupBy(b => b.def.label).Select(g => $"{g.Key} ×{g.Count()}").ToList();
             if (shelves.Count > 0)
@@ -72,32 +72,6 @@ namespace AIPawnControl
                     words.Add("not growing now (temperature)");
             }
             return $"{plant.label} ({string.Join(", ", words)})";
-        }
-
-        /// <summary>"food, indoors" or "everything except corpses, chunks": the top-level categories its filter mostly allows.</summary>
-        public static string Stockpile(Zone_Stockpile zone, Map map)
-        {
-            string holds = Holds(zone.settings.filter);
-            bool indoors = zone.cells.Count > 0 && zone.cells[0].GetRoom(map) is Room room && !room.PsychologicallyOutdoors;
-            return indoors ? holds + ", indoors" : holds;
-        }
-
-        public static string Holds(ThingFilter filter)
-        {
-            var allowed = new List<string>();
-            var not = new List<string>();
-            foreach (var category in ThingCategoryDefOf.Root.childCategories)
-            {
-                var defs = category.DescendantThingDefs.Where(d => d.EverStorable(false)).Distinct().ToList();
-                if (defs.Count == 0)
-                    continue;
-                (defs.Count(filter.Allows) * 2 >= defs.Count ? allowed : not).Add(category.label);
-            }
-            if (allowed.Count == 0)
-                return "nothing";
-            if (not.Count == 0)
-                return "everything";
-            return allowed.Count > not.Count ? "everything except " + string.Join(", ", not) : string.Join(", ", allowed);
         }
 
         /// <summary>"hunt deer ×3 (by me)", "cut trees ×8", "mine steel ×12".</summary>

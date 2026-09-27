@@ -27,7 +27,9 @@ namespace AIPawnControl
         private List<int> builtOnce = new List<int>(); // entry indexes seen built: gone later is a deconstruct, not a cancel
         public bool firstNight;
         public bool furnishing; // one item added to a room she built (§9)
-        public Pawn occupant;   // a bedroom she built for someone with no bed (PHASE6.md §5.2); null = her own
+        public Pawn occupant;   // a bedroom she built for someone with no room of their own (STREAMLINE.md §7); null = her own
+        public bool unclaimed;  // nobody's: the bed stays free and vanilla assigns it
+        public bool outfitted;  // its bills and stockpile were added once it was done (STREAMLINE.md §7)
 
         /// <summary>Whose bed it is: hers, or the colonist she built it for.</summary>
         public Pawn Owner => occupant ?? pawn;
@@ -35,16 +37,16 @@ namespace AIPawnControl
         /// <summary>"bedroom", or "bedroom for Kira".</summary>
         public string KindFor => occupant != null ? $"{Kind} for {occupant.LabelShort}" : Kind;
 
-        /// <summary>The one she built it for died, left, or got a bed elsewhere: the bed stays unclaimed, an ordinary room.</summary>
+        /// <summary>The one she built it for died, left, or got a room of their own elsewhere: the bed stays unclaimed, an ordinary room.</summary>
         private bool OccupantGone(PlanEntry bedEntry) =>
             occupant != null && (occupant.Dead || occupant.Destroyed || occupant.Map != map
-                                 || (occupant.ownership?.OwnedBed != null && occupant.ownership.OwnedBed.Position != bedEntry.cell));
+                                 || (occupant.ownership?.OwnedRoom != null && occupant.ownership.OwnedBed?.Position != bedEntry.cell));
 
         public bool Active => state == State.Placed;
         public string Kind => kindDef?.label ?? "room";
         public string SizeLabel => $"{footprint.Width - 2}×{footprint.Height - 2}";
         public PawnMind Mind => MindManager.Instance?.MindOf(pawn);
-        public PlanEntry Bed => kindDef != null && kindDef.owned ? entries.Find(e => e.def.IsBed) : null;
+        public PlanEntry Bed => kindDef != null && kindDef.owned && !unclaimed ? entries.Find(e => e.def.IsBed) : null;
 
         /// <summary>A build event in her memory (Phase 3), if she has a mind.</summary>
         public void Remember(string text, int importance) =>
@@ -81,6 +83,11 @@ namespace AIPawnControl
             }
             if (state == State.Done)
             {
+                if (!outfitted && !furnishing)
+                {
+                    outfitted = true;
+                    Outfitting.Outfit(this);
+                }
                 CheckFirstNight();
                 return;
             }
@@ -157,6 +164,20 @@ namespace AIPawnControl
         /// <summary>Material the unbuilt parts still need beyond what's in storage.</summary>
         public Dictionary<ThingDef, int> Missing()
         {
+            var need = Need();
+            var missing = new Dictionary<ThingDef, int>();
+            foreach (var kv in need)
+            {
+                int short_ = kv.Value - map.resourceCounter.GetCount(kv.Key);
+                if (short_ > 0)
+                    missing[kv.Key] = short_;
+            }
+            return missing;
+        }
+
+        /// <summary>Material the unbuilt parts still need, whatever is in storage.</summary>
+        public Dictionary<ThingDef, int> Need()
+        {
             var need = new Dictionary<ThingDef, int>();
             foreach (var e in entries)
             {
@@ -170,14 +191,7 @@ namespace AIPawnControl
                     foreach (var cost in blueprint.TotalMaterialCost())
                         Add(need, cost.thingDef, cost.count);
             }
-            var missing = new Dictionary<ThingDef, int>();
-            foreach (var kv in need)
-            {
-                int short_ = kv.Value - map.resourceCounter.GetCount(kv.Key);
-                if (short_ > 0)
-                    missing[kv.Key] = short_;
-            }
-            return missing;
+            return need;
         }
 
         private static void Add(Dictionary<ThingDef, int> d, ThingDef def, int n)
@@ -251,6 +265,8 @@ namespace AIPawnControl
             Scribe_Values.Look(ref firstNight, "firstNight");
             Scribe_Values.Look(ref furnishing, "furnishing");
             Scribe_References.Look(ref occupant, "occupant");
+            Scribe_Values.Look(ref unclaimed, "unclaimed");
+            Scribe_Values.Look(ref outfitted, "outfitted");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 kindDef = kindDef ?? RoomKindDef.Bedroom; // saves from before room kinds held only bedrooms
@@ -286,6 +302,12 @@ namespace AIPawnControl
         public BuildProject ActiveProject(Pawn pawn) => projects.Find(p => p.pawn == pawn && p.Active);
 
         public IEnumerable<BuildProject> ProjectsOf(Pawn pawn) => projects.Where(p => p.pawn == pawn);
+
+        /// <summary>Rooms being built on the map (not furnishing), for the ladder.</summary>
+        public IEnumerable<BuildProject> ActiveOn(Map map) => projects.Where(p => p.Active && p.map == map && !p.furnishing);
+
+        /// <summary>Who designed a finished room, for [Rooms]' credit, or null.</summary>
+        public Pawn BuilderOf(Room room) => projects.Find(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == room.Map && p.Room == room)?.pawn;
 
         public void Add(BuildProject project) => projects.Add(project);
 
@@ -334,7 +356,7 @@ namespace AIPawnControl
             if (own != null)
             {
                 var mine = projects.Find(p => p.pawn == pawn && p.state == BuildProject.State.Done && !p.furnishing && p.Bed != null && p.Room == own);
-                parts.Add($"My bedroom: {(mine != null ? mine.SizeLabel : own.CellCount + " cells")}, {Impressiveness(own)}.");
+                parts.Add($"My {own.GetRoomRoleLabel()}: {(mine != null ? mine.SizeLabel : own.CellCount + " cells")}, {Impressiveness(own)}.");
             }
             else if (bed == null)
                 parts.Add("I have no bed of my own.");

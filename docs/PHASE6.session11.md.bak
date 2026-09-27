@@ -1,0 +1,393 @@
+# Phase 6 spec: society (minds that know each other and work together)
+
+> **APPROVED 2026-09-26 (session 11). Build steps 1-5 BUILT (0 errors) and checked in the game; build step 6 (the
+> society run) started, stopped at day 2.7 when the model was unloaded.** Results so far: §16. Written from the session 11
+> discussion: the cooperation run on a fresh colony (Bernard, Lyra, Toni) and the user's decisions listed in §14.
+> The user reviews this spec before any building starts.
+
+**Goal (VISION.md roadmap, Phase 6):** several AI minds that talk to each other, know what the others are doing, and
+split up the colony's work between them. The test is the roadmap's: *three minds hold a conversation and split up the
+chores.* Phase 5 gave every mind the player's colony abilities (fields, stockpiles, hunting, cutting, mining, work
+orders); Phase 6 makes them use those abilities **as a group**.
+
+**Why now (session 11 findings):**
+- With the firm cooperation rule in `system.txt`, the minds are friendly ("we need", "our supplies"), but each
+  decides alone. Toni promised the player "rooms for everyone" and couldn't do it (a bedroom is always the designer's
+  own); Bernard and Lyra slept in Toni's bed instead of building; three days of "Need meal source" and nobody planned a
+  kitchen, each assuming someone else would.
+- Two minds picked the same chore at the same moment, and the second one lost its decision ("Someone already marked
+  them."). Nothing tells a mind what the others are working on.
+- Replies wait behind each other (one request in flight); 13 of about 40 Act replies were dropped as stale in
+  session 9 with three minds.
+- The context has grown over five phases and is hard to follow. At midnight a mind loses its whole day
+  (`[Today so far]` starts empty), and `[My plan]` and `[Recent]` don't say which day they're from.
+
+**Scope decisions (the user, session 11):**
+- **Clean up the context first**: `[My plan]` and `[Recent]` say *yesterday* or *today*; the special
+  `[I promised the player]` section goes; talking with the player is ordinary conversation.
+- **Minds knowing what the others do belongs here** (society), not in Phase 5. The user liked `[Others]`.
+- A storyboard for how collaboration and conversations should work (§3), then the mechanics.
+- Carries on from Phase 5's principles: world state from the map, the same for every mind; plain words, no coordinates;
+  she chooses, code works it out; start light, tighten on evidence; let vanilla handle it.
+
+**Builds on:** Phase 2 (talk lines, Chat), Phase 3 (events, person files, Reflect, `told` sources), Phase 4 (the Project
+call, room kinds), Phase 5 (the Colony call, `ChoreManager`). No new dependencies.
+
+**Out of scope:** a colony-level council or shared plan (Phase 7); new vanilla interaction defs; minds giving each
+other orders (asking is fine, the other may say no); trading, diplomacy, raids and defence.
+
+**Phase 5 still open:** its self-sufficiency run (build step 7) and closing checks. Build step 1 here (the context
+clean-up) touches every call and can go first; the rest waits until Phase 5 is closed. See §13.
+
+---
+
+## 1. What a mind sees today (the pipeline, as built through Phase 5)
+This is the reference the user asked for. Code: `PromptBuilder.cs` (recipes and order), `SnapshotBuilder.cs` (the
+world), `Recall.cs` / `Retrieval.cs` (memory), `Prompts/*.txt` (the task text).
+
+**The calls:**
+
+| Call | When | What it decides | Template |
+|---|---|---|---|
+| Persona | once, when she gets a mind | the identity anchor + a first line | `persona.txt` |
+| Plan | each morning; "re-plan" from the Act | today's intent, 24-hour schedule, work priorities | `plan.txt` |
+| Act | wake triggers (idle, a few hours passed, events), up to 10 a day | one numbered option + a spoken line | `act.txt` |
+| Chat | the player sends a message | a reply, an optional Act option, a promise note | `chat.txt` |
+| Project | after "plan a new room" (Act or Chat) | room kind, size, site, material | `project.txt` |
+| Colony | after "work on the colony" (Act or Chat) | one chore with its amount, crop, site, what it holds | `colony.txt` |
+| Reflect | once a night, asleep | diary, lately, memories, person files, goals | `reflect.txt` |
+
+**Every call = system prompt + user prompt.**
+- **System prompt** (stable, cached by LM Studio): who she is (`system.txt`), her persona, the rules of thumb
+  (`guidance.txt`), then `[Who I am lately]` and `[My goals]` from Reflect.
+- **User prompt**: the task text with `{snapshot}` filled in. The snapshot is the recipe's sections, in this fixed
+  order:
+
+| Section | Source | Plan | Act | Chat | Project/Colony | Reflect |
+|---|---|:-:|:-:|:-:|:-:|:-:|
+| `[Me] [Time]` | the pawn, the clock | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `[Condition] [Needs] [Feelings] [Skills] [Doing now]` | the pawn | ✓ | ✓ | ✓ | ✓ | |
+| `[My plan]` | this morning's (or yesterday's) intent | ✓ | ✓ | ✓ | ✓ | |
+| `[I promised the player]` | Chat `note` → a "promise" goal | ✓ | ✓ | ✓ | ✓ | |
+| `[My project]` | `BuildManager` | ✓ | ✓ | ✓ | ✓ | |
+| `[People nearby]` | the map: relation, opinion, mood, distance | ✓ | ✓ | ✓ | ✓ | |
+| `[Colony] [Colony stores] [Colony work] [Rooms]` | the map (the same for every mind) | ✓ | ✓ | ✓ | ✓ | |
+| `[Recent]` | her last 5 decisions (no day) | ✓ | ✓ | ✓ | ✓ | |
+| `[Today so far]` | memory events since midnight, top by importance | 5 | 3 | 5 (no chat) | 5 | |
+| `[About X]` | her person files | people in today's events | up to 3 present | the player + anyone named | | |
+| `[On my mind]` | ≤ 2 strong memory matches, ≤ once per 4 h | | ✓ | | | |
+| `[I remember]` | ≤ 5 memories matched to the player's words | | | ✓ | | |
+
+Reflect gets its own values instead (the day's events, the people, goals, the nearest memories).
+
+**Measured in session 11** (50 Act calls): `[Today so far]` in 47, `[About X]` in 27, `[On my mind]` in 11. So day to
+day, long-term memory reaches decisions mostly through `[Who I am lately]`, `[My goals]` and the person files.
+
+## 2. What changes in the context (build steps 1-2)
+
+### 2.1 Chronology: yesterday and today (build step 1)
+Every time-stamped line says which day it's from. No new sections; the existing ones get day labels.
+- **`[My plan]`**: `Today's plan (made at 07:00): Build the kitchen with Lyra.` Before today's Plan runs:
+  `Yesterday's plan (not planned today yet): Build shelter walls.` This is the backlog item where yesterday's plan
+  anchored the new one (Lover, session 9; Toni, session 11).
+- **`[Recent]`** (her own decisions): grouped by day, oldest first:
+  `Yesterday: 13:00 Laid out a potato field. · 21:00 Kept going. — Today: 07:00 Planned the day.` Still her last 5.
+- **`[Today so far]` becomes `[Since yesterday]`**: the last 24 hours, not since midnight, so a mind thinking at 00:16
+  still sees the evening before. Same caps (Act 3, others 5), each line with its day:
+  `Yesterday 18:10 Deep talk with Lyra … · Today 06:40 Ate without table (mood -3)`. Reflect is unchanged (it still
+  covers the events since the last Reflect).
+
+### 2.2 The player is conversation, not a promise list (build step 1)
+- **Removed:** `[I promised the player]`, the Chat `note` field, and `Goal.Promise` (the "promised the player" goals and
+  their morning expiry). Old saves: promise goals are dropped on load.
+- **What carries the conversation instead** (all of it exists already):
+  - the same day: the chat lines are memory events ("The player said: …", "I told the player: …"), so they show in
+    `[Since yesterday]` for every call;
+  - the Chat call keeps its own `[Conversation with the player so far]` (8 turns, forgotten after 6 h of silence);
+  - that night Reflect writes what mattered into the player's person file (impression and "threads": open matters
+    between us, e.g. "said I'd plan a kitchen") and into memories.
+- **One addition, so yesterday's conversation still reaches the day:** the morning Plan gets `[About the player]` when
+  the player's file has open threads. (Today the Plan only gets files for people in today's events.)
+- The chat prompt keeps "if you agree to do something right now, pick the option"; "later" is just what she said.
+
+### 2.3 `[Others]`: what everyone else is doing (build step 2)
+One short line per other colonist, for every call, placed after `[People nearby]`. It's world state (the same facts
+for every mind), read fresh on every call:
+> `[Others] Lyra (cook, builder): today: build a kitchen and beds · her kitchen: walls 12/20, waiting on 40 wood ·
+> 2 h ago marked 10 trees to cut. — Bernard (miner): today: mine steel for the walls · 5 h ago marked steel to mine.
+> — Snowberry (animal).`
+
+- **Role words:** her two best skills with a passion, as plain nouns (miner, cook, builder, grower, doctor, hunter,
+  crafter, artist, researcher, talker…). From `pawn.skills`; one table of words, no grammar code.
+- **For a mind:** its intent for today (or "no plan yet today"), its active project line (`BuildProject`, as in
+  `[My project]` but in the third person by name), and its last chore from `ChoreManager` with how long ago.
+- **For a colonist without a mind:** name and role words only. Animals and prisoners aren't listed.
+- **Cap:** 6 people, about 500 characters, closest first; "and 3 more" after that.
+- Owned rooms are already in `[Rooms]` ("Lyra's bedroom"); `[Others]` doesn't repeat them.
+
+## 3. Storyboard: three minds, one colony
+The cast follows VISION.md: Mara (a medic, cooks well), Bo (a miner, blunt), Kira (a builder, timid). All three have
+minds. Scenes 23-31 continue the VISION.md numbering. Each "under the hood" says which section of this spec does it.
+
+### Scene 23: Everyone sees everyone
+Morning. Mara plans her day. Her prompt says Bo is mining steel, Kira has a kitchen half built and is waiting on 40
+wood. Mara plans "cook for everyone, and help Kira get her wood". She doesn't also start a kitchen.
+
+> Under the hood: `[Others]` (§2.3) and `Today's plan` (§2.1). Nobody tells her to help; seeing the stall is enough.
+
+### Scene 24: Asking for help
+Kira's kitchen has waited on wood since yesterday. Kira picks "talk to Bo: chitchat" and says: *"Bo, could you cut some
+trees for the kitchen? I'm stuck on wood."* Bo answers in his own voice: *"Fine. After this vein."* His reply picks
+"work on the colony", and his Colony call marks 25 trees.
+
+> Under the hood: the **Reply** (§4). When a mind talks to another mind, the other mind answers with one line and may
+> act on it from its own menu, exactly like a reply to the player. Asking is ordinary conversation; there's no
+> "request" system.
+
+### Scene 25: Saying no, kindly
+Mara asks Bo to take a shift at the stove. Bo is exhausted: *"Not now, I'm dead on my feet. Tomorrow."* Both remember
+it. Next morning Bo's Plan sees `Yesterday 20:10 Mara asked me to cook; I said tomorrow.` and turns Cooking up.
+
+> Under the hood: §4's reply with no action, `[Since yesterday]` (§2.1), then Reflect puts it in the files
+> ("threads"). Minds may refuse each other, as they may refuse the player; the cooperation rule makes refusals polite
+> and usually "later".
+
+### Scene 26: No double work
+Mara opens the Colony call. `[Others]` says Bo marked 25 trees an hour ago, so she sets up a rice field instead. At
+the same moment Kira also picks "cut trees": code gives her the next 25 unmarked trees instead of failing.
+
+> Under the hood: `[Others]` (§2.3) and the collision rule (§5.1).
+
+### Scene 27: A room for someone else
+Kira sleeps on the floor and her mood is sinking. Mara has a bed. Mara plans "a bedroom for Kira". When the bed is
+built it's Kira's. Kira: *"You built this for me? Thank you."* Both remember it; Kira's opinion of Mara rises.
+
+> Under the hood: the Project call's "for whom" (§5.2). Barracks stay the "beds for everyone" choice.
+
+### Scene 28: The player's word is conversation
+The player tells Mara: *"We really need a kitchen."* Mara: *"You're right. Kira's on it; I'll help her with the
+stove."* There's no promise list. The same day her Act prompts show the exchange in `[Since yesterday]`; the next
+morning her Plan shows `[About the player]` with the thread "asked for a kitchen; I said I'd help Kira".
+
+> Under the hood: §2.2.
+
+### Scene 29: Midnight doesn't erase the day
+At 00:30 Bo wakes cold. His prompt still shows yesterday evening: the talk with Mara, the trees he marked. He doesn't
+re-plan yesterday's work as if it hadn't happened.
+
+> Under the hood: `[Since yesterday]` and the day labels in `[Recent]` (§2.1).
+
+### Scene 30: Word gets around
+Kira tells Mara over dinner: *"Bo was up all night in the mine."* Mara hasn't seen it. Her memory keeps it as
+*Kira told me*, not as a fact. When she next sees Bo, she asks how he's holding up.
+
+> Under the hood: the talk line is already a memory event for the listener; §4 tags it with source `told` and the
+> speaker, so Reflect treats it as a claim (VISION.md Scene 11, Scene 16).
+
+### Scene 31: The colony splits the work (the Phase 6 goal)
+A fresh colony, three minds, no player input. By day 3 each has a role they talk about ("I'll farm, you mine"), the
+work is split with no double marks, everyone has a bed, and a kitchen is built. The social log shows real exchanges:
+a line and an answer.
+
+> Under the hood: all of the above. Check 8 (§11).
+
+## 4. The Reply: one mind answers another (build step 3)
+Today a talk between two minds carries only the first speaker's line; the listener gets a memory event and says
+nothing. Phase 6 gives the listener one answer.
+
+**When:** a mind's talk (its Act chose "talk to X: …", with a line) lands on a colonist **who also has a mind**, awake
+and not in a mental break. Vanilla random chitchat stays canned (no call). One Reply per talk; the first speaker
+doesn't answer back (two lines is a conversation; a third is Phase 7 cost).
+
+**The call** (`reply`, template `Prompts/reply.txt`), from the listener's side. It is the Chat call with another
+colonist in the player's place:
+- recipe: the listener's full snapshot + `[Since yesterday]` + `[About <speaker>]` + `[I remember]` (up to 3 memories
+  matched to the line, as Chat does);
+- the task: *"<speaker> just said to you: '<line>' (<interaction label>). Answer out loud, in character, 1-2 short
+  sentences. If they ask for something and you agree to do it now, pick the option that does it; otherwise 0."*
+- the same menu as Chat (the Act menu), `0: nothing right now` first.
+
+```json
+{ "reply": "Fine. After this vein.", "act": 17, "memory": 0 }
+```
+
+**Applies via:** the reply is shown as a solo speech entry from the listener right after the talk (a bubble and the
+social log, `SpeechLog.Say`), with the same save-safety as today's remarks. `act` > 0 runs the option like a Chat
+`act` (Project and Colony calls included; it counts as the listener's decision, not a free one). Both minds record the
+exchange: the speaker "Bo answered: '…'" (source `took_part`), the listener "Kira asked me …; I said …".
+
+**Budget and guards:** a Reply costs the listener one decision from its daily budget; if it has none left, it still
+answers but `act` is not offered. It's dropped if the listener is drafted, downed, asleep or in a break by the time it
+lands (stale rule, as for Act). Negative interactions (insult, slight) get a reply too, and it may be sharp; the
+cooperation rule still holds.
+
+**Gossip:** a listener's memory event for a talk line gets source `told` and the speaker's name (today it's
+`took_part`), so Reflect treats what was said as a claim (Scene 30).
+
+## 5. Working together on the map (build step 4)
+
+### 5.1 No double work
+- **Collision rule:** when a Hunt / Cut / Gather / Mine option is applied and some of its targets were marked by
+  someone else meanwhile, the finder runs again at apply time and takes the next free targets of the same kind, up
+  to the chosen count. Only if none are left does it fail ("Someone already marked the rest."). Replaces today's
+  "Someone already marked them." after a stale menu.
+- `[Others]` shows each mind's last chore, so most doubles never happen.
+- No reservations or locks between minds; the Phase 5 rule stands: each mind only stops what it set up.
+
+### 5.2 Rooms for someone else
+- The Project call gets a **"for"** field when the chosen kind is a bedroom: `me`, or the name of a colonist with no
+  bed of their own (enum; only offered if there is one). Code claims the finished bed for that person instead of the
+  designer. `[My project]` says "a bedroom for Kira"; `[Others]` shows it on Mara's line; Kira gets a memory when it's
+  done ("Mara built me a bedroom", importance 6).
+- The designer still owns the project (cancel, abandon, one at a time). The occupant can't abandon it.
+- Barracks stay as they are (unowned beds for anyone).
+
+## 6. The request queue (build step 5)
+Several minds share one LM Studio. Today `LlmClient` runs one request at a time, first come first served, and a reply
+older than an hour of game time is dropped.
+- **Priority queue:** player Chat > Reply > Act > Project/Colony > Plan > Reflect. A waiting Reflect never delays a
+  conversation (Phase 3's cancel-and-rerun stays).
+- **Parallel slots:** a setting "Parallel requests" (default 1, up to 4) for servers that run several at once
+  (LM Studio's parallel option). Measure stale drops and seconds per call at 1 and at 2 before changing the default.
+- Stale rule unchanged; log each drop with how long it waited in the queue, so the cost of waiting is visible.
+
+## 7. What stays the same
+- Every mind gets the same world facts; `[Others]` is world state, not memory.
+- Minds may refuse the player and each other. The cooperation rule (session 11, `system.txt`) makes them helpful and
+  civil; traits change tone, not willingness.
+- Vanilla does the work; minds only decide, talk and set things up.
+- No coordinates or directions in prompts (`no_coords.py`).
+
+## 8. Guardrails
+- A Reply is only between two minds, only for a talk a mind started, and never chains (no reply to a reply).
+- Daily decision budget applies to Replies that act (§4).
+- "for" in the Project call only names colonists who have no bed of their own, checked again when the bed is claimed
+  (if they've got one meanwhile, the bed stays unclaimed and it's an ordinary room).
+- `[Others]` never shows another mind's reasons, memories or diary: only what anyone in the colony could see or be
+  told (their plan for the day is said at breakfast, in effect).
+
+## 9. Settings and dev tools
+- Settings: "Minds answer each other" (on), "Parallel requests" (1).
+- Debug actions (`Actions\…`, runnable through RimBridge):
+  - "Show context now" (selected mind): writes the full Act prompt it would get to
+    `D:\RimDev\AIPawnControl\context.txt`, with each section's character count. The pipeline table in §1, live.
+  - "Talk to <mind> now…" (children per other mind): the selected mind starts a deep talk with a fixed test line, so
+    the Reply runs without waiting for an Act.
+  - "Queue status": requests waiting, by kind, and how long.
+
+## 10. Save data and logging
+- No new saved classes. `Goal.Promise` is dropped on load. The Reply's lines are solo entries (left out of saves like
+  every remark). The "for" of a bedroom is saved on `BuildProject` (`occupant`).
+- JSONL: a new call type `reply`. Player.log: `<listener> reply to <speaker>: "<line>" | act: <option>`.
+
+## 11. Done when (checked through GABS + RimBridgeServer)
+1. **Chronology:** at 00:30 in-game, "Show context now" on a mind shows `[Since yesterday]` with yesterday evening's
+   events, `[Recent]` grouped "Yesterday: … — Today: …", and `Yesterday's plan (not planned today yet)`. After the
+   morning Plan: `Today's plan (made at 07:xx)`.
+2. **No promise section:** chat "can you cut trees later?" → the reply shows, no `note` field in the schema, no
+   `[I promised the player]` anywhere; the same day `[Since yesterday]` has both lines; after the night, the player's
+   file has a thread and the morning Plan shows `[About the player]`. An old save with promise goals loads cleanly.
+3. **`[Others]`:** on a 3-mind colony, each mind's context lists the other two with role words, today's plan, project
+   and last chore, and the numbers match the map (`[Colony work]`, `ChoreManager`). Under 500 characters.
+4. **Reply:** "Talk to <mind> now" → the listener's reply appears as a bubble (clipped `screenshot_cell_rect`) and in
+   the social log; both memories have the exchange; the listener's event has source `told`.
+5. **Asking works:** a line asking for trees → the listener picks "work on the colony" in its reply and trees get
+   marked (`[Colony work]` shows them "by" the listener). A tired listener says no politely (`reason` + line).
+6. **No double work:** two minds' Colony calls pick "cut trees" in the same second (dev: two "Colony call now" in one
+   `run_lua`) → both succeed on different trees; no "Someone already marked" line.
+7. **A room for someone else:** a mind plans "a bedroom for Kira"; after "Finish project instantly" the bed's owner is
+   Kira, `[Rooms]` says "Kira's bedroom", and Kira's memory has it.
+8. **The society run (the Phase 6 goal):** a fresh quicktest colony, three minds, no player input, 5 in-game days at
+   Superfast. Pass: at least 3 Replies where the listener acted on the request; zero double-marking failures; every
+   colonist has a bed by day 4; a kitchen or other meal source exists by day 5; no social fights started by a mind.
+   Note each mind's role in its own words (from `[Recent]` and plans).
+9. **Queue:** with 3 minds, stale Act drops per day at 1 slot vs 2 slots are recorded; Chat is never behind a Reflect.
+10. **Save/load and mod removal** as in earlier phases (only the known "Could not find class" lines).
+
+## 12. Out of scope (later)
+- A shared colony plan, roles assigned by a council, long multi-turn conversations (Phase 7).
+- New interaction defs ("ask for help" as its own vanilla interaction), trading between minds, lending items.
+- Minds reading each other's memories.
+
+## 13. Build order
+Each build step ends with its checks in the game. Say "build step N" or "§N".
+1. **Context clean-up** (§2.1, §2.2): day labels, `[Since yesterday]`, promise removal, `[About the player]` in Plan,
+   "Show context now". Checks 1, 2. *Can start before Phase 5 closes; it changes every call, so re-run Phase 5's
+   self-sufficiency run after it.*
+2. **`[Others]`** (§2.3). Check 3.
+3. **The Reply** (§4), gossip source, "Talk to <mind> now". Checks 4, 5.
+4. **Working together** (§5): the collision rule, rooms for someone else. Checks 6, 7.
+5. **The queue** (§6). Check 9.
+6. **The society run.** Checks 8, 10.
+
+Before build step 2: close Phase 5 (its self-sufficiency run and §9 checks) and rewrite PHASE5.md as planned.
+
+## 14. Decisions
+- **Session 11 (the user):**
+  - Minds must be far more agreeable: the firm cooperation rule is in `system.txt`, `persona.txt`, `guidance.txt` and
+    `chat.txt` (built and seen working in session 11). "Write only in English" was tried and removed.
+  - No `[I promised the player]`: talking to the player is ordinary conversation.
+  - `[My plan]` (and the other timelines) must say yesterday vs today.
+  - Minds knowing what the others do is Phase 6 (society); `[Others]` is the way.
+  - This spec with a storyboard, reviewed before building.
+  - **Review (session 11):** approved; implement it. The §15 defaults are accepted: no closing line, `[Others]` shows
+    colonists without minds by name and role words only (no current job), role words come from skills.
+- **Proposed here (defaults; the user decides in review):**
+  - Two lines per exchange (a line and one answer), no chains.
+  - The Reply is the Chat call with a colonist in the player's place; asking is conversation, not a request system.
+  - A Reply that acts costs the listener a decision.
+  - `[Since yesterday]` = the last 24 hours, replacing `[Today so far]`.
+  - Bedrooms can be built for a colonist without a bed; barracks unchanged.
+  - Collisions resolved by taking the next free targets, not by locks.
+  - Queue priority as in §6; parallel slots off by default until measured.
+
+## 15. Open questions
+- Should the first speaker hear the answer in a follow-up Act (it will, via `[Since yesterday]`), or also get a short
+  closing line of its own? **Default: no closing line.**
+- Should `[Others]` include colonists without minds' current job ("hauling", "sleeping")? **Default: no; only role
+  words.** `[People nearby]` already shows what's close.
+- Role words from skills, or from what each mind says it is (its intent)? **Default: skills**, since intents change
+  daily and are already on the line.
+
+## 16. Results so far (session 11)
+**Built** (all in the working tree, never committed):
+- §2.1: `PawnMind.intentTick`, `decisionTicks` (saved; old saves show "Earlier"); `[My plan]` "Today's plan (made at
+  07:53)" / "Yesterday's plan (not planned today yet)"; `[Recent]` grouped by day; `[Today so far]` → `[Since yesterday]`
+  (`MindMemory.SinceYesterday`, last 24 h, "Yesterday 18:10 …"). `SnapshotBuilder.DayLabel` / `Clock`.
+- §2.2: `[I promised the player]`, the Chat `note`, `Goal.Promise` and the tab's "(promised)" removed; promise goals
+  dropped on load; the Plan gets `[About the player]` first when the file has threads (`Recall.Plan`).
+- §2.3: `[Others]` (`SnapshotBuilder.Others`, role words from skills, `ChoreManager.LastOf` / `Did`), after
+  `[People nearby]`, in every call.
+- §4: the Reply (`PawnMind.Hear` / `UpdateReply` / `RequestReply` / `OnReply`, `Recall.Reply`, `Prompts/reply.txt`,
+  recipe `reply`); waits until the listener is free, cancels a Reflect, dropped if she's asleep/busy or after 2 h.
+  Setting "Minds answer each other". The listener's talk event now reads "…, who said to me: '…'" with source `told`
+  (it used to say "I said" for the listener too: a Phase 2 bug).
+- §5.1: `ColonyCall.Refresh`: a Hunt/Cut/Gather/Mine pick that was taken meanwhile takes the next free targets.
+- §5.2: `BuildProject.occupant` (saved), `Owner`, `KindFor`; the Project call's `for` enum lists bedless colonists.
+- §6: `LlmClient` priority queue (chat > reply > act > project/colony > plan/persona > reflect), setting "Parallel
+  requests" (1-4), `waited` in the JSONL and in stale-drop lines.
+- §9: debug actions "Show context now" (`D:\RimDev\AIPawnControl\context.txt`), "Talk to mind now...\<mind>",
+  "Queue status".
+
+**Checked in the game:**
+- Checks 1 (part), 3: on `aipc_coop_day2`: `Today's plan (made at 07:53)`, `[Recent]` "Earlier: … — Today: …",
+  `[Since yesterday]` carrying yesterday's talks into the morning, `[Others]` with roles, projects and chores (~300
+  chars). Toni's next plan: "…and help Bernard finish the bedroom."
+- Check 4: "Talk to mind now" Toni → Lyra ("could you cut some trees?") → Lyra: "I have already marked six trees for
+  us to cut, so we should be fine." (true), shown as her remark; both minds recorded it.
+- Check 6 (in the run): "'cut trees (near the base)' was taken meanwhile; took 'cut trees (a walk from the base)'
+  instead." Both minds got 10 trees.
+- Check 7: not yet (every colonist had a bed when tested; the `for` line showed only "me").
+- **Society run** (fresh quicktest: Alex, Max, Sheet; save `aipc_society_day2`), day 0-2.7 at Fast: 36 Acts, 6
+  Replies (4 acted: talks, walks), 6 stale drops, 0 exceptions. Stockpile, 2 × 10 trees, berries, rice field,
+  **Sheet's barracks built** ("gets everyone off the ground fast"). Reasons name the others ("so Max can actually
+  start", "Alex just marked [trees]"). Food and mood stay critical (no meal source, rice not ripe).
+- Earlier the same session on `aipc_coop_day2`, Lyra planned **a kitchen** ("A warm stove will help us all feel
+  settled").
+
+**Findings:**
+- **Stale drops at Superfast:** with `qwen3.8-27b` (6-8 s a call) and 3 minds, most Act replies were older than 1 game
+  hour at Superfast (waits of 3-25 s in the queue). At Fast: 6 of 36. Test runs with minds should use Fast; the
+  "Parallel requests" setting is untested (needs LM Studio's parallel option).
+- Replies so far answer and chat, but none has yet started a chore for someone else (check 5 still open).
+- Minds still spend many decisions on talks to lift mood when starving; the real fix is food (Phase 5 finding).

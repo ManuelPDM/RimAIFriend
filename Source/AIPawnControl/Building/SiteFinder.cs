@@ -646,11 +646,15 @@ namespace AIPawnControl
 
         // ---- materials and words ----
 
-        /// <summary>Up to 3 wall materials, most in storage first; padded with vanilla's default so it's never empty.</summary>
+        /// <summary>
+        /// Up to 3 wall materials, most in storage first; padded with vanilla's default so it's never empty. Wood or stone
+        /// blocks only (STREAMLINE.md §15): a fresh colony's silver once became a barracks, and steel is for other things.
+        /// </summary>
         public static List<ThingDef> Materials(Map map)
         {
             map.resourceCounter.UpdateResourceCounts(); // vanilla refreshes every 204 ticks, so it's stale while paused
             var list = GenStuff.AllowedStuffsFor(ThingDefOf.Wall)
+                .Where(Supplies.IsWallMaterial)
                 .Select(s => (stuff: s, count: map.resourceCounter.GetCount(s)))
                 .Where(p => p.count > 0)
                 .OrderByDescending(p => p.count)

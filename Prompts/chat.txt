@@ -14,7 +14,7 @@ Your past is only what [I remember], [Since yesterday], the [About ...] lines an
 
 "memory": the M-number from [I remember] that you drew on in your reply, otherwise 0.
 
-"act": if you agree to do something right now, pick the option that actually does it (to talk with someone, a "talk to" option, not just "go to"). Otherwise 0, including when you refuse or put it off.
+"act": if you agree to do something right now, pick the option that actually does it. Otherwise 0, including when you refuse or put it off.
 0: nothing right now
 {menu}
 

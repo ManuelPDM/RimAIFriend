@@ -5,7 +5,7 @@ using System.Text;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Assembles the Plan/Act/Chat prompts from named sections. Each section has a fixed position and a character
+    /// Assembles the Act/Chat/Base prompts from named sections. Each section has a fixed position and a character
     /// cap; each call type has a recipe of the sections it gets. Stable text goes first and volatile text last, so
     /// LM Studio (llama.cpp) can reuse its work on an unchanged prompt start. Over budget, the most droppable
     /// section goes first; the live snapshot is never dropped. Main thread only (it reads the snapshot).
@@ -35,8 +35,8 @@ namespace AIPawnControl
         // The live snapshot (SnapshotBuilder.Sections): no cap, never dropped.
         private static readonly string[] Snapshot =
         {
-            "Me", "Time", "Condition", "Needs", "Feelings", "Skills", "Doing now", "My plan", "My project",
-            "People nearby", "Others", "Colony", "Colony stores", "Colony work", "Rooms", "Recent",
+            "Me", "Time", "Condition", "Needs", "Feelings", "Doing now", "My project",
+            "People", "Others", "Colony", "Colony stores", "Colony work", "Rooms", "Recent",
         };
 
         // Every user-prompt section, in prompt order: the snapshot, then memory.
@@ -51,12 +51,10 @@ namespace AIPawnControl
         // Which sections each call type gets. The call type is also the name of its task template in Prompts/.
         private static readonly Dictionary<string, HashSet<string>> Recipes = new Dictionary<string, HashSet<string>>
         {
-            ["plan"] = new HashSet<string>(Snapshot) { "Since yesterday", "About" },
             ["act"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "On my mind" },
             ["chat"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember" },
             ["reply"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember" }, // Chat, with a colonist in the player's place
-            ["project"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
-            ["colony"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
+            ["base"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
             ["reflect"] = new HashSet<string> { "Me", "Time" }, // its events, people and goals come in the task values
         };
 

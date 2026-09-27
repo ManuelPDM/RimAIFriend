@@ -3,7 +3,8 @@
   Room kinds a mind can build (PHASE4.md §1). A kind is the set of items that makes vanilla give a room its role; the
   project is done when vanilla really gives it. Item rules: backToWall (the default), centre, nextTo (index of an
   earlier item), repeat/min, optional, preferNew, medical, clearAround. minSize: x = the short side, z = the long side.
-  Order matters: it's the order the kinds are listed to the model.
+  size: the interior code builds it at (default 5x5; STREAMLINE.md §7). Order matters: it's the order the kinds are listed
+  to the model.
 -->
 <Defs>
   <AIPawnControl.RoomKindDef>
@@ -12,6 +13,7 @@
     <description>a bed and an end table</description>
     <role>Bedroom</role>
     <owned>true</owned>
+    <size>(4,4)</size>
     <items>
       <li><defs><li>Bed</li></defs><backToWall>true</backToWall></li>
       <li><defs><li>EndTable</li></defs><nextTo>0</nextTo><optional>true</optional></li>
@@ -31,10 +33,11 @@
   <AIPawnControl.RoomKindDef>
     <defName>AIPC_Kitchen</defName>
     <label>kitchen</label>
-    <description>a fueled stove</description>
+    <description>a fueled stove and a butcher table</description>
     <role>Kitchen</role>
     <items>
       <li><defs><li>FueledStove</li></defs><backToWall>true</backToWall></li>
+      <li><defs><li>TableButcher</li><li>ButcherSpot</li></defs><backToWall>true</backToWall><optional>true</optional></li>
     </items>
   </AIPawnControl.RoomKindDef>
 
@@ -55,6 +58,7 @@
     <description>a horseshoes pin, and a chess table if researched</description>
     <role>RecRoom</role>
     <minSize>(4,6)</minSize> <!-- horseshoes are thrown from 5 cells away -->
+    <size>(5,6)</size>
     <items>
       <li><defs><li>HorseshoesPin</li></defs><backToWall>true</backToWall></li>
       <li><defs><li>ChessTable</li></defs><backToWall>true</backToWall><optional>true</optional><clearAround>2</clearAround></li>
@@ -68,7 +72,7 @@
     <role>Workshop</role>
     <items>
       <li>
-        <defs><li>HandTailoringBench</li><li>FueledSmithy</li><li>TableStonecutter</li><li>TableSculpting</li></defs>
+        <defs><li>TableStonecutter</li><li>HandTailoringBench</li><li>FueledSmithy</li><li>TableSculpting</li></defs>
         <backToWall>true</backToWall><preferNew>true</preferNew>
       </li>
     </items>
@@ -79,6 +83,7 @@
     <label>laboratory</label>
     <description>a simple research bench</description>
     <role>Laboratory</role>
+    <size>(4,4)</size>
     <items>
       <li><defs><li>SimpleResearchBench</li></defs><backToWall>true</backToWall></li>
     </items>

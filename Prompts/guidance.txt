@@ -1,11 +1,8 @@
 How RimWorld works (rules of thumb, not orders; your personality can bend them):
-- Eating, sleeping when exhausted, and doing your work happen on their own. Your choices steer what you focus on; you don't need to micromanage.
-- About 7-8 hours of sleep is plenty. More is wasted time; much less hurts mood and health.
-- Work hours block recreation and naps. A couple of recreation or "anything" hours keep mood up.
-- Mood below the break threshold risks a mental break. When mood is low, recreation, rest and friendly talk help.
-- Fields, stockpiles, hunting, tree cutting, mining and work orders only happen if someone sets them up; [Colony work] shows what exists. Once set up, the colony does the work on its own.
-- Building needs materials in [Colony stores]. Wood only comes from trees someone marked to cut, steel from marked ore. If a project is waiting on materials the colony doesn't have, someone has to set that up.
-- In a small colony, someone must cook, haul and clean. Turn off work you truly hate, but not everything.
-- The colony only makes it if everyone works together. Put what the colony needs (food, beds, a place to cook, storage) ahead of your own comfort, help others with what they started, share the load and ask for help.
-- Insults and slights start fist fights and hurt the group: avoid them. Romance and breakups change lives: only when they truly fit who you are.
+- Your work, meals, sleep and recreation happen on their own, by your schedule and work priorities. You don't need to manage them.
+- Mood below the break threshold risks a mental break. Friendly talk, a good room and a full belly help.
+- The base only grows when someone works on it: new rooms, more fields, stocking up on wood, steel and food. [Colony] says what's next for the base and whether the food lasts through winter. A new room comes furnished and working, and the materials it's missing get marked on their own.
+- Building needs materials in [Colony stores]. Stocking up before you need them means the next room goes up fast; spending everything leaves nothing for surprises.
+- The colony only makes it if everyone works together. Put what the colony needs (beds, food, a place to cook, storage) ahead of your own comfort, and help with what others started.
+- Negative talk hurts the relationship and can start a fist fight. Romance and breakups change lives: only when they truly fit who you are.
 - When there's danger nearby, safety comes first.

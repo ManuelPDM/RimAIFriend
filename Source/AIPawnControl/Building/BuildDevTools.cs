@@ -38,8 +38,8 @@ namespace AIPawnControl
                 if (mind != null && mind.persona != null)
                     yield return new Command_Action
                     {
-                        defaultLabel = "DEV: Plan a room now",
-                        defaultDesc = "Runs the site scan and the Project call (kind, size, site, material), ignoring the budget and cooldown.",
+                        defaultLabel = "DEV: Base call now",
+                        defaultDesc = "Runs the Base call (the ladder, food, stock-ups, rooms, furniture), ignoring the budget and cooldowns.",
                         icon = icon,
                         action = () =>
                         {
@@ -48,13 +48,13 @@ namespace AIPawnControl
                                 Messages.Message($"{pawn.LabelShort} is thinking already.", MessageTypeDefOf.RejectInput, false);
                                 return;
                             }
-                            mind.AddDecision("DEV plan a room now: " + ProjectCall.Start(mind, dev: true), importance: 0);
+                            mind.AddDecision("DEV base call now: " + BaseCall.Start(mind, dev: true), importance: 0);
                         },
                     };
                 yield return new Command_Action
                 {
                     defaultLabel = "DEV: Furnish now",
-                    defaultDesc = "Logs the furnishing options her Act menu would show and places the first one. No LLM; the cooldown applies.",
+                    defaultDesc = "Logs the furnishing options the Base call would show and places the first one. No LLM; the cooldown applies.",
                     icon = icon,
                     action = () =>
                     {
@@ -68,7 +68,7 @@ namespace AIPawnControl
                 yield return new Command_Action
                 {
                     defaultLabel = "DEV: Place site A now",
-                    defaultDesc = "Pick a room kind; places it at the best site, 5×5, in the most-stocked material as blueprints. No LLM.",
+                    defaultDesc = "Pick a room kind; places it at the best site, 5×5, in the most-stocked material as blueprints, and marks missing materials. No LLM.",
                     icon = icon,
                     action = () => BuildDevTools.PlaceBest(pawn),
                 };
@@ -323,7 +323,9 @@ namespace AIPawnControl
                 Messages.Message($"No site fits a {kind.label}.", MessageTypeDefOf.RejectInput, false);
                 return;
             }
-            BuildManager.Instance.Place(pawn, plan, materials[0], validator, finder.Where(plan));
+            var project = BuildManager.Instance.Place(pawn, plan, materials[0], validator, finder.Where(plan));
+            if (project != null)
+                ModLog.Message($"Materials for {pawn.LabelShort}'s {kind.label}: {Supplies.MarkFor(pawn, project)}");
         }
 
         /// <summary>God-mode build of every entry plus a roof, to test done and bed claiming.</summary>

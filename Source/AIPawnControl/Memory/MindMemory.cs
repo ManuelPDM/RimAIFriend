@@ -61,6 +61,57 @@ namespace AIPawnControl
             return count;
         }
 
+        /// <summary>
+        /// Memories this close say the same thing in other words (measured on a 30-day save: paraphrases 0.82-0.93,
+        /// distinct memories 0.79 and below, the median pair 0.30).
+        /// </summary>
+        public const float SameMemoryCosine = 0.81f;
+
+        /// <summary>
+        /// Merges every pair of memories that say the same thing (FURNISHING.md, session 15): one memory instead of a
+        /// repeat. Returns how many were merged away.
+        /// </summary>
+        public int Consolidate(string tag)
+        {
+            int merged = 0;
+            var live = memories.Where(m => !m.archived && m.vectorTag == tag && m.vector != null).ToList();
+            for (int i = 0; i < live.Count; i++)
+                for (int j = i + 1; j < live.Count; j++)
+                    if (Embedding.Cosine(live[i].Vector, live[j].Vector) >= SameMemoryCosine)
+                    {
+                        Merge(live[i], live[j]);
+                        live.RemoveAt(j);
+                        merged++;
+                        j = i; // the survivor changed: compare it with the rest again
+                    }
+            return merged;
+        }
+
+        /// <summary>
+        /// Folds <paramref name="gone"/> into <paramref name="keep"/>: the more important text survives (the newer on a tie),
+        /// events and people are shared, and it counts one more (something that keeps happening matters more).
+        /// </summary>
+        public void Merge(MemoryRecord keep, MemoryRecord gone)
+        {
+            if (gone.importance > keep.importance || (gone.importance == keep.importance && gone.id > keep.id))
+            {
+                keep.text = gone.text;
+                keep.vector = gone.vector;
+                keep.vectorTag = gone.vectorTag;
+                keep.place = gone.place;
+            }
+            keep.importance = Math.Min(10, Math.Max(keep.importance, gone.importance) + 1);
+            keep.tick = Math.Min(keep.tick, gone.tick);
+            keep.events = keep.events.Union(gone.events).ToList();
+            keep.people = keep.people.Union(gone.people).OrderBy(n => n).ToList();
+            keep.usedCount += gone.usedCount;
+            keep.lastUsedTick = Math.Max(keep.lastUsedTick, gone.lastUsedTick);
+            foreach (var file in files)
+                if (file.toldThem.Remove(gone.id) && !file.toldThem.Contains(keep.id))
+                    file.toldThem.Add(keep.id);
+            memories.Remove(gone);
+        }
+
         public void MarkReflected(int eventId, int tick)
         {
             lastReflectEventId = eventId;

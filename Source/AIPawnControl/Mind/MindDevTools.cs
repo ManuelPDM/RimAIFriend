@@ -36,6 +36,7 @@ namespace AIPawnControl
             {
                 ["trigger"] = "(Show context now)",
                 ["menu"] = ActionCatalog.DescribeMenu(menu),
+                ["talkto"] = PawnMind.TalkToText(menu),
             }, Recall.Plan(mind).Sections);
             string system = messages[0].Value, user = messages[1].Value;
             var sb = new StringBuilder();

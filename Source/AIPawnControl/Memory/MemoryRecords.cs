@@ -115,6 +115,8 @@ namespace AIPawnControl
         public string source;
         public int since;
         public int until = -1; // -1 = still true
+        public string vector;    // Embedding.Pack, or null until embedded: a fact that repeats an open one isn't added
+        public string vectorTag;
 
         public bool Open => until < 0;
 
@@ -124,6 +126,8 @@ namespace AIPawnControl
             Scribe_Values.Look(ref source, "source");
             Scribe_Values.Look(ref since, "since");
             Scribe_Values.Look(ref until, "until", -1);
+            Scribe_Values.Look(ref vector, "vector");
+            Scribe_Values.Look(ref vectorTag, "vectorTag");
         }
     }
 

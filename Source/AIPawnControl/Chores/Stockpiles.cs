@@ -6,38 +6,11 @@ using Verse;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Stockpiles (PHASE5.md §4.7): "make a stockpile" (the Colony call scans for sites, outdoors or in a room with no role,
-    /// roofed a bonus, and asks what it holds, the size and the site). Haulers fill it on their own.
+    /// Stockpiles (STREAMLINE.md §7): code lays them out, the colony's first one and one in each new kitchen and storeroom.
+    /// Haulers fill them on their own.
     /// </summary>
     public static class Stockpiles
     {
-        public static readonly int[] Sizes = { 3, 5, 7 };
-        public static readonly string[] Kinds = { "everything", "food", "materials", "weapons and clothes", "dump for corpses and chunks" };
-
-        public static string SizeName(int size) => Fields.SizeNames[System.Array.IndexOf(Sizes, size)];
-
-        public static IEnumerable<ChoreOption> Options(ChoreScan scan)
-        {
-            if (!scan.SomeoneCanDo(WorkTypeDefOf.Hauling))
-                yield break;
-            bool none = scan.map.haulDestinationManager.AllGroupsListForReading.Count == 0;
-            yield return new ChoreOption
-            {
-                kind = Chore.Kind.Stockpile,
-                label = "make a stockpile",
-                useful = none ? 3f : 0.3f,
-                needs = ChoreNeeds.Stockpile,
-                check = () => null, // the Colony call scans for sites; its reply is validated when placed
-                apply = (mind, choice) =>
-                {
-                    int size = System.Math.Min(Sizes[choice.size], choice.site.maxSize);
-                    var rect = choice.site.Rect(size);
-                    string result = Place(mind.pawn, rect, choice.holds, choice.finder.Where(rect, choice.site.steps));
-                    return size < Sizes[choice.size] ? result + $" Only {SizeName(size)} fit there." : result;
-                },
-            };
-        }
-
         public static bool CellOk(IntVec3 c, Map map)
         {
             if (!c.InBounds(map) || c.InNoBuildEdgeArea(map) || c.Fogged(map) || !c.Standable(map) || c.GetTerrain(map).IsWater)
@@ -90,17 +63,23 @@ namespace AIPawnControl
             string why = ZoneSites.Check(rect, map, c => CellOk(c, map));
             if (why != null)
                 return $"Couldn't lay out the stockpile: {why}.";
+            return PlaceCells(pawn, rect.Cells.ToList(), kind, where, $"{rect.Width}×{rect.Height}");
+        }
+
+        /// <summary>Lays out the zone on cells already checked (a room's free floor, or a square), and records it as hers.</summary>
+        public static string PlaceCells(Pawn pawn, List<IntVec3> cells, string kind, string where, string size)
+        {
+            Map map = pawn.Map;
             var preset = kind.StartsWith("dump") ? StorageSettingsPreset.DumpingStockpile : StorageSettingsPreset.DefaultStockpile;
             var zone = new Zone_Stockpile(preset, map.zoneManager);
             map.zoneManager.RegisterZone(zone);
-            foreach (var c in rect)
+            foreach (var c in cells)
                 zone.AddCell(c);
             SetFilter(zone, kind);
             var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Stockpile, kind);
             chore.zone = zone;
-            string size = $"{rect.Width}×{rect.Height}";
             chore.Remember($"I laid out a stockpile for {kind} ({size}), {where}.", 3);
-            ModLog.Message($"{pawn.LabelShort} laid out a stockpile for {kind} ({size}) at {rect}, {where}.");
+            ModLog.Message($"{pawn.LabelShort} laid out a stockpile for {kind} ({size}), {where}.");
             return $"Laid out a stockpile for {kind} ({size}), {where}.";
         }
     }

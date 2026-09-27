@@ -49,14 +49,13 @@ namespace AIPawnControl
                 Section(sb, "AIPawnControl_TabLately", mind.memory.lately);
             if (mind.memory.goals.Count > 0)
                 Section(sb, "AIPawnControl_TabGoals", string.Join("\n", mind.memory.goals.Select(g => g.text)));
-            Section(sb, "AIPawnControl_TabIntent", mind.intent ?? "…");
             Section(sb, "AIPawnControl_TabSchedule", ActionCatalog.DescribeSchedule(mind.pawn));
             Section(sb, "AIPawnControl_TabPriorities", ActionCatalog.DescribePriorities(mind.pawn));
             Section(sb, "AIPawnControl_TabReason", mind.lastReason ?? "…");
             Section(sb, "AIPawnControl_TabRecent", mind.decisions.Count > 0 ? string.Join("\n", Enumerable.Reverse(mind.decisions)) : "…");
             if (mind.memory.diary.Count > 0)
                 Section(sb, "AIPawnControl_TabDiary", mind.memory.diary[mind.memory.diary.Count - 1].text);
-            sb.AppendLine("AIPawnControl_TabBudget".Translate(Mathf.Max(0, mind.ActsLeft), mind.ExtraPlansLeft).ToString());
+            sb.AppendLine("AIPawnControl_TabBudget".Translate(Mathf.Max(0, mind.ActsLeft)).ToString());
 
             Rect inner = new Rect(0f, 0f, size.x, size.y).ContractedBy(12f);
             inner.yMin += 20f; // leave room for the tab's close button

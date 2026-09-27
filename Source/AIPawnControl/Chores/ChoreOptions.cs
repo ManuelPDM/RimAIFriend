@@ -6,51 +6,23 @@ using Verse;
 
 namespace AIPawnControl
 {
-    /// <summary>What an option asks of the Colony call besides its number (PHASE5.md §5).</summary>
-    public enum ChoreNeeds { Nothing, Amount, Field, Stockpile, Crop }
-
-    /// <summary>Her answer to the Colony call, resolved against the option she picked.</summary>
-    public class ColonyChoice
-    {
-        public int size = 1;      // 0 small, 1 medium, 2 large
-        public int count;         // for an Amount option: its count at that size
-        public ThingDef crop;     // a new field or a crop switch
-        public ZoneSites.Site site;
-        public ZoneSites finder;
-        public string holds;      // a new stockpile
-    }
-
-    /// <summary>One chore the Colony call can offer (PHASE5.md §4): words for her, how useful it is now, and how to apply it.</summary>
+    /// <summary>One stock-up line the Base call can offer (STREAMLINE.md §5): its words, with the amount and what it's for, and how to apply it.</summary>
     public class ChoreOption
     {
         public Chore.Kind kind;
-        public string label;
-        public float useful;                          // orders the list, most useful first; nothing is hidden
-        public ChoreNeeds needs;
-        public int[] counts;                          // Amount: how many at small, medium, large
-        public Func<int, string> describe;            // Amount: words for one count, e.g. "25 trees, about 500 wood"
-        public Func<PawnMind, ColonyChoice, string> apply; // main thread; re-validates, then changes the map. Returns the result line
-        public Func<string> check;                    // the validator: null = fine, else why it fails
-
-        /// <summary>"small: 10 trees, about 200 wood · medium: … · large: …", or one description when the sizes are equal.</summary>
-        public string AmountText()
-        {
-            if (needs != ChoreNeeds.Amount)
-                return null;
-            if (counts.Distinct().Count() == 1)
-                return describe(counts[0]);
-            return string.Join(" · ", counts.Select((n, i) => $"{ChoreOptions.Sizes[i]}: {describe(n)}"));
-        }
+        public string label;                  // "wood, enough for another room: ~12 trees (+250 wood, near the base)"
+        public float useful;                  // orders the group, most useful first
+        public Func<string> check;            // the validator: null = fine, else why it fails
+        public Func<PawnMind, string> apply;  // main thread; re-validates, then changes the map. Returns the result line
     }
 
     /// <summary>The live map facts every finder shares, read once per call.</summary>
     public class ChoreScan
     {
-        public const int MaxWalk = 60;
-
         public readonly Map map;
         public readonly Pawn pawn;
         public readonly IntVec3 center;
+        public readonly int colonists;
         public readonly float foodDays; // -1 = unknown (no storage yet)
         private int[] walk;
 
@@ -59,19 +31,22 @@ namespace AIPawnControl
             this.pawn = pawn;
             map = pawn.Map;
             center = SiteFinder.BaseCenter(map);
-            int colonists = Math.Max(1, map.mapPawns.FreeColonistsSpawnedCount);
+            colonists = Math.Max(1, map.mapPawns.FreeColonistsSpawnedCount);
             foodDays = map.haulDestinationManager.AllGroupsListForReading.Count == 0 ? -1f : map.resourceCounter.TotalHumanEdibleNutrition / colonists;
         }
 
-        /// <summary>Steps from the base centre over walkable cells (trees pass), or -1 past MaxWalk.</summary>
+        /// <summary>
+        /// Steps from the base centre over walkable cells (trees pass), or -1 where no colonist can walk (or it's unexplored).
+        /// The whole map, not a radius: wood, stone and food come from wherever they are (the user, session 14).
+        /// </summary>
         public int WalkAt(IntVec3 c)
         {
             if (walk == null)
-                walk = SiteFinder.Walk(map, center, MaxWalk);
+                walk = SiteFinder.Walk(map, center, int.MaxValue);
             return c.InBounds(map) ? walk[c.z * map.Size.x + c.x] : -1;
         }
 
-        public static string Near(int steps) => steps <= 20 ? "right by the base" : steps <= 45 ? "near the base" : "a walk from the base";
+        public static string Near(int steps) => steps <= 20 ? "right by the base" : steps <= 45 ? "near the base" : steps <= 100 ? "a walk from the base" : "far from the base";
 
         /// <summary>Stored count, or a large number when there's no storage to count (don't cry shortage on a fresh map).</summary>
         public int Stock(ThingDef def) => map.haulDestinationManager.AllGroupsListForReading.Count == 0 ? 9999 : map.resourceCounter.GetCount(def);
@@ -88,11 +63,7 @@ namespace AIPawnControl
 
     public static class ChoreOptions
     {
-        public static readonly string[] Sizes = { "small", "medium", "large" };
-
-        public const string MenuLabel = "work on the colony (fields, stockpiles, hunting, wood, mining, work orders)";
-
-        /// <summary>Every option each finder has right now, most useful first. Cheap checks only; zone site scans run in the Colony call.</summary>
+        /// <summary>Every stock-up option the finders have right now, most useful first.</summary>
         /// <param name="ignoreLimits">Dev tools: skip the setting, cooldowns and caps.</param>
         public static List<ChoreOption> All(Pawn pawn, bool ignoreLimits = false)
         {
@@ -112,31 +83,15 @@ namespace AIPawnControl
                     ModLog.Error($"Chore finder {kind} threw: {e}");
                 }
             }
-            Try(Chore.Kind.Hunt, Hunting.Options);
             Try(Chore.Kind.Cut, TreeCutting.Options);
-            Try(Chore.Kind.Gather, WildFood.Options);
             Try(Chore.Kind.Mine, Mining.Options);
-            Try(Chore.Kind.Bill, WorkOrders.Options);
-            Try(Chore.Kind.Field, Fields.Options);
-            Try(Chore.Kind.Stockpile, Stockpiles.Options);
+            Try(Chore.Kind.Bill, WorkOrders.StockOptions);
+            Try(Chore.Kind.Hunt, Hunting.Options);
+            Try(Chore.Kind.Gather, WildFood.Options);
             return options.OrderByDescending(o => o.useful).ToList();
         }
 
-        /// <summary>"call off …" for each chore she has running, newest first.</summary>
-        public static List<ChoreOption> Stops(Pawn pawn) =>
-            ChoreManager.Instance?.ActiveOf(pawn).OrderByDescending(c => c.placedTick)
-                .Select(c => new ChoreOption
-                {
-                    kind = c.kind,
-                    label = StopLabel(c),
-                    check = () => c.Active ? null : "already over",
-                    apply = (mind, choice) => c.Active ? c.Stop() : "That's already over.",
-                }).ToList() ?? new List<ChoreOption>();
-
-        /// <summary>Whether the Act menu shows "work on the colony" (PHASE5.md §3): chores are on and there's anything to pick.</summary>
-        public static bool AnythingToDo(Pawn pawn) =>
-            AIPawnControlMod.Settings.allowChores && ChoreManager.Instance != null && (Stops(pawn).Count > 0 || All(pawn).Count > 0);
-
+        /// <summary>"call off my tree cutting": the words for her own stop (dev tool).</summary>
         public static string StopLabel(Chore chore)
         {
             switch (chore.kind)
@@ -151,15 +106,38 @@ namespace AIPawnControl
             }
         }
 
-        /// <summary>Counts for small, medium and large, never more than what's there.</summary>
-        public static int[] Counts(int available, int small, int medium, int large) =>
-            new[] { Math.Min(available, small), Math.Min(available, medium), Math.Min(available, large) };
-
         /// <summary>Why nothing could be marked: another mind got there first, or the given reason.</summary>
         public static string NoneLeft(IEnumerable<string> reasons, string otherwise) =>
             reasons.Contains("already marked") ? "Someone already marked the rest." : otherwise;
 
+        /// <summary>The share of its full yield a tree must give before anyone marks it for wood.</summary>
+        public const float MinYieldShare = 0.75f;
+
+        /// <summary>
+        /// Trees for wood: vanilla lets it be harvested now, and it gives at least 75% of its full yield (cutting early wastes
+        /// wood; wild food only needs to be ripe). Vanilla's own yield share (Plant.YieldNow, without the random rounding): 50% at its
+        /// harvest point rising to 100% fully grown, times 50-100% for its health.
+        /// </summary>
+        public static bool WorthHarvesting(Plant p)
+        {
+            if (!p.HarvestableNow || p.def.plant.harvestYield <= 0f)
+                return false;
+            float growth = 0.5f + 0.5f * UnityEngine.Mathf.InverseLerp(p.def.plant.harvestMinGrowth, 1f, p.Growth);
+            float health = UnityEngine.Mathf.Lerp(0.5f, 1f, (float)p.HitPoints / p.MaxHitPoints);
+            return growth * health >= MinYieldShare;
+        }
+
         /// <summary>Food shortage as a usefulness bonus: 2 when under 4 days, 1 under 8 or unknown.</summary>
         public static float FoodNeed(ChoreScan scan) => scan.foodDays < 0f ? 1f : scan.foodDays < 4f ? 2f : scan.foodDays < 8f ? 1f : 0f;
+
+        /// <summary>
+        /// The two purposes a stock-up amount can have (STREAMLINE.md §5, defaults to tune): enough for another room, and a big
+        /// stockpile for the colony's size. Each is a target for what's in storage.
+        /// </summary>
+        public static List<(string purpose, int target)> WoodTargets(int colonists) => new List<(string, int)>
+        {
+            ("enough for another room", 250),
+            ("a big stockpile", 200 + 150 * colonists),
+        };
     }
 }

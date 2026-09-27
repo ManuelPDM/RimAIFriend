@@ -6,59 +6,12 @@ using Verse;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Fields (PHASE5.md §4.6): "start a new field" (the Colony call scans for sites, fertility a bonus, and asks for crop,
-    /// size and site); "switch the crop in my field" changes a field she laid out. Vanilla sows, tends and harvests.
+    /// Fields (STREAMLINE.md §6): code lays one out when the food outlook falls short and she picks it in the Base call; the
+    /// crop, site and size are code's. Vanilla sows, tends and harvests.
     /// </summary>
     public static class Fields
     {
-        public static readonly int[] Sizes = { 4, 6, 8 };
-        public static readonly string[] SizeNames = { "small", "medium", "large" };
         private const float MinFertility = 0.7f;
-
-        public static string SizeName(int size) => SizeNames[System.Array.IndexOf(Sizes, size)];
-
-        public static IEnumerable<ChoreOption> Options(ChoreScan scan)
-        {
-            if (!scan.SomeoneCanDo(WorkTypeDefOf.Growing))
-                yield break;
-            var crops = Crops(scan.map);
-            if (crops.Count == 0)
-                yield break;
-            bool none = !scan.map.zoneManager.AllZones.OfType<Zone_Growing>().Any();
-            yield return new ChoreOption
-            {
-                kind = Chore.Kind.Field,
-                label = "start a new field",
-                useful = 0.5f + ChoreOptions.FoodNeed(scan) + (none ? 1.5f : 0f) + scan.PassionFor(SkillDefOf.Plants) * 0.5f,
-                needs = ChoreNeeds.Field,
-                check = () => null, // the Colony call scans for sites; its reply is validated when placed
-                apply = (mind, choice) =>
-                {
-                    int size = System.Math.Min(Sizes[choice.size], choice.site.maxSize);
-                    var rect = choice.site.Rect(size);
-                    string result = Place(mind.pawn, rect, choice.crop, choice.finder.Where(rect, choice.site.steps));
-                    return size < Sizes[choice.size] ? result + $" Only {SizeName(size)} fit there." : result;
-                },
-            };
-            // Switch the crop of her own fields (the crop comes from the Colony call's crop list).
-            var manager = ChoreManager.Instance;
-            if (manager == null)
-                yield break;
-            foreach (var chore in manager.ActiveOf(scan.pawn).Where(c => c.kind == Chore.Kind.Field && c.zone is Zone_Growing).ToList())
-            {
-                var zone = (Zone_Growing)chore.zone;
-                ThingDef now = zone.GetPlantDefToGrow();
-                yield return new ChoreOption
-                {
-                    kind = Chore.Kind.Field,
-                    label = $"switch the crop in my field of {now?.label} ({zone.cells.Count} cells)",
-                    useful = 0.3f,
-                    needs = ChoreNeeds.Crop,
-                    check = () => zone.cells.Count > 0 ? null : "the field is gone",
-                    apply = (mind, choice) => choice.crop == now ? $"My field already grows {now.label}." : Switch(mind.pawn, chore, choice.crop),
-                };
-            }
-        }
 
         /// <summary>Crops that can be sown in a field here now: researched, in season outdoors, and someone has the skill.</summary>
         public static List<ThingDef> Crops(Map map)
@@ -85,10 +38,6 @@ namespace AIPawnControl
             var made = DefDatabase<RecipeDef>.AllDefsListForReading.FirstOrDefault(r => r.ProducedThingDef != null && r.ingredients.Any(i => i.filter.Allows(product)));
             return made != null ? "used to make " + made.ProducedThingDef.label : product.label;
         }
-
-        /// <summary>"- rice plant: gives rice (food), ready in about 5.6 days".</summary>
-        public static string CropLine(ThingDef plant) =>
-            $"- {plant.label}: gives {plant.plant.harvestedThingDef.label} ({Purpose(plant)}), ready in about {plant.plant.growDays:0.#} days on plain soil";
 
         public static bool CellOk(IntVec3 c, Map map, List<(IntVec3 pos, float radius)> foci)
         {
@@ -137,19 +86,6 @@ namespace AIPawnControl
             chore.Remember($"I laid out a field of {crop.label} ({size}), {where}.", 3);
             ModLog.Message($"{pawn.LabelShort} laid out a field of {crop.label} ({size}) at {rect}, {where}.");
             return $"Laid out a field of {crop.label} ({size}), {where}.";
-        }
-
-        private static string Switch(Pawn pawn, Chore chore, ThingDef crop)
-        {
-            var zone = chore.zone as Zone_Growing;
-            if (zone == null || zone.cells.Count == 0)
-                return "That field is gone.";
-            string old = zone.GetPlantDefToGrow()?.label;
-            zone.SetPlantDefToGrow(crop);
-            chore.label = crop.label;
-            chore.Remember($"I switched my field from {old} to {crop.label}.", 2);
-            ModLog.Message($"{pawn.LabelShort} switched a field from {old} to {crop.label}.");
-            return $"My field grows {crop.label} now instead of {old}.";
         }
     }
 }

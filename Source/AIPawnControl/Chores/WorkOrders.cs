@@ -6,91 +6,33 @@ using Verse;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Work-order options (PHASE5.md §2): bills at the colony's own tables, only for a few kinds of things and only when the
-    /// ingredients are there: meals "until N", butchering, medicine, stone blocks, and clothes for whoever lacks them.
-    /// Never a recipe that already has a bill (the player's included).
+    /// Bills (STREAMLINE.md §5, §7): the ones a finished room comes with (Outfitting), and stone blocks as a stock-up line.
+    /// Code picks the counts. Never a recipe that already has a bill (the player's included).
     /// </summary>
     public static class WorkOrders
     {
-        private enum Goal { Meal, Butcher, Medicine, Blocks, Clothes }
+        public enum Goal { Meal, Butcher, Medicine, Blocks, Clothes }
 
-        public static IEnumerable<ChoreOption> Options(ChoreScan scan)
+        /// <summary>"stone blocks, enough for another room": an order at a stonecutter's table, when there are chunks to cut.</summary>
+        public static IEnumerable<ChoreOption> StockOptions(ChoreScan scan)
         {
             Map map = scan.map;
-            int colonists = System.Math.Max(1, map.mapPawns.FreeColonistsSpawnedCount);
-            var taken = new HashSet<string>(Bills(map).Select(b => Key(b.recipe)));
-            var tables = map.listerBuildings.allBuildingsColonist
-                .Where(b => b is IBillGiver giver && giver.BillStack != null)
-                .OrderBy(b => ((IBillGiver)b).BillStack.Count)
-                .ToList();
-            bool clothesOffered = false;
-            foreach (var table in tables)
+            foreach (var table in map.listerBuildings.allBuildingsColonist.Where(b => b is IBillGiver giver && giver.BillStack != null))
             {
-                foreach (var recipe in table.def.AllRecipes.OrderBy(r => r.products.Count > 0 ? r.products[0].count : 1))
+                var recipe = table.def.AllRecipes.FirstOrDefault(r => GoalOf(r) == Goal.Blocks);
+                if (recipe == null || Check(table, recipe) != null)
+                    continue;
+                const int count = 100;
+                var t = table;
+                yield return new ChoreOption
                 {
-                    Goal? goal = GoalOf(recipe);
-                    if (goal == null || taken.Contains(Key(recipe)) || Check(table, recipe) != null)
-                        continue;
-                    int[] counts = null; // small, medium, large targets for "until there are N"
-                    int repeat = 0;
-                    float useful;
-                    string mode;
-                    switch (goal.Value)
-                    {
-                        case Goal.Meal:
-                            counts = new[] { 2 * colonists, 2 * colonists * 3, 2 * colonists * 6 }; // meals for 1, 3 or 6 days
-                            useful = 1f + ChoreOptions.FoodNeed(scan) + (scan.Stock(recipe.ProducedThingDef) < counts[1] / 2 ? 1f : 0f);
-                            mode = null;
-                            break;
-                        case Goal.Butcher:
-                            if (!FreshCorpses(map))
-                                continue;
-                            useful = 2.5f;
-                            mode = "whenever there are corpses";
-                            break;
-                        case Goal.Medicine:
-                            counts = new[] { colonists, 2 * colonists, 4 * colonists };
-                            useful = 0.5f + (scan.Stock(recipe.ProducedThingDef) < counts[1] ? 1f : 0f);
-                            mode = null;
-                            break;
-                        case Goal.Blocks:
-                            counts = new[] { 50, 100, 200 };
-                            useful = 0.5f;
-                            mode = null;
-                            break;
-                        default:
-                            if (clothesOffered)
-                                continue;
-                            repeat = NeedClothes(map, recipe.ProducedThingDef);
-                            if (repeat == 0)
-                                continue;
-                            clothesOffered = true;
-                            useful = 1.5f;
-                            mode = repeat == 1 ? "once" : $"×{repeat}";
-                            break;
-                    }
-                    SkillDef skill = recipe.workSkill;
-                    if (skill != null)
-                        useful += scan.PassionFor(skill) * 0.5f;
-                    taken.Add(Key(recipe));
-                    var t = table;
-                    var r = recipe;
-                    int times = repeat;
-                    string fixedMode = mode;
-                    yield return new ChoreOption
-                    {
-                        kind = Chore.Kind.Bill,
-                        label = fixedMode != null ? $"order at the {table.def.label}: {recipe.label}, {fixedMode}" : $"order at the {table.def.label}: {recipe.label}",
-                        useful = useful,
-                        needs = counts != null ? ChoreNeeds.Amount : ChoreNeeds.Nothing,
-                        counts = counts,
-                        describe = k => $"until there are {k}",
-                        check = () => Check(t, r),
-                        apply = (mind, choice) => counts != null
-                            ? Apply(mind.pawn, t, r, choice.count, 0, $"until there are {choice.count}")
-                            : Apply(mind.pawn, t, r, 0, times, fixedMode),
-                    };
-                }
+                    kind = Chore.Kind.Bill,
+                    label = $"stone blocks, enough for another room: an order at the {table.def.label} until there are {count}",
+                    useful = 0.5f,
+                    check = () => Check(t, recipe),
+                    apply = mind => AddBill(mind.pawn, t, recipe, count, 0, $"until there are {count}"),
+                };
+                yield break;
             }
         }
 
@@ -102,7 +44,7 @@ namespace AIPawnControl
                     yield return $"{table.def.label}: {recipe.label} ({GoalOf(recipe)}) → {Check(table, recipe) ?? "ok"}";
         }
 
-        private static Goal? GoalOf(RecipeDef recipe)
+        public static Goal? GoalOf(RecipeDef recipe)
         {
             if (recipe.specialProducts != null && recipe.specialProducts.Contains(SpecialProductType.Butchery))
                 return recipe.fixedIngredientFilter?.AllowedThingDefs.Any(d => d.IsCorpse && d.ingestible?.sourceDef?.race?.Animal == true) == true ? Goal.Butcher : (Goal?)null;
@@ -129,7 +71,8 @@ namespace AIPawnControl
                 .SelectMany(b => ((IBillGiver)b).BillStack.Bills.OfType<Bill_Production>());
 
         /// <summary>The validator: null if this table can take a bill for this recipe right now.</summary>
-        public static string Check(Building table, RecipeDef recipe)
+        /// <param name="ingredients">A room's own bills don't wait for ingredients: the bill waits instead.</param>
+        public static string Check(Building table, RecipeDef recipe, bool ingredients = true)
         {
             Map map = table.Map;
             if (table.Destroyed || !table.Spawned || table.Faction != Faction.OfPlayer) return "the table is gone";
@@ -138,7 +81,7 @@ namespace AIPawnControl
             if (!map.mapPawns.FreeColonistsSpawned.Any(p => recipe.PawnSatisfiesSkillRequirements(p)
                                                           && (recipe.requiredGiverWorkType == null || !p.WorkTypeIsDisabled(recipe.requiredGiverWorkType))))
                 return "nobody can make it";
-            if (!HasIngredients(recipe, map)) return "not enough ingredients";
+            if (ingredients && !HasIngredients(recipe, map)) return "not enough ingredients";
             return null;
         }
 
@@ -164,32 +107,10 @@ namespace AIPawnControl
             return true;
         }
 
-        private static bool FreshCorpses(Map map) =>
-            map.listerThings.ThingsInGroup(ThingRequestGroup.Corpse).OfType<Corpse>()
-                .Any(c => c.InnerPawn?.RaceProps?.Animal == true && !c.IsNotFresh() && !c.IsForbidden(Faction.OfPlayer) && !(c.ParentHolder is Building_Grave));
-
-        /// <summary>How many colonists this piece would help: no shirt on the torso for plain clothes, or colder outside than they can stand for warm ones.</summary>
-        private static int NeedClothes(Map map, ThingDef apparel)
+        /// <summary>Re-validates, then adds the bill (count = "until N", repeat = "×N", neither = forever) and records it as her chore.</summary>
+        public static string AddBill(Pawn pawn, Building table, RecipeDef recipe, int count, int repeat, string mode, bool ingredients = true)
         {
-            float outside = map.mapTemperature.OutdoorTemp;
-            bool warm = apparel.GetStatValueAbstract(StatDefOf.Insulation_Cold, GenStuff.DefaultStuffFor(apparel)) >= 15f;
-            bool torso = apparel.apparel.bodyPartGroups.Contains(BodyPartGroupDefOf.Torso);
-            int need = 0;
-            foreach (var p in map.mapPawns.FreeColonistsSpawned.ToList())
-            {
-                if (p.apparel == null || !apparel.apparel.PawnCanWear(p))
-                    continue;
-                if (warm && p.GetStatValue(StatDefOf.ComfyTemperatureMin) > outside)
-                    need++;
-                else if (!warm && torso && !p.apparel.WornApparel.Any(a => a.def.apparel.bodyPartGroups.Contains(BodyPartGroupDefOf.Torso)))
-                    need++;
-            }
-            return need;
-        }
-
-        private static string Apply(Pawn pawn, Building table, RecipeDef recipe, int count, int repeat, string mode)
-        {
-            string why = Check(table, recipe);
+            string why = Check(table, recipe, ingredients);
             if (why != null)
                 return $"Couldn't order {recipe.label}: {why}.";
             var bill = (Bill_Production)recipe.MakeNewBill();

@@ -56,6 +56,8 @@ namespace AIPawnControl
         public bool owned;
         /// <summary>The smallest interior: x = the short side, z = the long side.</summary>
         public IntVec2 minSize = new IntVec2(4, 4);
+        /// <summary>The interior code builds it at (STREAMLINE.md §7); a barracks is sized to the beds missing instead.</summary>
+        public IntVec2 size = new IntVec2(5, 5);
         public List<RoomItem> items = new List<RoomItem>();
 
         public static RoomKindDef Bedroom => DefDatabase<RoomKindDef>.GetNamed("AIPC_Bedroom");

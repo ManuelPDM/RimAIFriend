@@ -7,7 +7,7 @@ using Verse.AI;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Hunt options (PHASE5.md §2): wild animals grouped by kind, with the count, the meat and the danger in words from
+    /// Hunt options (STREAMLINE.md §5): wild animals grouped by kind (up to 8 each), with the meat and the danger in words from
     /// vanilla's revenge chance. Dangerous kinds only for someone who can shoot. Never owned, bonded or venerated animals.
     /// </summary>
     public static class Hunting
@@ -48,13 +48,10 @@ namespace AIPawnControl
                 yield return new ChoreOption
                 {
                     kind = Chore.Kind.Hunt,
-                    label = $"hunt {label} ({n} around, {where}, {danger})",
+                    label = $"food: hunt {n} {label} ({where}, {danger}, ~{meat} meat)",
                     useful = 0.5f + ChoreOptions.FoodNeed(scan) + System.Math.Min(1.5f, meat / 300f) + scan.PassionFor(SkillDefOf.Shooting) - (dangerous ? 1f : 0f),
-                    needs = ChoreNeeds.Amount,
-                    counts = ChoreOptions.Counts(n, 1, (n + 1) / 2, n),
-                    describe = k => $"{k} {label}, about {animals.Take(k).Sum(a => (int)a.GetStatValue(StatDefOf.MeatAmount))} meat",
                     check = () => animals.Select(a => Check(a, pawn)).FirstOrDefault(r => r != null),
-                    apply = (mind, choice) => Apply(mind.pawn, animals.Take(choice.count).ToList(), label),
+                    apply = mind => Apply(mind.pawn, animals, label),
                 };
             }
         }
@@ -78,7 +75,7 @@ namespace AIPawnControl
                 label = $"pick up the {weapon.def.label} to hunt with (nobody can hunt without a gun)",
                 useful = 1f + ChoreOptions.FoodNeed(scan),
                 check = () => weapon.Spawned && !weapon.IsForbidden(pawn) ? null : "gone",
-                apply = (mind, choice) =>
+                apply = mind =>
                 {
                     if (!weapon.Spawned)
                         return $"The {weapon.def.label} is gone.";

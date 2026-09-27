@@ -6,16 +6,15 @@ using Verse;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Cut-trees options (PHASE5.md §2): up to 50 grown trees near the base, the ones in the way first (in the Home area or
-    /// next to a zone or a building). Never the anima tree or its radius, never trees protected from cutting, never tree
-    /// farms, and a floor of trees always stays near the base.
+    /// Wood (STREAMLINE.md §5): grown trees near the base, the ones in the way first (in the Home area or next to a zone or a
+    /// building), for a purpose-labelled amount: enough for another room, or a big stockpile. Never the anima tree or its
+    /// radius, never trees protected from cutting, never tree farms, and a floor of trees always stays near the base.
     /// </summary>
     public static class TreeCutting
     {
-        public const int MaxTrees = 50;
+        public const int MaxTrees = 60;
         private const int NearBase = 30; // steps: the trees whose count keeps a floor
         private const int MinNearTrees = 4;
-        private const float MinGrowth = 0.9f; // young trees give little wood; they're only cut when in the way
 
         public static IEnumerable<ChoreOption> Options(ChoreScan scan)
         {
@@ -23,12 +22,38 @@ namespace AIPawnControl
                 yield break;
             Map map = scan.map;
             var foci = SiteFinder.NoBuildFoci(map);
+            var picked = Candidates(scan, foci);
+            int have = scan.Stock(ThingDefOf.WoodLog) + MarkedWood(map);
+            int lastCount = 0;
+            foreach (var (purpose, target) in ChoreOptions.WoodTargets(scan.colonists))
+            {
+                var trees = Take(picked, target - have);
+                if (trees.Count < 3 || trees.Count == lastCount)
+                    continue;
+                lastCount = trees.Count;
+                int wood = trees.Sum(t => t.YieldNow());
+                yield return new ChoreOption
+                {
+                    kind = Chore.Kind.Cut,
+                    label = $"wood, {purpose}: ~{trees.Count} trees (+{wood} wood, {ChoreScan.Near(trees.Max(t => scan.WalkAt(t.Position)))})",
+                    useful = 0.5f + (have < 150 ? 2f : have < 300 ? 1f : 0f) + scan.PassionFor(SkillDefOf.Plants) * 0.5f,
+                    check = () => trees.Select(t => Check(t, map, foci)).FirstOrDefault(r => r != null),
+                    apply = mind => Apply(mind.pawn, trees, foci),
+                };
+            }
+        }
+
+        /// <summary>The trees that may be cut, in the order to cut them, keeping the floor near the base. At most MaxTrees.</summary>
+        public static List<Plant> Candidates(ChoreScan scan, List<(IntVec3 pos, float radius)> foci)
+        {
+            Map map = scan.map;
             var all = map.listerThings.ThingsInGroup(ThingRequestGroup.Plant).OfType<Plant>()
                 .Where(t => t.def.plant.IsTree && scan.WalkAt(t.Position) >= 0)
                 .ToList();
             int near = all.Count(t => scan.WalkAt(t.Position) <= NearBase && map.designationManager.DesignationOn(t) == null);
             int floor = System.Math.Max(MinNearTrees, near / 3);
-            var candidates = all.Where(t => Check(t, map, foci) == null && (t.Growth >= MinGrowth || InTheWay(t, map)))
+            // Vanilla clears plants off blueprints by itself; for wood, only trees worth it (ChoreOptions.WorthHarvesting).
+            var candidates = all.Where(t => Check(t, map, foci) == null && ChoreOptions.WorthHarvesting(t))
                 .OrderByDescending(t => InTheWay(t, map))
                 .ThenBy(t => scan.WalkAt(t.Position))
                 .ToList();
@@ -45,22 +70,30 @@ namespace AIPawnControl
                 }
                 picked.Add(t);
             }
-            if (picked.Count < 3)
-                yield break;
-            int woodStock = scan.Stock(ThingDefOf.WoodLog);
-            yield return new ChoreOption
-            {
-                kind = Chore.Kind.Cut,
-                label = $"cut trees for wood ({ChoreScan.Near(picked.Max(t => scan.WalkAt(t.Position)))}, the ones in the way first)",
-                useful = 0.5f + (woodStock < 100 ? 2f : woodStock < 300 ? 1f : 0f) + scan.PassionFor(SkillDefOf.Plants) * 0.5f
-                         + (picked.Count(t => InTheWay(t, map)) >= 3 ? 0.5f : 0f),
-                needs = ChoreNeeds.Amount,
-                counts = ChoreOptions.Counts(picked.Count, 10, 25, MaxTrees),
-                describe = k => $"{k} trees, about {picked.Take(k).Sum(t => t.YieldNow())} wood",
-                check = () => picked.Select(t => Check(t, map, foci)).FirstOrDefault(r => r != null),
-                apply = (mind, choice) => Apply(mind.pawn, picked.Take(choice.count).ToList(), foci),
-            };
+            return picked;
         }
+
+        /// <summary>The first trees whose wood adds up to the amount (none for 0 or less).</summary>
+        public static List<Plant> Take(List<Plant> trees, int wood)
+        {
+            var result = new List<Plant>();
+            int sum = 0;
+            foreach (var t in trees)
+            {
+                if (sum >= wood)
+                    break;
+                result.Add(t);
+                sum += t.YieldNow();
+            }
+            return result;
+        }
+
+        /// <summary>Wood still standing in trees someone already marked.</summary>
+        public static int MarkedWood(Map map) =>
+            map.designationManager.AllDesignations
+                .Where(d => (d.def == DesignationDefOf.HarvestPlant || d.def == DesignationDefOf.CutPlant) && d.target.Thing is Plant p && p.def.plant.IsTree
+                            && p.def.plant.harvestedThingDef == ThingDefOf.WoodLog)
+                .Sum(d => ((Plant)d.target.Thing).YieldNow());
 
         /// <summary>The validator for one tree: null if it may be marked now.</summary>
         public static string Check(Plant t, Map map, List<(IntVec3 pos, float radius)> foci)
@@ -96,7 +129,7 @@ namespace AIPawnControl
             return false;
         }
 
-        private static string Apply(Pawn pawn, List<Plant> trees, List<(IntVec3 pos, float radius)> foci)
+        public static string Apply(Pawn pawn, List<Plant> trees, List<(IntVec3 pos, float radius)> foci)
         {
             var marked = trees.Where(t => Check(t, pawn.Map, foci) == null).ToList();
             if (marked.Count == 0)

@@ -27,17 +27,14 @@ namespace AIPawnControl
                 yield break;
             var products = plants.Select(p => p.def.plant.harvestedThingDef).Distinct().ToList();
             string food = products.Count == 1 ? products[0].label : "food";
-            string Kinds(IEnumerable<Plant> some) => string.Join(", ", some.GroupBy(p => p.def).Select(g => $"{g.Key.label} ×{g.Count()}"));
+            string kinds = string.Join(", ", plants.GroupBy(p => p.def).Select(g => $"{g.Key.label} ×{g.Count()}"));
             yield return new ChoreOption
             {
                 kind = Chore.Kind.Gather,
-                label = $"gather wild food ({string.Join(", ", plants.Select(p => p.def.label).Distinct())}, {ChoreScan.Near(plants.Max(p => scan.WalkAt(p.Position)))})",
+                label = $"food: gather wild plants ({kinds}, ~{plants.Sum(p => p.YieldNow())} {food}, {ChoreScan.Near(plants.Max(p => scan.WalkAt(p.Position)))})",
                 useful = 0.5f + ChoreOptions.FoodNeed(scan) * 1.25f,
-                needs = ChoreNeeds.Amount,
-                counts = ChoreOptions.Counts(plants.Count, 5, 12, MaxPlants),
-                describe = k => $"{k} plants, about {plants.Take(k).Sum(p => p.YieldNow())} {food}",
                 check = () => plants.Select(p => Check(p, map)).FirstOrDefault(r => r != null),
-                apply = (mind, choice) => Apply(mind.pawn, plants.Take(choice.count).ToList(), Kinds(plants.Take(choice.count))),
+                apply = mind => Apply(mind.pawn, plants, kinds),
             };
         }
 
@@ -49,7 +46,7 @@ namespace AIPawnControl
             ThingDef product = p.def.plant.harvestedThingDef;
             if (product == null || !product.IsNutritionGivingIngestible || !product.ingestible.HumanEdible || product.ingestible.preferability <= FoodPreferability.DesperateOnly)
                 return "not food";
-            if (!p.HarvestableNow || p.YieldNow() <= 0) return "not ripe";
+            if (!p.HarvestableNow || p.YieldNow() <= 0) return "not ripe"; // food is ripe or not (the user); the yield rule is for trees
             if (p.Fogged()) return "not seen";
             if (map.zoneManager.ZoneAt(p.Position) is Zone_Growing) return "in a field";
             if (map.designationManager.DesignationOn(p) != null) return "already marked";

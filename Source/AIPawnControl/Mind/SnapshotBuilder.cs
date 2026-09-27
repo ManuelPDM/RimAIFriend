@@ -11,9 +11,10 @@ namespace AIPawnControl
     /// <summary>The live facts the LLM sees (PromptBuilder assembles them). Main thread only: most of these getters touch caches.</summary>
     public static class SnapshotBuilder
     {
-        private const int MaxThoughts = 8;
+        private const int MaxThoughts = 3;
         private const int MaxSkills = 8;
-        private const int MaxPeople = 6;
+        private const int MaxPeople = 10;
+        private const float LowNeed = 0.25f;
         private const int MaxAlerts = 6;
         private const int MaxRooms = 12;
         private const int MaxRoomItems = 4;
@@ -48,24 +49,26 @@ namespace AIPawnControl
         {
             Map map = pawn.Map;
             string ideo = pawn.Ideo != null ? $" Ideo: {pawn.Ideo.name}." : "";
+            // Only needs that are low: vanilla looks after the rest (STREAMLINE.md §9).
             var needs = pawn.needs?.AllNeeds
-                .Where(n => n.ShowOnNeedList && !(n is Need_Mood))
-                .Select(n => $"{n.LabelCap} {n.CurLevelPercentage.ToStringPercent()}");
+                .Where(n => n.ShowOnNeedList && !(n is Need_Mood) && n.CurLevelPercentage < LowNeed)
+                .Select(n => $"{n.LabelCap} low").ToList();
+            string goodAt = GoodAt(pawn);
             return new Dictionary<string, string>
             {
                 ["Me"] = $"{pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
                          $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.{ideo}" +
+                         (goodAt != null ? $" Good at: {goodAt}." : "") +
+                         (mind.WorkFeelingsText() is string work ? " " + work : "") +
                          (BuildManager.Instance?.RoomsPhrase(pawn) is string rooms && rooms.Length > 0 ? " " + rooms : ""),
                 ["Time"] = $"{TimeString(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
-                           $"I'm in: {RoomLabel(pawn)}. Schedule now: {pawn.timetable?.CurrentAssignment?.label ?? "anything"}.",
+                           $"I'm in: {RoomLabel(pawn)}.",
                 ["Condition"] = Condition(pawn),
-                ["Needs"] = needs != null ? string.Join(", ", needs) : null,
+                ["Needs"] = needs != null && needs.Count > 0 ? string.Join(", ", needs) : null,
                 ["Feelings"] = Feelings(pawn),
-                ["Skills"] = Skills(pawn),
                 ["Doing now"] = (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + ".", // null between jobs, e.g. as a mental break starts
-                ["My plan"] = PlanLine(mind, map),
                 ["My project"] = BuildManager.Instance?.ProjectLine(pawn),
-                ["People nearby"] = People(pawn),
+                ["People"] = People(pawn),
                 ["Others"] = Others(pawn),
                 ["Colony"] = Colony(map),
                 ["Colony stores"] = Stores(map),
@@ -73,19 +76,6 @@ namespace AIPawnControl
                 ["Rooms"] = Rooms(pawn),
                 ["Recent"] = Recent(mind, map),
             };
-        }
-
-        /// <summary>"Today's plan (made at 07:00): …", or "Yesterday's plan (not planned today yet): …" (PHASE6.md §2.1).</summary>
-        private static string PlanLine(PawnMind mind, Map map)
-        {
-            if (string.IsNullOrEmpty(mind.intent))
-                return null;
-            if (mind.intentTick < 0)
-                return mind.intent; // an old save: when it was made isn't known
-            string day = DayLabel(mind.intentTick, map);
-            return day == "Today"
-                ? $"Today's plan (made at {Clock(mind.intentTick, map)}): {mind.intent}"
-                : $"{(day == "Yesterday" ? "Yesterday's plan" : $"A plan from {day.ToLower()}")} (not planned today yet): {mind.intent}";
         }
 
         /// <summary>Her last 5 decisions grouped by day: "Yesterday: 13:00 … · 21:00 … — Today: 07:00 …".</summary>
@@ -168,8 +158,28 @@ namespace AIPawnControl
             if (pain > 0.01f) parts.Add($"Pain {pain.ToStringPercent()}");
             if (pawn.health.hediffSet.BleedRateTotal > 0.01f) parts.Add("Bleeding");
             if (pawn.needs?.mood != null)
-                parts.Add($"Mood {pawn.needs.mood.CurLevelPercentage.ToStringPercent()} (minor break at {pawn.mindState.mentalBreaker.BreakThresholdMinor.ToStringPercent()})");
+                parts.Add("Mood " + MoodWords(pawn));
             return string.Join(". ", parts) + ".";
+        }
+
+        /// <summary>Mood in words, against her own break threshold (STREAMLINE.md §9): numbers made the model panic well above it.</summary>
+        private static string MoodWords(Pawn pawn)
+        {
+            float mood = pawn.needs.mood.CurLevel;
+            float minor = pawn.mindState.mentalBreaker.BreakThresholdMinor;
+            if (mood < pawn.mindState.mentalBreaker.BreakThresholdMajor) return "very low (close to a serious break)";
+            if (mood < minor) return "low (at risk of a break)";
+            if (mood < minor + 0.1f) return "shaky (a little above breaking)";
+            if (mood < 0.65f) return "okay";
+            return mood < 0.85f ? "good" : "great";
+        }
+
+        /// <summary>"construction (burning passion), melee (interested)": her skills with a passion, best first.</summary>
+        private static string GoodAt(Pawn pawn)
+        {
+            var skills = pawn.skills?.skills.Where(s => !s.TotallyDisabled && s.passion != Passion.None).OrderByDescending(s => s.Level)
+                .Select(s => $"{s.def.label} ({PassionLabel(s.passion)})").ToList();
+            return skills != null && skills.Count > 0 ? string.Join(", ", skills) : null;
         }
 
         private static string Feelings(Pawn pawn)
@@ -235,8 +245,8 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// [Others] (PHASE6.md §2.3): every other colonist, closest first. Name and role words; for a mind also today's
-        /// plan, its project and the last chore it set up. What anyone in the colony could see or be told.
+        /// [Others] (PHASE6.md §2.3, STREAMLINE.md §4): every other colonist, closest first. Name, role words and what they're
+        /// doing; for a mind also its project and the last chore it set up. What anyone in the colony could see or be told.
         /// </summary>
         private static string Others(Pawn pawn)
         {
@@ -250,12 +260,10 @@ namespace AIPawnControl
             foreach (Pawn other in others.Take(MaxOthers))
             {
                 string roles = Roles(other);
-                var parts = new List<string>();
+                var parts = new List<string> { (other.GetJobReport() ?? "idle").TrimEnd('.') };
                 var mind = MindManager.Instance?.MindOf(other);
                 if (mind != null)
                 {
-                    parts.Add(!string.IsNullOrEmpty(mind.intent) && mind.intentTick >= 0 && DayLabel(mind.intentTick, map) == "Today"
-                        ? "today: " + mind.intent.TrimEnd('.') : "no plan yet today");
                     if (BuildManager.Instance?.ProjectLine(other) is string project)
                         parts.Add("project: " + project.TrimEnd('.'));
                     if (ChoreManager.Instance?.LastOf(other) is Chore chore)
@@ -279,6 +287,7 @@ namespace AIPawnControl
                 : ticks < 2 * GenDate.TicksPerDay ? "yesterday" : $"{ticks / GenDate.TicksPerDay} days ago";
         }
 
+        /// <summary>[People] (STREAMLINE.md §4): every colonist, nearest first: how she relates to them, their mood, where they are.</summary>
         private static string People(Pawn pawn)
         {
             var others = pawn.Map.mapPawns.FreeColonistsSpawned
@@ -296,9 +305,15 @@ namespace AIPawnControl
                     : p.needs?.mood != null ? p.needs.mood.MoodString : "";
                 int dist = (int)p.Position.DistanceTo(pawn.Position);
                 string asleep = p.Awake() ? "" : ", asleep";
-                return $"{p.LabelShort} ({relation}, opinion {opinion:+0;-0;0}, {mood}{asleep}, {dist} tiles)";
+                string where = dist <= NearbyTiles ? "nearby" : RoomLabel(p) == "outside" ? $"outside, {dist} tiles away" : $"in the {RoomLabel(p)}";
+                return $"{p.LabelShort} ({p.gender.GetLabel()}, {relation}, opinion {opinion:+0;-0;0}, {mood}{asleep}, {where})";
             }));
         }
+
+        /// <summary>What [People] calls "nearby"; a talk with someone this close starts now, else when they next meet.</summary>
+        public const int NearbyTiles = 12;
+
+        public static bool Nearby(Pawn a, Pawn b) => a.Map == b.Map && a.Position.DistanceTo(b.Position) <= NearbyTiles;
 
         private static string Colony(Map map)
         {
@@ -310,6 +325,8 @@ namespace AIPawnControl
             string alerts = Alerts();
             if (alerts != null)
                 parts.Add("Alerts: " + alerts);
+            parts.Add("Base: " + Ladder.Line(map));
+            parts.Add("Food: " + FoodOutlook.For(map).Line());
             return string.Join(". ", parts) + ".";
         }
 
@@ -330,7 +347,46 @@ namespace AIPawnControl
             };
             foreach (var def in new[] { ThingDefOf.WoodLog, ThingDefOf.Steel, ThingDefOf.ComponentIndustrial, ThingDefOf.Silver })
                 parts.Add($"{def.label} {counter.GetCount(def)}");
-            return string.Join(", ", parts) + " (in stockpiles and shelves only).";
+            string haul = WaitingToBeHauled(map);
+            return string.Join(", ", parts) + " (in stockpiles and shelves only)." + (haul != null ? " Waiting to be hauled: " + haul + "." : "");
+        }
+
+        /// <summary>
+        /// "wood 240, steel 75, 12 corpses, 9 apparel" (FURNISHING.md §3): what vanilla itself lists as needing hauling
+        /// (not in its best storage, not forbidden), in the home area. Resources by name with amounts, the rest one count
+        /// per top-level category. Null when nothing waits.
+        /// </summary>
+        private static string WaitingToBeHauled(Map map)
+        {
+            var named = new Dictionary<ThingDef, int>();
+            var grouped = new Dictionary<ThingCategoryDef, int>();
+            foreach (var t in map.listerHaulables.ThingsPotentiallyNeedingHauling())
+            {
+                if (!t.Spawned || !map.areaManager.Home[t.Position])
+                    continue;
+                if (t.def.CountAsResource)
+                {
+                    named.TryGetValue(t.def, out int n);
+                    named[t.def] = n + t.stackCount;
+                }
+                else if (TopCategory(t.def) is ThingCategoryDef category)
+                {
+                    grouped.TryGetValue(category, out int n);
+                    grouped[category] = n + t.stackCount;
+                }
+            }
+            var parts = named.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key.label} {kv.Value}")
+                .Concat(grouped.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Value} {kv.Key.label}")).ToList();
+            return parts.Count > 0 ? string.Join(", ", parts) : null;
+        }
+
+        /// <summary>The thing's category just below the root ("corpses", "apparel", "weapons").</summary>
+        private static ThingCategoryDef TopCategory(ThingDef def)
+        {
+            var c = def.FirstThingCategory;
+            while (c?.parent != null && c.parent != ThingCategoryDefOf.Root)
+                c = c.parent;
+            return c;
         }
 
         /// <summary>The kinds of rooms the colony has, e.g. "bedroom ×2, kitchen", or that it has none yet.</summary>
@@ -361,7 +417,7 @@ namespace AIPawnControl
                 if (items.Count == 0)
                     empty++;
                 else
-                    parts.Add($"{RoomName(room, pawn)} ({BuildManager.Impressiveness(room)}): {ItemList(items, MaxRoomItems)}");
+                    parts.Add($"{RoomName(room, pawn)} ({BuildManager.Impressiveness(room)}{BuiltBy(room, pawn)}): {ItemList(items, MaxRoomItems)}");
             }
             if (parts.Count > MaxRooms)
                 parts = parts.Take(MaxRooms).Append($"{parts.Count - MaxRooms} more rooms").ToList();
@@ -376,6 +432,13 @@ namespace AIPawnControl
             string detail = $"I'm in {(here.Owners.Any() ? name : "the " + name)}: {RoomFeel(here, pawn)}. " +
                             (hereItems.Count > 0 ? $"Has: {ItemList(hereItems, int.MaxValue)}." : "Nothing in it.");
             return others != null ? $"{detail} Other rooms: {others}" : detail;
+        }
+
+        /// <summary>", built by Sab" or ", built by me" (STREAMLINE.md §4), or "".</summary>
+        private static string BuiltBy(Room room, Pawn pawn)
+        {
+            Pawn builder = BuildManager.Instance?.BuilderOf(room);
+            return builder == null ? "" : builder == pawn ? ", built by me" : $", built by {builder.LabelShort}";
         }
 
         /// <summary>"my bedroom" for hers, vanilla's label otherwise ("Mo's bedroom", "kitchen").</summary>
