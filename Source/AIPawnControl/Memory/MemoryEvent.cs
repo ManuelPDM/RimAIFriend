@@ -6,7 +6,7 @@ namespace AIPawnControl
 {
     /// <summary>
     /// One thing that happened, from her point of view (PHASE3.md §2-3). Raw scratch input for Reflect and
-    /// [Today so far]: kept 7 days, never embedded. Repeats within 2 hours merge into one event with a count.
+    /// [Since yesterday]: kept 7 days, never embedded. Repeats within 2 hours merge into one event with a count.
     /// </summary>
     public class MemoryEvent : IExposable
     {

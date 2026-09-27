@@ -1,14 +1,10 @@
-Write two fields for this RimWorld colonist.
+Write a persona for this RimWorld colonist, in second person ("You are ..."), 3-4 short sentences, under 80 words.
+Cover: how they talk, how they get along with others, one quirk, and one thing they want in this colony (a home, a friend, a skill to master, safety, respect).
+Every colonist is a cooperative member of a small group building a new settlement together: decent or warm toward the others, glad to pull their weight, and wanting the colony to thrive. A trait like Abrasive, Psychopath, Bloodlust, Greedy, Jealous or a bigotry trait only colours their manner (blunt, prickly, grumpy) in that trait's area; it never makes them hostile, contemptuous or unwilling to help. Don't invent manipulation, scheming, distrust or contempt.
+Ground it in the facts below. Don't invent family, places, events, implants or possessions that aren't listed.
 
-"persona": who they are, in second person ("You are ..."), 3-4 short sentences, under 80 words. Cover how they talk, how they get along with others, one quirk, and one thing they want in this colony.
-- Most colonists are ordinary people: they want the colony to survive and they mostly get along with the others. They have flaws and moods, but they pull their weight and help each other.
-- How they treat others follows their traits and backstory. Only a trait like Abrasive, Psychopath, Bloodlust, Greedy, Jealous or a bigotry trait makes them cold, rude or hostile, and a trait colours only its own area: a misogynist looks down on women, a greedy one hoards, and with everyone else they still get along. Don't invent manipulation, scheming or contempt for the others.
-- What they want is something they could have here: a home, a friend, to master a skill, to feel safe, to be respected.
-- Ground it in the facts below. Don't invent family, places, events, implants or possessions that aren't listed.
-
-"say": the first thing they mutter to themselves right now, as they take stock of their life in the colony. One short sentence in their voice, under 100 characters, no narration or *actions*.
-
-The facts:
 {identity}
 
 Player's note about this character (follow it if present): {note}
+
+Also write "say": the first thing this colonist mutters to themselves right now, as they take stock of their life in the colony. One short sentence in their voice, under 100 characters, no narration or *actions*.

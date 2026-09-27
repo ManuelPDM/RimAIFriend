@@ -88,8 +88,6 @@ namespace AIPawnControl
                 goals.RemoveAt(0);
         }
 
-        public string Promises => JoinGoals(Goal.Promise);
-
         public string OwnGoals => JoinGoals(Goal.Mine);
 
         private string JoinGoals(string source)
@@ -148,23 +146,22 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// [Today so far]: the day's most important events, oldest first, as "14:05 text". Her own decisions and chat
-        /// turns are left out: [Recent] and the chat history already show them.
+        /// [Since yesterday] (PHASE6.md §2.1): the most important events of the last 24 hours, oldest first, as
+        /// "Yesterday 18:10 text". Decisions are left out ([Recent] has them); chat too for the Chat call, which shows
+        /// the conversation itself, so every other call hears what the player said.
         /// </summary>
-        /// <summary>Today's most important events. Decisions are left out ([Recent] has them); chat only for the Chat call,
-        /// which already shows the conversation, so every other call hears what the player said today.</summary>
-        public string TodaySoFar(Pawn pawn, int max, bool withChat)
+        public string SinceYesterday(Pawn pawn, int max, bool withChat)
         {
             Map map = pawn.Map;
             if (map == null)
                 return null;
-            int dayStart = Find.TickManager.TicksGame - GenLocalDate.DayTick(map);
+            int from = Find.TickManager.TicksGame - GenDate.TicksPerDay;
             var top = events
-                .Where(e => e.lastTick >= dayStart && e.kind != "decision" && (withChat || e.kind != "chat"))
+                .Where(e => e.lastTick >= from && e.kind != "decision" && (withChat || e.kind != "chat"))
                 .OrderByDescending(e => e.importance).ThenByDescending(e => e.lastTick)
                 .Take(max)
                 .OrderBy(e => e.tick)
-                .Select(e => $"{e.Clock(map)} {e.Text}")
+                .Select(e => $"{SnapshotBuilder.DayLabel(e.tick, map)} {e.Clock(map)} {e.Text}")
                 .ToList();
             return top.Count > 0 ? string.Join(" · ", top) : null;
         }
@@ -192,6 +189,7 @@ namespace AIPawnControl
                 diary = diary ?? new List<DiaryEntry>();
                 files = files ?? new List<PersonFile>();
                 goals = goals ?? new List<Goal>();
+                goals.RemoveAll(g => g.source == "promise"); // promises to the player are conversation now (PHASE6.md §2.2)
             }
         }
     }

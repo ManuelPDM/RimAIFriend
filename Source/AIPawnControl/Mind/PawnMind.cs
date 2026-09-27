@@ -28,8 +28,10 @@ namespace AIPawnControl
         public string persona;
         public string note;
         public string intent;
+        public int intentTick = -1; // when the Plan that wrote it ran: "today's plan" or "yesterday's plan"
         public string lastReason;
         public List<string> decisions = new List<string>();
+        public List<int> decisionTicks = new List<int>(); // parallel to decisions, for the day labels in [Recent]
         private int lastMorningPlanDay = -1;
         private int extraPlansDay = -1;
         private int extraPlansToday;
@@ -43,7 +45,7 @@ namespace AIPawnControl
         private int lastChatTick = -1;
         private bool chatPending; // unanswered player messages, e.g. while unconscious or while another call was running
         private bool chatWhileOut;
-        public MindMemory memory = new MindMemory(); // events, memories, diary, person files, lately, goals (promises included)
+        public MindMemory memory = new MindMemory(); // events, memories, diary, person files, lately, goals
 
         // Not saved
         private LlmRequest current;
@@ -91,8 +93,10 @@ namespace AIPawnControl
             Scribe_Values.Look(ref persona, "persona");
             Scribe_Values.Look(ref note, "note");
             Scribe_Values.Look(ref intent, "intent");
+            Scribe_Values.Look(ref intentTick, "intentTick", -1);
             Scribe_Values.Look(ref lastReason, "lastReason");
             Scribe_Collections.Look(ref decisions, "decisions", LookMode.Value);
+            Scribe_Collections.Look(ref decisionTicks, "decisionTicks", LookMode.Value);
             Scribe_Values.Look(ref lastMorningPlanDay, "lastMorningPlanDay", -1);
             Scribe_Values.Look(ref extraPlansDay, "extraPlansDay", -1);
             Scribe_Values.Look(ref extraPlansToday, "extraPlansToday");
@@ -110,6 +114,9 @@ namespace AIPawnControl
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 decisions = decisions ?? new List<string>();
+                decisionTicks = decisionTicks ?? new List<int>();
+                while (decisionTicks.Count < decisions.Count)
+                    decisionTicks.Insert(0, -1); // an old save: those days aren't known
                 lastInteractionTicks = lastInteractionTicks ?? new Dictionary<string, int>();
                 chat = chat ?? new List<ChatLine>();
                 memory = memory ?? new MindMemory();
@@ -267,6 +274,117 @@ namespace AIPawnControl
                 text += $" I said: \"{line}\"";
             AddDecision(text, importance: success ? 0 : 2); // a talk that happened is recorded from the PlayLog
             ModLog.Message($"{pawn.LabelShort}: {text}");
+            if (success && line != null && AIPawnControlMod.Settings.mindsAnswer && AIPawnControlMod.Settings.speakLines)
+                MindManager.Instance?.MindOf(target)?.Hear(pawn, def, line);
+        }
+
+        // ---------- Replies to other minds (PHASE6.md §4) ----------
+
+        private class Heard
+        {
+            public Pawn speaker;
+            public InteractionDef def;
+            public string line;
+            public int tick;
+        }
+
+        private Heard heard; // not saved: a reload just loses an unanswered line
+        private const int ReplyMaxAgeTicks = 2 * GenDate.TicksPerHour;
+
+        /// <summary>Another mind's talk landed on her: she answers once, when she's free (never cancels her own call).</summary>
+        public void Hear(Pawn speaker, InteractionDef def, string line)
+        {
+            if (persona == null)
+                return;
+            heard = new Heard { speaker = speaker, def = def, line = line, tick = Find.TickManager.TicksGame };
+            UpdateReply();
+        }
+
+        /// <summary>Called every frame with UpdateChat: the player first, then an answer to another mind.</summary>
+        public void UpdateReply()
+        {
+            if (heard == null || chatPending)
+                return;
+            if (Find.TickManager.TicksGame - heard.tick > ReplyMaxAgeTicks || PausedReason() != null)
+            {
+                ModLog.Message($"{pawn.LabelShort}: didn't answer {heard.speaker.LabelShort} ({PausedReason() ?? "too long ago"}).");
+                heard = null;
+                return;
+            }
+            if (reflecting)
+                CancelReflect(); // a conversation never waits for background memory work
+            if (Thinking)
+                return;
+            var h = heard;
+            heard = null;
+            RequestReply(h);
+        }
+
+        private void RequestReply(Heard h)
+        {
+            bool mayAct = ActsLeft > 0;
+            var menu = mayAct ? ActionCatalog.BuildActMenu(pawn, this) : new List<ActionCatalog.ActOption>();
+            string speaker = h.speaker.LabelShort;
+            recalling = true;
+            Recall.WithQuery(this, $"{h.line} ({speaker})", (vector, tag) =>
+            {
+                if (!recalling || pawn == null || !pawn.Spawned)
+                    return; // cancelled meanwhile
+                recalling = false;
+                var recall = Recall.Reply(this, speaker, vector, tag);
+                var messages = PromptBuilder.Build("reply", this, new Dictionary<string, string>
+                {
+                    ["speaker"] = speaker,
+                    ["line"] = h.line,
+                    ["kind"] = h.def.label,
+                    ["menu"] = mayAct ? ActionCatalog.DescribeMenu(menu) : "(you've made all your decisions for today; just answer)",
+                }, recall.Sections);
+                Send("reply", messages, ActionCatalog.ChatSchema(menu, recall.Shown), reply => OnReply(h, reply, menu, recall),
+                    maxAgeTicks: ReplyMaxAgeTicks, stillValid: () => PausedReason());
+            });
+        }
+
+        private void OnReply(Heard h, Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
+        {
+            string speaker = h.speaker.LabelShort;
+            int memoryId = reply.TryGetValue("memory", out object m) && m is double md ? (int)md : 0;
+            recall.MarkUsed(this, memoryId, speaker);
+            string text = SpeechLog.Clean(reply.TryGetValue("reply", out object r) ? r as string : null, ActionCatalog.MaxChatReply);
+            if (text == null)
+                return;
+            SpeechLog.Say(pawn, text);
+            memory.Record(pawn, "talk", h.def.defName, $"I answered {speaker}: \"{text}\"", 3, MemoryEvent.TookPart, new[] { speaker });
+            MindManager.Instance?.MindOf(h.speaker)?.memory.Record(h.speaker, "talk", h.def.defName, $"{pawn.LabelShort} answered me: \"{text}\"",
+                3, MemoryEvent.Told, new[] { pawn.LabelShort });
+
+            string result = $"Answered {speaker}: \"{text}\"";
+            int choice = reply.TryGetValue("act", out object a) && a is double d ? (int)d : 0;
+            var option = menu.FirstOrDefault(o => o.Id == choice);
+            if (option != null)
+            {
+                CountAct(); // acting on it is her decision (§4); just answering is free
+                try
+                {
+                    result += $" Then: {option.Label}: {option.Apply(null)}";
+                }
+                catch (Exception e)
+                {
+                    result += " That went wrong: " + e.Message;
+                    ModLog.Error($"{pawn.LabelShort}: applying \"{option.Label}\" from a reply threw: {e}");
+                }
+            }
+            AddDecision(result, importance: 0); // the talk events above are the memory
+            ModLog.Message($"{pawn.LabelShort} reply to {speaker}: \"{text}\" | act: {option?.Label ?? "none"}");
+        }
+
+        private void CountAct()
+        {
+            if (actsDay != LocalDay)
+            {
+                actsDay = LocalDay;
+                actsToday = 0;
+            }
+            actsToday++;
         }
 
         public string KeepGoing(int hours)
@@ -278,14 +396,7 @@ namespace AIPawnControl
         private void RequestAct(string trigger, bool countBudget = true)
         {
             if (countBudget)
-            {
-                if (actsDay != LocalDay)
-                {
-                    actsDay = LocalDay;
-                    actsToday = 0;
-                }
-                actsToday++;
-            }
+                CountAct();
             wakeAtTick = -1;
             idleSinceTick = -1;
             var menu = ActionCatalog.BuildActMenu(pawn, this);
@@ -436,13 +547,6 @@ namespace AIPawnControl
             if (AIPawnControlMod.Settings.chatBubbles)
                 SpeechLog.Say(pawn, text);
 
-            string note = reply.TryGetValue("note", out object n) ? (n as string)?.Trim() : null;
-            if (!string.IsNullOrEmpty(note))
-            {
-                memory.AddGoal(note, "I promised the player", Goal.Promise); // shown as [I promised the player] until Reflect retires it
-                AddDecision($"Promised the player: {note}", importance: 4);
-            }
-
             int choice = reply.TryGetValue("act", out object a) && a is double d ? (int)d : 0;
             var option = PausedReason(ignoreSleep: true) == null ? menu.FirstOrDefault(o => o.Id == choice) : null;
             if (option == null)
@@ -536,11 +640,7 @@ namespace AIPawnControl
         private void RequestPlan(bool morning)
         {
             if (morning)
-            {
                 lastMorningPlanDay = LocalDay; // one morning plan per day, even if it fails
-                if (!AIPawnControlMod.Settings.memoryEnabled)
-                    memory.goals.RemoveAll(g => g.source == Goal.Promise); // no Reflect to retire them, so yesterday's promises expire
-            }
             var workTypes = ActionCatalog.PlannableWorkTypes(pawn);
             bool manual = ActionCatalog.ManualPriorities;
             if (!manual)
@@ -561,7 +661,10 @@ namespace AIPawnControl
         {
             string result = MindActions.ApplyPlan(pawn, reply);
             if (reply.TryGetValue("intent", out object i) && i is string newIntent && !string.IsNullOrWhiteSpace(newIntent))
+            {
                 intent = newIntent.Trim();
+                intentTick = Find.TickManager.TicksGame;
+            }
             AddDecision($"Plan: {intent} {result}");
             ModLog.Message($"{pawn.LabelShort} plan: {intent} | {result} | Reason: {lastReason} | " +
                            $"Now: schedule {ActionCatalog.DescribeSchedule(pawn)}; priorities {ActionCatalog.DescribePriorities(pawn)}");
@@ -751,7 +854,7 @@ namespace AIPawnControl
                     paused = "the situation changed while I was thinking";
                 if (paused != null)
                 {
-                    ModLog.Message($"{pawn?.LabelShort}: dropped {callType} reply ({paused}).");
+                    ModLog.Message($"{pawn?.LabelShort}: dropped {callType} reply ({paused}; waited {result.WaitedSeconds:0}s in the queue, {result.Seconds:0}s to answer).");
                     return;
                 }
                 if (!result.Ok)
@@ -792,10 +895,14 @@ namespace AIPawnControl
         {
             string time = pawn.Map != null ? $"{GenLocalDate.HourOfDay(pawn.Map):00}:00 " : "";
             decisions.Add(time + text);
+            decisionTicks.Add(Find.TickManager.TicksGame);
             if (importance > 0)
                 memory.Record(pawn, "decision", null, text, importance, MemoryEvent.TookPart);
             while (decisions.Count > MaxDecisions)
+            {
                 decisions.RemoveAt(0);
+                decisionTicks.RemoveAt(0);
+            }
         }
     }
 }

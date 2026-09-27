@@ -35,14 +35,14 @@ namespace AIPawnControl
         // The live snapshot (SnapshotBuilder.Sections): no cap, never dropped.
         private static readonly string[] Snapshot =
         {
-            "Me", "Time", "Condition", "Needs", "Feelings", "Skills", "Doing now", "My plan", "I promised the player", "My project",
-            "People nearby", "Colony", "Colony stores", "Rooms", "Recent",
+            "Me", "Time", "Condition", "Needs", "Feelings", "Skills", "Doing now", "My plan", "My project",
+            "People nearby", "Others", "Colony", "Colony stores", "Colony work", "Rooms", "Recent",
         };
 
         // Every user-prompt section, in prompt order: the snapshot, then memory.
         private static readonly Section[] Order = Snapshot.Select(name => new Section(name)).Concat(new[]
         {
-            new Section("Today so far", cap: 700, drop: 1),
+            new Section("Since yesterday", cap: 700, drop: 1),
             new Section("About", cap: 700, drop: 2, labelled: true),
             new Section("On my mind", cap: 600, drop: 3),
             new Section("I remember", cap: 1200, drop: 4),
@@ -51,10 +51,12 @@ namespace AIPawnControl
         // Which sections each call type gets. The call type is also the name of its task template in Prompts/.
         private static readonly Dictionary<string, HashSet<string>> Recipes = new Dictionary<string, HashSet<string>>
         {
-            ["plan"] = new HashSet<string>(Snapshot) { "Today so far", "About" },
-            ["act"] = new HashSet<string>(Snapshot) { "Today so far", "About", "On my mind" },
-            ["chat"] = new HashSet<string>(Snapshot) { "Today so far", "About", "I remember" },
-            ["project"] = new HashSet<string>(Snapshot) { "Today so far" }, // the Act that chose it already recalled memories
+            ["plan"] = new HashSet<string>(Snapshot) { "Since yesterday", "About" },
+            ["act"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "On my mind" },
+            ["chat"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember" },
+            ["reply"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember" }, // Chat, with a colonist in the player's place
+            ["project"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
+            ["colony"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
             ["reflect"] = new HashSet<string> { "Me", "Time" }, // its events, people and goals come in the task values
         };
 
@@ -66,7 +68,7 @@ namespace AIPawnControl
         public static List<KeyValuePair<string, string>> Build(string call, PawnMind mind, Dictionary<string, string> task, Dictionary<string, string> recalled = null)
         {
             var texts = SnapshotBuilder.Sections(mind.pawn, mind);
-            texts["Today so far"] = mind.memory.TodaySoFar(mind.pawn, call == "act" ? 3 : 5, withChat: call != "chat");
+            texts["Since yesterday"] = mind.memory.SinceYesterday(mind.pawn, call == "act" ? 3 : 5, withChat: call != "chat");
             if (recalled != null)
                 foreach (var pair in recalled)
                     texts[pair.Key] = pair.Value;

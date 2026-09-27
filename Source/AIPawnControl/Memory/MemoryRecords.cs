@@ -127,10 +127,10 @@ namespace AIPawnControl
         }
     }
 
-    /// <summary>Something she wants, carried across days: her own ("me") or a promise to the player ("promise").</summary>
+    /// <summary>Something she wants, carried across days.</summary>
     public class Goal : IExposable
     {
-        public const string Mine = "me", Promise = "promise";
+        public const string Mine = "me";
 
         public string text;
         public string why;

@@ -93,7 +93,7 @@ namespace AIPawnControl
             yield return new Command_Action
             {
                 defaultLabel = "DEV: Chat: ask for later",
-                defaultDesc = "Sends a fixed chat message as the player asking for something later, to test the chat note.",
+                defaultDesc = "Sends a fixed chat message as the player asking for something later (just conversation: no promise list).",
                 icon = MindIcon,
                 action = () => MainThread.Post(() => mind.PlayerSays("No rush, but some time later today, could you check in on the others and see how they're holding up?")),
             };

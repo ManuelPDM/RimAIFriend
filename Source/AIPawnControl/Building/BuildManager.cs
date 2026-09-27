@@ -27,6 +27,18 @@ namespace AIPawnControl
         private List<int> builtOnce = new List<int>(); // entry indexes seen built: gone later is a deconstruct, not a cancel
         public bool firstNight;
         public bool furnishing; // one item added to a room she built (§9)
+        public Pawn occupant;   // a bedroom she built for someone with no bed (PHASE6.md §5.2); null = her own
+
+        /// <summary>Whose bed it is: hers, or the colonist she built it for.</summary>
+        public Pawn Owner => occupant ?? pawn;
+
+        /// <summary>"bedroom", or "bedroom for Kira".</summary>
+        public string KindFor => occupant != null ? $"{Kind} for {occupant.LabelShort}" : Kind;
+
+        /// <summary>The one she built it for died, left, or got a bed elsewhere: the bed stays unclaimed, an ordinary room.</summary>
+        private bool OccupantGone(PlanEntry bedEntry) =>
+            occupant != null && (occupant.Dead || occupant.Destroyed || occupant.Map != map
+                                 || (occupant.ownership?.OwnedBed != null && occupant.ownership.OwnedBed.Position != bedEntry.cell));
 
         public bool Active => state == State.Placed;
         public string Kind => kindDef?.label ?? "room";
@@ -92,11 +104,12 @@ namespace AIPawnControl
                 if (e.medical && e.cell.GetFirstThing<Building_Bed>(map) is Building_Bed medicalBed && medicalBed.def == e.def && !medicalBed.Medical)
                     medicalBed.Medical = true;
             PlanEntry bedEntry = Bed;
-            if (bedEntry != null && pawn.ownership != null && bedEntry.cell.GetFirstThing<Building_Bed>(map) is Building_Bed bed
-                && bed.def == bedEntry.def && bed.Faction == Faction.OfPlayer && !bed.IsOwner(pawn))
+            Pawn owner = Owner;
+            if (bedEntry != null && owner.ownership != null && !OccupantGone(bedEntry) && bedEntry.cell.GetFirstThing<Building_Bed>(map) is Building_Bed bed
+                && bed.def == bedEntry.def && bed.Faction == Faction.OfPlayer && !bed.IsOwner(owner))
             {
-                pawn.ownership.ClaimBedIfNonMedical(bed);
-                ModLog.Message($"{pawn.LabelShort} claimed the bed in the new {Kind}.");
+                owner.ownership.ClaimBedIfNonMedical(bed);
+                ModLog.Message($"{owner.LabelShort} claimed the bed in the new {KindFor}.");
             }
             if (IsDone(out Room room))
             {
@@ -106,7 +119,10 @@ namespace AIPawnControl
                 if (furnishing)
                     Remember($"Added {where}: {entries[0].def.label}.", 4);
                 else
-                    Remember($"The {Kind} I designed is finished ({SizeLabel}, {material?.label}) {where}.", 6);
+                    Remember($"The {KindFor} I designed is finished ({SizeLabel}, {material?.label}) {where}.", 6);
+                if (occupant != null && !OccupantGone(Bed))
+                    MindManager.Instance?.MindOf(occupant)?.memory.Record(occupant, "build", kindDef?.defName,
+                        $"{pawn.LabelShort} built me a bedroom {where}.", 6, MemoryEvent.TookPart, new[] { pawn.LabelShort });
             }
         }
 
@@ -124,12 +140,12 @@ namespace AIPawnControl
             if (kindDef?.role != null && room.Role != kindDef.role)
                 return false;
             PlanEntry bedEntry = Bed;
-            return bedEntry == null || pawn.ownership?.OwnedBed?.Position == bedEntry.cell;
+            return bedEntry == null || Owner.ownership?.OwnedBed?.Position == bedEntry.cell || OccupantGone(bedEntry);
         }
 
         private void CheckFirstNight()
         {
-            if (firstNight || furnishing || Bed == null)
+            if (firstNight || furnishing || Bed == null || occupant != null)
                 return;
             if (!pawn.Awake() && pawn.CurrentBed() is Building_Bed bed && bed.Position == Bed.cell)
             {
@@ -193,10 +209,11 @@ namespace AIPawnControl
             if (missing.Count > 0)
                 parts.Add("waiting on " + string.Join(", ", missing.Select(kv => $"{kv.Value} {kv.Key.label}")));
             if (entries.TrueForAll(Built))
-                parts.Add(Bed != null && pawn.ownership?.OwnedBed?.Position != Bed.cell ? "the bed isn't mine yet" : "waiting for the roof");
+                parts.Add(Bed != null && Owner.ownership?.OwnedBed?.Position != Bed.cell
+                    ? (occupant != null ? $"the bed isn't {occupant.LabelShort}'s yet" : "the bed isn't mine yet") : "waiting for the roof");
             if (furnishing)
                 return $"Adding a {entries[0].def.label} ({material?.label ?? "no material"}) {where}: {string.Join(", ", parts)}.";
-            return $"{Kind.CapitalizeFirst()} ({SizeLabel}, {material?.label}) {where}: {string.Join(", ", parts)}.";
+            return $"{KindFor.CapitalizeFirst()} ({SizeLabel}, {material?.label}) {where}: {string.Join(", ", parts)}.";
         }
 
         /// <summary>Her choice (Act) or the player's veto (a cancelled blueprint): leftover blueprints go, frames and built walls stay.</summary>
@@ -233,6 +250,7 @@ namespace AIPawnControl
             Scribe_Collections.Look(ref builtOnce, "builtOnce", LookMode.Value);
             Scribe_Values.Look(ref firstNight, "firstNight");
             Scribe_Values.Look(ref furnishing, "furnishing");
+            Scribe_References.Look(ref occupant, "occupant");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 kindDef = kindDef ?? RoomKindDef.Bedroom; // saves from before room kinds held only bedrooms

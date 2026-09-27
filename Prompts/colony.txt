@@ -1,0 +1,21 @@
+It's {time}. You've decided to spend a moment on the colony's chores: the work that only happens if someone sets it up. You decide what and how much; whoever does that kind of work carries it out.
+
+{snapshot}
+
+What you could set up now ([Colony stores] says what the colony has, [Colony work] what's already set up):
+0: nothing after all
+{options}
+
+{extras}
+
+Pick one:
+- "choice": the option's number.
+- "size": small, medium or large, for an option that lists amounts, or for the size of a new field or stockpile. Otherwise "medium".
+- "crop": for a new field or a crop switch, one crop from the list. Otherwise "-".
+- "site": for a new field or stockpile, a site letter from its list. Otherwise "-".
+- "holds": for a new stockpile, what it holds. Otherwise "-".
+
+Think about what you or the colony need most, your mood, your plans and who you are.
+
+"reason": why this, in your own voice, briefly.
+"say": what you say out loud about it, or "" to stay silent. 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks.

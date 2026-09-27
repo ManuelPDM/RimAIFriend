@@ -42,14 +42,20 @@ namespace AIPawnControl
             ModLog.Message($"{pawn.LabelShort}: room scan took {clock.ElapsedMilliseconds} ms ({sites.Count} sites, {kinds.Count} kinds).");
 
             var letters = sites.Select((s, i) => ((char)('A' + i)).ToString()).ToList();
+            // A bedroom can be for someone else with no bed of their own (PHASE6.md §5.2)
+            var bedless = map.mapPawns.FreeColonistsSpawned.Where(p => p != pawn && p.ownership != null && p.ownership.OwnedBed == null)
+                .Select(p => p.LabelShort).ToList();
             var messages = PromptBuilder.Build("project", mind, new Dictionary<string, string>
             {
+                ["forwhom"] = bedless.Count > 0
+                    ? $"\"for\": who a bedroom is for: \"me\", or someone with no bed of their own ({string.Join(", ", bedless)}); the bed becomes theirs. For other kinds, \"me\"."
+                    : "\"for\": \"me\".",
                 ["kinds"] = string.Join("\n", kinds.Select(k => KindLine(k.kind, k.plan, materials))),
                 ["sizes"] = "from 4x4 up to 7x7, rectangles too (e.g. 4x6, 5x7)",
                 ["sites"] = string.Join("\n", sites.Select((s, i) => finder.Describe(s, letters[i][0], materials, fits[i]))),
                 ["stock"] = SiteFinder.StockLine(map, materials),
             });
-            var schema = Schema(kinds.Select(k => k.kind.label).ToList(), letters, materials.Select(m => m.label).ToList());
+            var schema = Schema(kinds.Select(k => k.kind.label).ToList(), letters, materials.Select(m => m.label).ToList(), bedless);
             mind.Send("project", messages, schema, reply => OnReply(mind, reply, finder, validator, sites, letters, kinds.Select(k => k.kind).ToList(), materials),
                 stillValid: () =>
                 {
@@ -75,7 +81,7 @@ namespace AIPawnControl
             return line + $". At {plan.SizeLabel.Replace('×', 'x')}: {items}; {SiteFinder.CostText(cost, materials)}.";
         }
 
-        private static Dictionary<string, object> Schema(List<string> kinds, List<string> letters, List<string> materials) => new Dictionary<string, object>
+        private static Dictionary<string, object> Schema(List<string> kinds, List<string> letters, List<string> materials, List<string> bedless) => new Dictionary<string, object>
         {
             ["type"] = "object",
             ["properties"] = new Dictionary<string, object>
@@ -85,9 +91,10 @@ namespace AIPawnControl
                 ["size"] = Enum(SiteFinder.Shapes.Select(s => $"{s.w}x{s.h}").ToList()),
                 ["site"] = Enum(letters),
                 ["material"] = Enum(materials),
+                ["for"] = Enum(new[] { "me" }.Concat(bedless).ToList()),
                 ["say"] = ActionCatalog.SaySchema(),
             },
-            ["required"] = new List<object> { "reason", "kind", "size", "site", "material", "say" },
+            ["required"] = new List<object> { "reason", "kind", "size", "site", "material", "for", "say" },
             ["additionalProperties"] = false,
         };
 
@@ -116,15 +123,17 @@ namespace AIPawnControl
                 mind.AddDecision($"Wanted a {kind.label} at site {letters[siteIndex]}, but it didn't fit there.");
                 return;
             }
+            if (kind.owned && Get("for") is string forName && forName != "me")
+                project.occupant = pawn.Map.mapPawns.FreeColonistsSpawned.FirstOrDefault(p => p.LabelShort == forName && p.ownership?.OwnedBed == null);
             string say = SpeechLog.Clean(Get("say"));
-            string result = $"Laid out a {kind.label} ({plan.SizeLabel}, {material.label}) {project.where}" + (note != null ? $"; {note}." : ".");
+            string result = $"Laid out a {project.KindFor} ({plan.SizeLabel}, {material.label}) {project.where}" + (note != null ? $"; {note}." : ".");
             if (say != null && AIPawnControlMod.Settings.speakLines)
             {
                 SpeechLog.Say(pawn, say);
                 result += $" Said: \"{say}\"";
             }
             mind.AddDecision(result, importance: 0); // BuildManager.Place recorded the event
-            ModLog.Message($"{pawn.LabelShort} project: {kind.label} {width}x{height} at {letters[siteIndex]} in {material.label} | {result} | Reason: {mind.lastReason}");
+            ModLog.Message($"{pawn.LabelShort} project: {project.KindFor} {width}x{height} at {letters[siteIndex]} in {material.label} | {result} | Reason: {mind.lastReason}");
         }
     }
 }

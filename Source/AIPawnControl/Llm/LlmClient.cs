@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -14,6 +15,7 @@ namespace AIPawnControl
         public string Reasoning;
         public string Error;
         public double Seconds;
+        public double WaitedSeconds; // in the queue, behind other requests
         public int CompletionTokens;
 
         public bool Ok => Error == null;
@@ -41,14 +43,101 @@ namespace AIPawnControl
     }
 
     /// <summary>
-    /// OpenAI-compatible chat client (LM Studio). One request in flight across the whole mod; the rest wait.
+    /// OpenAI-compatible chat client (LM Studio). "Parallel requests" run at once across the whole mod (default 1); the
+    /// rest wait in a priority queue (PHASE6.md §6): the player's chat first, Reflect last.
     /// Call Send on the main thread (it snapshots settings); the callback also runs on the main thread.
     /// </summary>
     public static class LlmClient
     {
         // Backstop only: each request gets its own real-time CancelAfter from settings.
         private static readonly HttpClient http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        private static readonly SemaphoreSlim inFlight = new SemaphoreSlim(1, 1);
+
+        private class Waiter
+        {
+            public int priority;
+            public long order;
+            public string callType;
+            public Stopwatch since;
+            public TaskCompletionSource<bool> ready;
+        }
+
+        private static readonly object gate = new object();
+        private static readonly List<Waiter> waiting = new List<Waiter>();
+        private static int running;
+        private static long nextOrder;
+
+        /// <summary>Lower goes first: a conversation never waits behind background work.</summary>
+        private static int Priority(string callType)
+        {
+            switch (callType)
+            {
+                case "chat": return 0;
+                case "reply": return 1;
+                case "project":
+                case "colony": return 3;
+                case "plan":
+                case "persona": return 4;
+                case "reflect": return 5;
+                default: return 2; // act, dev tests
+            }
+        }
+
+        private static Task Acquire(string callType, int slots, CancellationToken token)
+        {
+            lock (gate)
+            {
+                if (running < slots && waiting.Count == 0)
+                {
+                    running++;
+                    return Task.CompletedTask;
+                }
+                var waiter = new Waiter { priority = Priority(callType), order = nextOrder++, callType = callType, since = Stopwatch.StartNew(),
+                                          ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously) };
+                waiting.Add(waiter);
+                token.Register(() =>
+                {
+                    lock (gate)
+                        if (!waiting.Remove(waiter))
+                            return; // already let through
+                    waiter.ready.TrySetCanceled();
+                });
+                return waiter.ready.Task;
+            }
+        }
+
+        private static void Release()
+        {
+            lock (gate)
+            {
+                running--;
+                LetThrough();
+            }
+        }
+
+        /// <summary>Starts the most urgent waiters while there are free slots. Holds the gate.</summary>
+        private static void LetThrough()
+        {
+            int slots = Math.Max(1, AIPawnControlMod.Settings.parallelRequests);
+            while (running < slots && waiting.Count > 0)
+            {
+                Waiter next = waiting[0];
+                foreach (var w in waiting)
+                    if (w.priority < next.priority || (w.priority == next.priority && w.order < next.order))
+                        next = w;
+                waiting.Remove(next);
+                running++;
+                next.ready.TrySetResult(true);
+            }
+        }
+
+        /// <summary>Dev "Queue status": running and waiting requests, by call type and how long they've waited.</summary>
+        public static string QueueStatus()
+        {
+            lock (gate)
+                return $"{running} running (slots: {Math.Max(1, AIPawnControlMod.Settings.parallelRequests)}), {waiting.Count} waiting" +
+                       (waiting.Count > 0 ? ": " + string.Join(", ", waiting.OrderBy(w => w.priority).ThenBy(w => w.order)
+                           .Select(w => $"{w.callType} {w.since.Elapsed.TotalSeconds:0}s")) : "");
+        }
 
         /// <param name="messages">(role, content) pairs.</param>
         /// <param name="schema">JSON schema object for structured output, or null for free text.</param>
@@ -64,6 +153,7 @@ namespace AIPawnControl
             var request = new LlmRequest(callType);
             string url = settings.endpoint.TrimEnd('/') + "/chat/completions";
             int timeoutSeconds = settings.timeoutSeconds;
+            int slots = Math.Max(1, settings.parallelRequests);
 
             var messageList = new List<object>();
             foreach (var m in messages)
@@ -92,13 +182,14 @@ namespace AIPawnControl
 
             Task.Run(async () =>
             {
-                LlmResult result = await Run(request, url, bodyJson, timeoutSeconds);
+                LlmResult result = await Run(request, url, bodyJson, timeoutSeconds, slots);
                 ModLog.Prompt(new Dictionary<string, object>
                 {
                     ["id"] = request.Id,
                     ["callType"] = callType,
                     ["url"] = url,
                     ["seconds"] = Math.Round(result.Seconds, 2),
+                    ["waited"] = Math.Round(result.WaitedSeconds, 2),
                     ["request"] = body,
                     ["content"] = result.Content,
                     ["reasoning"] = result.Reasoning,
@@ -115,15 +206,16 @@ namespace AIPawnControl
             return request;
         }
 
-        private static async Task<LlmResult> Run(LlmRequest request, string url, string bodyJson, int timeoutSeconds)
+        private static async Task<LlmResult> Run(LlmRequest request, string url, string bodyJson, int timeoutSeconds, int slots)
         {
             var result = new LlmResult();
             var watch = Stopwatch.StartNew();
             bool acquired = false;
             try
             {
-                await inFlight.WaitAsync(request.Cts.Token).ConfigureAwait(false);
+                await Acquire(request.CallType, slots, request.Cts.Token).ConfigureAwait(false);
                 acquired = true;
+                result.WaitedSeconds = watch.Elapsed.TotalSeconds;
                 watch.Restart(); // don't count time spent waiting behind another request
                 request.Cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
@@ -150,7 +242,7 @@ namespace AIPawnControl
             finally
             {
                 if (acquired)
-                    inFlight.Release();
+                    Release();
                 result.Seconds = watch.Elapsed.TotalSeconds;
             }
             return result;

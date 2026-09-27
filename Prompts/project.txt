@@ -14,6 +14,8 @@ Sites (the walls and door cost is for 5x5):
 
 {stock}. You may pick a material there isn't enough of; the building then waits until more arrives.
 
+{forwhom}
+
 Think about what you or the colony need most ([Rooms] says what already exists), your mood, your plans and who you are.
 
 "reason": why this room, here, in this material, in your own voice, briefly.

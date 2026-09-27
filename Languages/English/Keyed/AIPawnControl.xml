@@ -26,7 +26,13 @@
   <AIPawnControl_Memory>Memory</AIPawnControl_Memory>
   <AIPawnControl_AllowBuilding>Allow building</AIPawnControl_AllowBuilding>
   <AIPawnControl_AllowBuildingTip>AI colonists may plan new rooms and furnish rooms they built. They only place blueprints; the colony builds them. Off: no new projects; a running one is left as-is.</AIPawnControl_AllowBuildingTip>
-  <AIPawnControl_MemoryTip>Off: no nightly reflection and no recalled memories in prompts. What happens is still noted, and promises are still kept (they expire each morning).</AIPawnControl_MemoryTip>
+  <AIPawnControl_AllowChores>Allow colony chores</AIPawnControl_AllowChores>
+  <AIPawnControl_AllowChoresTip>AI colonists may mark animals to hunt, trees to cut and rock to mine, add work orders, and lay out fields and stockpiles. The colony does the work. Off: no new chores; what's set up stays.</AIPawnControl_AllowChoresTip>
+  <AIPawnControl_MindsAnswer>Minds answer each other</AIPawnControl_MindsAnswer>
+  <AIPawnControl_MindsAnswerTip>When an AI colonist talks to another AI colonist, the other one answers with a line of their own, and may agree to help. Off: only the first line is said.</AIPawnControl_MindsAnswerTip>
+  <AIPawnControl_ParallelRequests>Parallel requests: {0}</AIPawnControl_ParallelRequests>
+  <AIPawnControl_ParallelRequestsTip>How many requests go to the model server at once. More than 1 only helps if the server runs requests in parallel (LM Studio's parallel option). Waiting requests go in order: your chat, answers between colonists, decisions, then plans and nightly reflection.</AIPawnControl_ParallelRequestsTip>
+  <AIPawnControl_MemoryTip>Off: no nightly reflection and no recalled memories in prompts. What happens is still noted.</AIPawnControl_MemoryTip>
   <AIPawnControl_EmbedEndpoint>Embedding endpoint (empty: same as above)</AIPawnControl_EmbedEndpoint>
   <AIPawnControl_EmbedModel>Embedding model</AIPawnControl_EmbedModel>
   <AIPawnControl_TestEmbeddings>Test embeddings</AIPawnControl_TestEmbeddings>
@@ -52,7 +58,6 @@
   <AIPawnControl_TabNote>player's note</AIPawnControl_TabNote>
   <AIPawnControl_TabLately>lately</AIPawnControl_TabLately>
   <AIPawnControl_TabGoals>goals</AIPawnControl_TabGoals>
-  <AIPawnControl_TabPromise>(promised)</AIPawnControl_TabPromise>
   <AIPawnControl_TabDiary>latest diary entry</AIPawnControl_TabDiary>
   <AIPawnControl_TabIntent>today's intent</AIPawnControl_TabIntent>
   <AIPawnControl_TabSchedule>schedule</AIPawnControl_TabSchedule>

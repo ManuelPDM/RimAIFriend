@@ -66,7 +66,10 @@ namespace AIPawnControl
         public override void GameComponentUpdate()
         {
             foreach (var mind in minds)
+            {
                 mind.UpdateChat();
+                mind.UpdateReply();
+            }
         }
 
         public override void ExposeData()

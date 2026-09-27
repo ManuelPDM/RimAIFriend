@@ -74,8 +74,12 @@ namespace AIPawnControl
                 {
                     Pawn other = me == initiator ? recipient : initiator;
                     bool spoken = manager.Lines.TryGet(entry.LogID, out string line); // our line replaces the vanilla text
-                    string text = spoken ? $"{def.LabelCap} with {Name(other, me)}, I said: \"{line}\"" : Short(entry.ToGameStringFromPOV(me));
-                    mind.memory.Record(me, "talk", def.defName, text, importance, MemoryEvent.TookPart, new[] { other.LabelShort }, merge: !spoken);
+                    string text = !spoken ? Short(entry.ToGameStringFromPOV(me))
+                        : me == initiator ? $"{def.LabelCap} with {Name(other, me)}, I said: \"{line}\""
+                        : $"{def.LabelCap} with {Name(other, me)}, who said to me: \"{line}\"";
+                    // What someone else said is a claim, not something she saw (PHASE6.md §4, gossip)
+                    string source = spoken && me == recipient ? MemoryEvent.Told : MemoryEvent.TookPart;
+                    mind.memory.Record(me, "talk", def.defName, text, importance, source, new[] { other.LabelShort }, merge: !spoken);
                 }
                 else if (Witnesses(me, initiator, recipient))
                 {

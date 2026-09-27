@@ -63,15 +63,69 @@ namespace AIPawnControl
                 ["Feelings"] = Feelings(pawn),
                 ["Skills"] = Skills(pawn),
                 ["Doing now"] = (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + ".", // null between jobs, e.g. as a mental break starts
-                ["My plan"] = string.IsNullOrEmpty(mind.intent) ? null : mind.intent,
-                ["I promised the player"] = mind.memory.Promises,
+                ["My plan"] = PlanLine(mind, map),
                 ["My project"] = BuildManager.Instance?.ProjectLine(pawn),
                 ["People nearby"] = People(pawn),
+                ["Others"] = Others(pawn),
                 ["Colony"] = Colony(map),
                 ["Colony stores"] = Stores(map),
+                ["Colony work"] = ColonyWork.Line(pawn),
                 ["Rooms"] = Rooms(pawn),
-                ["Recent"] = mind.decisions.Count > 0 ? string.Join(" · ", mind.decisions.Skip(Math.Max(0, mind.decisions.Count - 5))) : null,
+                ["Recent"] = Recent(mind, map),
             };
+        }
+
+        /// <summary>"Today's plan (made at 07:00): …", or "Yesterday's plan (not planned today yet): …" (PHASE6.md §2.1).</summary>
+        private static string PlanLine(PawnMind mind, Map map)
+        {
+            if (string.IsNullOrEmpty(mind.intent))
+                return null;
+            if (mind.intentTick < 0)
+                return mind.intent; // an old save: when it was made isn't known
+            string day = DayLabel(mind.intentTick, map);
+            return day == "Today"
+                ? $"Today's plan (made at {Clock(mind.intentTick, map)}): {mind.intent}"
+                : $"{(day == "Yesterday" ? "Yesterday's plan" : $"A plan from {day.ToLower()}")} (not planned today yet): {mind.intent}";
+        }
+
+        /// <summary>Her last 5 decisions grouped by day: "Yesterday: 13:00 … · 21:00 … — Today: 07:00 …".</summary>
+        private static string Recent(PawnMind mind, Map map)
+        {
+            int count = Math.Min(5, mind.decisions.Count);
+            if (count == 0)
+                return null;
+            var groups = new List<KeyValuePair<string, List<string>>>();
+            for (int i = mind.decisions.Count - count; i < mind.decisions.Count; i++)
+            {
+                int tick = i < mind.decisionTicks.Count ? mind.decisionTicks[i] : -1;
+                string day = tick >= 0 ? DayLabel(tick, map) : "Earlier";
+                if (groups.Count == 0 || groups[groups.Count - 1].Key != day)
+                    groups.Add(new KeyValuePair<string, List<string>>(day, new List<string>()));
+                groups[groups.Count - 1].Value.Add(mind.decisions[i]);
+            }
+            return string.Join(" — ", groups.Select(g => $"{g.Key}: {string.Join(" · ", g.Value)}"));
+        }
+
+        /// <summary>The map's local day number of a game tick.</summary>
+        private static int LocalDayAt(int tick, Map map)
+        {
+            long abs = GenDate.TickGameToAbs(tick);
+            float longitude = Find.WorldGrid.LongLatOf(map.Tile).x;
+            return GenDate.Year(abs, longitude) * GenDate.DaysPerYear + GenDate.DayOfYear(abs, longitude);
+        }
+
+        /// <summary>"Today", "Yesterday" or "3 days ago", in the map's local time.</summary>
+        public static string DayLabel(int tick, Map map)
+        {
+            int days = LocalDayAt(Find.TickManager.TicksGame, map) - LocalDayAt(tick, map);
+            return days <= 0 ? "Today" : days == 1 ? "Yesterday" : $"{days} days ago";
+        }
+
+        /// <summary>"14:05" in the map's local time.</summary>
+        public static string Clock(int tick, Map map)
+        {
+            float hour = GenDate.HourFloat(GenDate.TickGameToAbs(tick), Find.WorldGrid.LongLatOf(map.Tile).x);
+            return $"{(int)hour:00}:{(int)(hour % 1f * 60f):00}";
         }
 
         public static string TimeString(Map map)
@@ -155,6 +209,74 @@ namespace AIPawnControl
                 case Passion.Major: return "burning passion";
                 default: return passion.ToString().ToLower();
             }
+        }
+
+        private const int MaxOthers = 6;
+        private const int OthersCap = 600;
+
+        /// <summary>The nouns for [Others]' role words, by skill.</summary>
+        private static readonly Dictionary<string, string> RoleWords = new Dictionary<string, string>
+        {
+            ["Shooting"] = "shooter", ["Melee"] = "fighter", ["Construction"] = "builder", ["Mining"] = "miner",
+            ["Cooking"] = "cook", ["Plants"] = "grower", ["Animals"] = "animal handler", ["Crafting"] = "crafter",
+            ["Artistic"] = "artist", ["Medicine"] = "doctor", ["Social"] = "talker", ["Intellectual"] = "researcher",
+        };
+
+        /// <summary>"miner, cook": her two best skills with a passion, or her best skill if she has no passion.</summary>
+        private static string Roles(Pawn pawn)
+        {
+            var skills = pawn.skills?.skills.Where(s => !s.TotallyDisabled && RoleWords.ContainsKey(s.def.defName)).ToList();
+            if (skills == null || skills.Count == 0)
+                return null;
+            var picked = skills.Where(s => s.passion != Passion.None).OrderByDescending(s => s.Level).Take(2).ToList();
+            if (picked.Count == 0)
+                picked = skills.OrderByDescending(s => s.Level).Take(1).ToList();
+            return string.Join(", ", picked.Select(s => RoleWords[s.def.defName]));
+        }
+
+        /// <summary>
+        /// [Others] (PHASE6.md §2.3): every other colonist, closest first. Name and role words; for a mind also today's
+        /// plan, its project and the last chore it set up. What anyone in the colony could see or be told.
+        /// </summary>
+        private static string Others(Pawn pawn)
+        {
+            Map map = pawn.Map;
+            var others = map.mapPawns.FreeColonistsSpawned.Where(p => p != pawn)
+                .OrderBy(p => p.Position.DistanceToSquared(pawn.Position)).ToList();
+            if (others.Count == 0)
+                return null;
+            var lines = new List<string>();
+            int length = 0;
+            foreach (Pawn other in others.Take(MaxOthers))
+            {
+                string roles = Roles(other);
+                var parts = new List<string>();
+                var mind = MindManager.Instance?.MindOf(other);
+                if (mind != null)
+                {
+                    parts.Add(!string.IsNullOrEmpty(mind.intent) && mind.intentTick >= 0 && DayLabel(mind.intentTick, map) == "Today"
+                        ? "today: " + mind.intent.TrimEnd('.') : "no plan yet today");
+                    if (BuildManager.Instance?.ProjectLine(other) is string project)
+                        parts.Add("project: " + project.TrimEnd('.'));
+                    if (ChoreManager.Instance?.LastOf(other) is Chore chore)
+                        parts.Add($"{Ago(chore.placedTick)} {ChoreManager.Did(chore)}");
+                }
+                string line = other.LabelShort + (roles != null ? $" ({roles})" : "") + (parts.Count > 0 ? ": " + string.Join(" · ", parts) : "");
+                if (lines.Count > 0 && length + line.Length > OthersCap)
+                    break;
+                lines.Add(line);
+                length += line.Length + 3;
+            }
+            string text = string.Join(" — ", lines) + ".";
+            return others.Count > lines.Count ? $"{text} And {others.Count - lines.Count} more." : text;
+        }
+
+        /// <summary>"just now", "3 h ago", "2 days ago".</summary>
+        private static string Ago(int tick)
+        {
+            int ticks = Find.TickManager.TicksGame - tick;
+            return ticks < GenDate.TicksPerHour ? "just now" : ticks < GenDate.TicksPerDay ? $"{ticks / GenDate.TicksPerHour} h ago"
+                : ticks < 2 * GenDate.TicksPerDay ? "yesterday" : $"{ticks / GenDate.TicksPerDay} days ago";
         }
 
         private static string People(Pawn pawn)

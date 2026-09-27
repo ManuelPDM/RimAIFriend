@@ -24,7 +24,7 @@ namespace AIPawnControl
         // ---------- Act ----------
 
         /// <summary>Every AI order goes through here, from the main-thread pump (never OnGUI, see the Shift-queue trap).</summary>
-        private static bool Order(PawnMind mind, Job job)
+        internal static bool Order(PawnMind mind, Job job)
         {
             mind.RememberOurJob(job);
             return mind.pawn.jobs.TryTakeOrderedJob(job, JobTag.Misc);

@@ -198,10 +198,13 @@ namespace AIPawnControl
                 });
             if (BuildManager.Instance?.CantPlanReason(pawn) == null)
             {
-                options.Add(new ActOption { Id = options.Count + 1, Label = "plan a new room", Apply = _ => ProjectCall.Start(mind), OwnRemark = true });
+                options.Add(new ActOption { Id = options.Count + 1, Label = "plan a new room (bedroom, barracks, kitchen, storeroom, workshop...)", Apply = _ => ProjectCall.Start(mind), OwnRemark = true });
                 foreach (var furnish in Furnishing.Options(pawn))
                     Add(furnish.label, () => Furnishing.Place(pawn, furnish));
             }
+
+            if (ChoreOptions.AnythingToDo(pawn))
+                options.Add(new ActOption { Id = options.Count + 1, Label = ChoreOptions.MenuLabel, Apply = _ => ColonyCall.Start(mind), OwnRemark = true });
 
             return options;
         }
@@ -319,12 +322,13 @@ namespace AIPawnControl
             return GenText.SplitCamelCase(def.defName.Replace("_", " ")).ToLower();
         }
 
-        /// <summary>The nearest room of each role (bedroom, dining room...), excluding the one the pawn is in.</summary>
+        /// <summary>The nearest room of each role (bedroom, dining room...), excluding the one the pawn is in and others' bedrooms.</summary>
         private static List<Room> NotableRooms(Pawn pawn)
         {
             Room here = pawn.GetRoom();
             return pawn.Map.regionGrid.AllRooms
-                .Where(r => r != here && !r.PsychologicallyOutdoors && !r.Fogged && r.Role != null && r.Role != RoomRoleDefOf.None)
+                .Where(r => r != here && !r.PsychologicallyOutdoors && !r.Fogged && r.Role != null && r.Role != RoomRoleDefOf.None
+                            && (!r.Owners.Any() || r.Owners.Contains(pawn)))
                 .GroupBy(r => r.GetRoomRoleLabel())
                 .Select(g => g.OrderBy(r => r.Cells.First().DistanceToSquared(pawn.Position)).First())
                 .Take(MaxGoToRooms)
@@ -333,7 +337,7 @@ namespace AIPawnControl
 
         public const int MaxChatReply = 300;
 
-        /// <summary>Chat reply: what she says back, an optional action from the current menu (0 = none), and a note for later.</summary>
+        /// <summary>Chat reply: what she says back, and an optional action from the current menu (0 = none). Anything for later is just what she said.</summary>
         public static Dictionary<string, object> ChatSchema(List<ActOption> menu, List<int> memories) => new Dictionary<string, object>
         {
             ["type"] = "object",
@@ -341,10 +345,9 @@ namespace AIPawnControl
             {
                 ["reply"] = new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = MaxChatReply + 60 },
                 ["act"] = new Dictionary<string, object> { ["type"] = "integer", ["enum"] = new List<object> { 0 }.Concat(menu.Select(o => (object)o.Id)).ToList() },
-                ["note"] = new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 120 },
                 ["memory"] = MemorySchema(memories),
             },
-            ["required"] = new List<object> { "reply", "act", "note", "memory" },
+            ["required"] = new List<object> { "reply", "act", "memory" },
             ["additionalProperties"] = false,
         };
 

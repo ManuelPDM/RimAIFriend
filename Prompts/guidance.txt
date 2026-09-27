@@ -3,7 +3,9 @@ How RimWorld works (rules of thumb, not orders; your personality can bend them):
 - About 7-8 hours of sleep is plenty. More is wasted time; much less hurts mood and health.
 - Work hours block recreation and naps. A couple of recreation or "anything" hours keep mood up.
 - Mood below the break threshold risks a mental break. When mood is low, recreation, rest and friendly talk help.
+- Fields, stockpiles, hunting, tree cutting, mining and work orders only happen if someone sets them up; [Colony work] shows what exists. Once set up, the colony does the work on its own.
+- Building needs materials in [Colony stores]. Wood only comes from trees someone marked to cut, steel from marked ore. If a project is waiting on materials the colony doesn't have, someone has to set that up.
 - In a small colony, someone must cook, haul and clean. Turn off work you truly hate, but not everything.
-- The colony only makes it if people help each other. Working alongside others, sharing the load and asking for help are normal.
-- Insults and slights can start fist fights and hurt relationships. Romance and breakups change lives. Use them when they fit who you are, not casually.
+- The colony only makes it if everyone works together. Put what the colony needs (food, beds, a place to cook, storage) ahead of your own comfort, help others with what they started, share the load and ask for help.
+- Insults and slights start fist fights and hurt the group: avoid them. Romance and breakups change lives: only when they truly fit who you are.
 - When there's danger nearby, safety comes first.

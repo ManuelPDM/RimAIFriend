@@ -96,6 +96,22 @@ namespace AIPawnControl
             return recall;
         }
 
+        /// <summary>Reply (PHASE6.md §4): the speaker's file and up to 3 memories matched to what they said, as [I remember].</summary>
+        public static Recall Reply(PawnMind mind, string speaker, float[] query, string tag)
+        {
+            var recall = new Recall();
+            if (!Enabled)
+                return recall;
+            var memory = mind.memory;
+            recall.Sections["About"] = Retrieval.About(memory, new[] { speaker }, 1, 400);
+            var picked = Retrieval.Pick(Retrieval.Rank(memory, query, tag, new List<string> { speaker }, null, new[] { speaker }), 3, Retrieval.MinRemember);
+            if (picked.Count == 0)
+                return recall;
+            recall.Shown.AddRange(picked.Select(s => s.memory.id));
+            recall.Sections["I remember"] = Retrieval.Describe(picked) + Line(Retrieval.BroughtUpToday(memory));
+            return recall;
+        }
+
         /// <summary>Chat: the player's file and the files of anyone they mention, and up to 5 memories as [I remember].</summary>
         public static Recall Chat(PawnMind mind, List<string> mentioned, float[] query, string tag)
         {
@@ -113,7 +129,10 @@ namespace AIPawnControl
             return recall;
         }
 
-        /// <summary>Plan: [About X] for the people in today's events. Her lately and goals are already in the system prompt.</summary>
+        /// <summary>
+        /// Plan: [About X] for the people in today's events, and the player's file first when it has open threads, so a
+        /// conversation from yesterday reaches the new day (PHASE6.md §2.2). Her lately and goals are in the system prompt.
+        /// </summary>
         public static Recall Plan(PawnMind mind)
         {
             var recall = new Recall();
@@ -122,6 +141,8 @@ namespace AIPawnControl
             int dayStart = Find.TickManager.TicksGame - GenLocalDate.DayTick(mind.pawn.Map);
             var names = mind.memory.events.Where(e => e.lastTick >= dayStart).SelectMany(e => e.people)
                 .Where(n => n != PersonFile.Player && n != PersonFile.Colony);
+            if (!string.IsNullOrEmpty(mind.memory.File(PersonFile.Player, create: false)?.threads))
+                names = new[] { PersonFile.Player }.Concat(names);
             recall.Sections["About"] = Retrieval.About(mind.memory, names, 3, 110);
             return recall;
         }

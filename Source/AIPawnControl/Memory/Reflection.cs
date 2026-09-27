@@ -102,7 +102,7 @@ namespace AIPawnControl
                 })),
                 ["people"] = string.Join("\n", names.Select(Describe)),
                 ["goals"] = goalsShown.Count > 0
-                    ? string.Join("\n", goalsShown.Select((g, i) => $"G{i + 1} [{(g.source == Goal.Promise ? "promised the player" : "my own")}] {g.text}" + (string.IsNullOrEmpty(g.why) ? "" : $" (why: {g.why})")))
+                    ? string.Join("\n", goalsShown.Select((g, i) => $"G{i + 1} {g.text}" + (string.IsNullOrEmpty(g.why) ? "" : $" (why: {g.why})")))
                     : "(none)",
                 ["memories"] = shown.Count > 0
                     ? string.Join("\n", shown.Select((m, i) => $"M{i + 1} day {GenDate.DaysPassedAt(m.tick) + 1} · importance {m.importance}: {m.text}"))
