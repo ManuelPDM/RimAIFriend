@@ -25,7 +25,10 @@ namespace AIPawnControl
         public float home = 5f;
         public float bigRoom = 4f;          // the 5×5 size
         public float insideDoor = 8f;       // per door opening inside the base instead of outdoors (a new wall costs 1)
-        public int outdoorWalk = 20;        // most tiles from any room's door to the outdoors once doors come inside
+        public int outdoorWalk = 20;
+        public int apartGap = 2;            // a building apart keeps this many cells from anything built (BASE_GROWTH.md §6.4)
+        public float goodsWalk = -0.5f;     // per tile to each room its goods flow to or from (BASE_GROWTH.md §6.2)
+        public float wallTemp = -0.3f;      // per shared wall cell per 10°C between the temperatures the two rooms hold        // most tiles from any room's door to the outdoors once doors come inside
 
         public static string FilePath => Path.Combine(AIPawnControlMod.RootDir, "Tuning", "building.txt");
 

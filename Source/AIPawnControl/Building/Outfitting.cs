@@ -28,9 +28,36 @@ namespace AIPawnControl
             foreach (var table in tables)
                 if (DefaultBill(pawn, table, colonists) is string result)
                     results.Add(result);
-            // Stockpiles only in storerooms (FURNISHING.md §3): food piled on a kitchen floor doesn't work.
-            if (project.kindDef?.defName == "AIPC_Storeroom" && RoomStockpile(pawn, room, project.Kind) is string pile)
-                results.Add(pile);
+            // Stockpiles only in rooms for storage (FURNISHING.md §3; a storeroom, a food store): food piled on a kitchen floor
+            // doesn't work. Its shelves take the same things at the same priority (BASE_GROWTH.md §6.3).
+            if (project.kindDef?.stores != null)
+            {
+                var kind = project.kindDef;
+                var filter = kind.StoreFilter();
+                // An "everything" room keeps its shelves as vanilla made them (Preferred, above the floor stockpile).
+                if (!kind.stores.Contains(ThingCategoryDefOf.Root))
+                    foreach (var shelf in room.ContainedAndAdjacentThings.OfType<Building_Storage>().Where(s => room.ContainsCell(s.Position)).Distinct())
+                    {
+                        var settings = shelf.GetStoreSettings();
+                        settings.filter.CopyAllowancesFrom(filter);
+                        if (kind.storePriority > settings.Priority)
+                            settings.Priority = kind.storePriority;
+                    }
+                string what = kind.stores.Contains(ThingCategoryDefOf.Root) ? "everything" : string.Join(" and ", kind.stores.Select(s => s.label));
+                if (RoomStockpile(pawn, room, project.Kind, filter, kind.storePriority, what) is string pile)
+                    results.Add(pile);
+            }
+            // A throne is its owner's (a title's throne room, BASE_GROWTH.md §6.6).
+            if (project.occupant != null && room.ContainedAndAdjacentThings.OfType<Building_Throne>().FirstOrDefault() is Building_Throne throne
+                && project.occupant.ownership?.AssignedThrone == null && project.occupant.ownership.ClaimThrone(throne))
+                results.Add($"The throne is {project.occupant.LabelShort}'s.");
+            // Coolers and heaters hold the kind's temperature (a freezer, BASE_GROWTH.md §6.3).
+            if (project.kindDef != null && !float.IsNaN(project.kindDef.holdTemperature))
+                foreach (var control in room.ContainedAndAdjacentThings.Where(t => Needs.Controls(t, room)).Select(t => t.TryGetComp<CompTempControl>()).Where(c => c != null).Distinct())
+                {
+                    control.targetTemperature = project.kindDef.holdTemperature;
+                    results.Add($"Set the {control.parent.def.label} to {project.kindDef.holdTemperature.ToStringTemperature("F0")}.");
+                }
             ModLog.Message($"Outfitted {pawn.LabelShort}'s {project.Kind}: {(results.Count > 0 ? string.Join(" ", results) : "nothing to add")}");
         }
 
@@ -64,7 +91,7 @@ namespace AIPawnControl
         }
 
         /// <summary>A stockpile on the room's free floor: no furniture, no work spot, not the cell inside a door, no zone yet.</summary>
-        private static string RoomStockpile(Pawn pawn, Room room, string kind)
+        private static string RoomStockpile(Pawn pawn, Room room, string kind, ThingFilter filter, StoragePriority priority, string what)
         {
             Map map = room.Map;
             var blocked = new HashSet<IntVec3>();
@@ -81,7 +108,7 @@ namespace AIPawnControl
                 .ToList();
             if (cells.Count == 0)
                 return null;
-            return Stockpiles.PlaceCells(pawn, cells, $"in the {kind}", $"{cells.Count} cells");
+            return Stockpiles.PlaceCells(pawn, cells, $"in the {kind}", $"{cells.Count} cells", filter, priority, what);
         }
     }
 }

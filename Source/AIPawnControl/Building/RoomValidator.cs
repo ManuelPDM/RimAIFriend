@@ -20,6 +20,7 @@ namespace AIPawnControl
         private readonly Map map;
         private readonly int limit;
         private readonly List<IntVec3> reachableDoors;
+        private readonly Dictionary<Room, bool> openAir = new Dictionary<Room, bool>(); // Ground.OpenAir per room: the map doesn't change while it checks
 
         public RoomValidator(Map map, IntVec3 center, int maxWalk)
         {
@@ -41,6 +42,8 @@ namespace AIPawnControl
             int walledIn = WalledIn(plan);
             if (walledIn > 0)
                 fail.Add($"V9: walls in {walledIn} cells of open ground");
+            else if (SealsOff(plan))
+                fail.Add("V10: closes off open ground from the map edge (a courtyard against rock or water)");
 
             // V8 vanilla: every entry passes CanPlaceBlueprintAt with its material.
             foreach (var e in plan.entries)
@@ -81,10 +84,51 @@ namespace AIPawnControl
             return before.Reached.Count(c => !plan.footprint.Contains(c) && !after.Has(c));
         }
 
+        /// <summary>
+        /// V10: the open ground around the room, with its walls up, still all reaches the map edge. V9 only looks 10 cells
+        /// out, so a courtyard its walls close against rock or other rooms slips past it. The open cells just outside the
+        /// footprint are grouped by a local walk; only when they fall apart is each group walked to the map edge. A walk also
+        /// ends on a cell an earlier group's walk reached: that group reaches the edge, so this one does too.
+        /// </summary>
+        private bool SealsOff(RoomPlan plan)
+        {
+            // Open ground only: not through the new room, nor through doors (a pocket reached through a room is still no way out).
+            bool Open(IntVec3 c) => !plan.footprint.Contains(c) && c.Walkable(map) && !(c.GetEdifice(map) is Building_Door);
+            var around = plan.footprint.ExpandedBy(1).EdgeCells.Where(c => c.InBounds(map) && c.Walkable(map) && Ground.OpenAir(c.GetRoom(map), openAir)).ToList();
+            if (around.Count < 2)
+                return false;
+            CellRect local = plan.footprint.ExpandedBy(25).ClipInsideMap(map);
+            var groups = new List<IntVec3>();
+            var left = new HashSet<IntVec3>(around);
+            while (left.Count > 0)
+            {
+                IntVec3 seed = left.First();
+                groups.Add(seed);
+                var reached = Flood.Run(local, new[] { seed }, Open);
+                left.RemoveWhere(reached.Has);
+                left.Remove(seed);
+            }
+            if (groups.Count < 2)
+                return false;
+            var reachesEdge = new bool[map.Size.x * map.Size.z];
+            foreach (var seed in groups)
+            {
+                bool edge = false;
+                var walk = Flood.Run(Flood.All(map), new[] { seed }, Open,
+                    stop: c => edge = reachesEdge[c.z * map.Size.x + c.x] || c.x == 0 || c.z == 0 || c.x == map.Size.x - 1 || c.z == map.Size.z - 1);
+                if (!edge)
+                    return true;
+                foreach (var c in walk.Reached)
+                    reachesEdge[c.z * map.Size.x + c.x] = true;
+            }
+            return false;
+        }
+
         private Flood Reach(CellRect area, RoomPlan plan)
         {
             bool Open(IntVec3 c) => plan == null ? c.Walkable(map) : c == plan.door || (c.Walkable(map) && !plan.IsWall(c));
-            return Flood.Run(area, area.EdgeCells.Where(Open), Open);
+            // From the open air only: the area's edge can run through a room, and a pocket is reached through its doors.
+            return Flood.Run(area, area.EdgeCells.Where(c => Open(c) && Ground.OpenAir(c.GetRoom(map), openAir)), Open);
         }
     }
 }

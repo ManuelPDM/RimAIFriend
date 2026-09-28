@@ -65,10 +65,11 @@ namespace AIPawnControl
             public IntVec3 outside; // its cell on the outdoor side
         }
 
-        /// <summary>Every colony door with an indoor room on one side and the outdoors on the other.</summary>
+        /// <summary>Every colony door with an indoor room on one side and the outdoors that reach the map edge on the other.</summary>
         public static List<WayOut> WaysOut(Map map)
         {
             var result = new List<WayOut>();
+            var openAir = new Dictionary<Room, bool>();
             foreach (var b in map.listerBuildings.allBuildingsColonist)
             {
                 if (!(b is Building_Door door))
@@ -83,7 +84,7 @@ namespace AIPawnControl
                     Room room = n.GetRoom(map);
                     if (Ground.Indoor(room))
                         inside = room;
-                    else if (room != null && !room.IsDoorway)
+                    else if (Ground.OpenAir(room, openAir))
                         outside = n;
                 }
                 if (inside != null && outside.IsValid)
@@ -112,11 +113,42 @@ namespace AIPawnControl
         /// <summary>"dining room", "workshop", or "room" when vanilla gives it no role.</summary>
         public static string Name(Room room) => Ground.NoRole(room) ? "room" : room.Role.label;
 
-        /// <summary>For [Colony]: "6 ways out".</summary>
+        /// <summary>For [Colony]: "one block of 5 rooms, 2 buildings apart · 6 ways out".</summary>
         public static string Line(Map map)
         {
             int n = WaysOut(map).Count;
-            return n == 1 ? "1 way out" : $"{n} ways out";
+            string shape = Shape(map);
+            return (shape != null ? shape + " · " : "") + (n == 1 ? "1 way out" : $"{n} ways out");
+        }
+
+        /// <summary>
+        /// The base's shape (BASE_GROWTH.md §6.4): rooms that share a wall or a door make one building. "one block of 5
+        /// rooms, 2 buildings apart", or null with no rooms.
+        /// </summary>
+        public static string Shape(Map map)
+        {
+            var rooms = map.regionGrid.AllRooms.Where(OfBase).ToList();
+            if (rooms.Count == 0)
+                return null;
+            var group = rooms.ToDictionary(r => r, r => r);
+            Room Find(Room r) => group[r] == r ? r : group[r] = Find(group[r]);
+            foreach (var room in rooms)
+                foreach (var c in room.BorderCells)
+                {
+                    if (!c.InBounds(map) || !(c.GetEdifice(map) is Building b) || !(b.def.IsWall || b is Building_Door))
+                        continue;
+                    foreach (var d in GenAdj.CardinalDirections)
+                    {
+                        IntVec3 n = c + d;
+                        Room other = n.InBounds(map) ? n.GetRoom(map) : null;
+                        if (other != null && other != room && group.ContainsKey(other))
+                            group[Find(other)] = Find(room);
+                    }
+                }
+            var sizes = rooms.GroupBy(Find).Select(g => g.Count()).OrderByDescending(s => s).ToList();
+            string block = sizes[0] == 1 ? "one room" : $"one block of {sizes[0]} rooms";
+            int apart = sizes.Count - 1;
+            return apart == 0 ? block : $"{block}, {apart} {(apart == 1 ? "building" : "buildings")} apart";
         }
 
         // ---- doors between neighbours (§5.2a) ----
@@ -319,9 +351,10 @@ namespace AIPawnControl
                 return result;
             int limit = SiteWeights.Load().outdoorWalk;
             var rooms = map.regionGrid.AllRooms.Where(OfBase).ToList();
+            var openAir = new Dictionary<Room, bool>();
             foreach (var way in ways)
                 if (ReachesInside(way.room) && BuildManager.Instance.OurDoor(map, way.door.Position)
-                    && rooms.All(r => OutdoorWalk(r, way.door.Position, map, limit) <= limit))
+                    && rooms.All(r => OutdoorWalk(r, way.door.Position, map, limit, openAir) <= limit))
                     result.Add(way);
             return result;
         }
@@ -330,7 +363,7 @@ namespace AIPawnControl
         /// Tiles from the room's doors to the outdoors with this door shut, up to limit + 1. The walk never crosses another
         /// room that shouldn't be walked through (a bedroom, the kitchen).
         /// </summary>
-        private static int OutdoorWalk(Room room, IntVec3 shut, Map map, int limit)
+        private static int OutdoorWalk(Room room, IntVec3 shut, Map map, int limit, Dictionary<Room, bool> openAir)
         {
             var passable = new Dictionary<Room, bool>();
             bool Passable(Room r)
@@ -348,7 +381,7 @@ namespace AIPawnControl
                 limit + 1,
                 stop: c =>
                 {
-                    if (!Ground.Outdoors(c.GetRoom(map)))
+                    if (!Ground.OpenAir(c.GetRoom(map), openAir))
                         return false;
                     hit = c;
                     return true;

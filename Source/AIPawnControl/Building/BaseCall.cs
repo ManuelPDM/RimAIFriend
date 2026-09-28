@@ -27,6 +27,7 @@ namespace AIPawnControl
             public string label;
             public RoomKindDef kind;      // a room, at code's size
             public (int w, int h) size;
+            public AskedFor.Ask ask;      // a room the game asks for (its items, whose it is), or null
             public ChoreOption chore;     // a stock-up
             public Room upgrade;          // a room to upgrade: the Upgrade call follows
             public ThingDef crop;         // a field
@@ -135,6 +136,7 @@ namespace AIPawnControl
                 call.materials = had.Select(m => m.stuff).ToList();
                 materialsLine = Supplies.WallMaterialsLine(had);
                 var validator = new RoomValidator(map, finder.center, finder.weights.maxWalk);
+                finder.For(rung?.kind); // the sites suit the ladder's next room (its goods' neighbours, BASE_GROWTH.md §6.2)
                 call.sites = finder.Sites(validator, call.materials[0], out _);
                 if (call.sites.Count == 0)
                 {
@@ -146,6 +148,13 @@ namespace AIPawnControl
                     if (rung?.kind != null && rung.waiting == null
                         && RoomChoice(rung.kind, SizeFor(rung.kind, map), "Next for the base", rung.label, finder, validator, call.sites, call.materials) is Choice next)
                         choices.Add(next);
+                    // What the game asks for comes first among the other rooms (BASE_GROWTH.md §6.6), with vanilla's reason.
+                    foreach (var ask in AskedFor.Current(map))
+                        if (RoomChoice(ask.kind, AskedFor.SizeFor(ask, map), "Other rooms", ask.why, finder, validator, call.sites, call.materials, ask) is Choice asked)
+                        {
+                            asked.ask = ask;
+                            choices.Add(asked);
+                        }
                     foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => k != rung?.kind && OtherRoom(k, pawn)))
                         if (RoomChoice(kind, SizeFor(kind, map), "Other rooms", kind == RoomKindDef.Bedroom ? "my own bedroom" : null, finder, validator, call.sites, call.materials) is Choice other)
                             choices.Add(other);
@@ -179,7 +188,7 @@ namespace AIPawnControl
             // Past the early base, the ladder's last rung is the room most worth upgrading (the only way upgrades are
             // offered); the Upgrade call offers the concrete upgrades.
             Room worst = rung != null && rung.rooms && canPlan
-                ? Upgrades.Worst(Upgrades.Rooms(pawn).Where(r => Upgrades.For(r, pawn).Count > 0), pawn) : null;
+                ? Upgrades.Worst(Upgrades.Rooms(pawn), pawn) : null;
             if (rung != null && rung.rooms)
                 rungText = worst == null && canPlan ? "Next for the base: nothing; every room has what it can get for now." : "Next for the base: better rooms.";
             if (worst != null)
@@ -225,19 +234,28 @@ namespace AIPawnControl
             return call;
         }
 
-        /// <summary>Code's size for a kind (STREAMLINE.md §7): the kind's own, and a barracks sized to the beds missing.</summary>
+        /// <summary>
+        /// Code's size for a kind (STREAMLINE.md §7): the kind's own, a barracks sized to the beds missing, and a room whose
+        /// items grow with the colony (a dining hall's tables, BASE_GROWTH.md §6.1) about 12 cells per anchor over the
+        /// kind's own size. Fit tries the nearest sizes if this one doesn't hold them.
+        /// </summary>
         public static (int w, int h) SizeFor(RoomKindDef kind, Map map)
         {
             if (kind.defName == "AIPC_Barracks")
                 return Ladder.Sleepers(map).Count - Ladder.BedSlots(map) > 4 ? (6, 6) : (5, 5);
-            return (kind.size.x, kind.size.z);
+            int anchors = kind.items.Where(i => i.perAnchor > 0).Select(i => (i.Count(map) + i.perAnchor - 1) / i.perAnchor).DefaultIfEmpty(1).Max();
+            if (anchors <= 1)
+                return (kind.size.x, kind.size.z);
+            int area = kind.size.x * kind.size.z + 12 * (anchors - 1);
+            var shape = SiteFinder.FitShapes.Where(s => s.w <= s.h && s.w * s.h >= area).OrderBy(s => s.w * s.h).ThenBy(s => s.h - s.w).DefaultIfEmpty((w: 10, h: 10)).First(); // past 10×10: the biggest
+            return (shape.w, shape.h);
         }
 
         /// <summary>A kind the colony doesn't have yet (a room with its role, or a bench it lacks), or her own bedroom when she has none.</summary>
         private static bool OtherRoom(RoomKindDef kind, Pawn pawn)
         {
             Map map = pawn.Map;
-            if (kind == RoomKindDef.Plain || kind.layout || !kind.BuildableNow(map) || kind.defName == "AIPC_Barracks")
+            if (kind == RoomKindDef.Plain || kind.layout || kind.askedFor != null || !kind.Wanted(map) || !kind.BuildableNow(map) || kind.defName == "AIPC_Barracks")
                 return false;
             if (kind.owned)
                 return pawn.ownership?.OwnedRoom == null;
@@ -250,10 +268,11 @@ namespace AIPawnControl
 
         /// <summary>"a kitchen (5x5: fueled stove, butcher table; 80 steel)". Null when it doesn't fit at the best site.</summary>
         private static Choice RoomChoice(RoomKindDef kind, (int w, int h) size, string group, string name, SiteFinder finder, RoomValidator validator,
-                                         List<RoomPlan> sites, List<ThingDef> materials)
+                                         List<RoomPlan> sites, List<ThingDef> materials, AskedFor.Ask ask = null)
         {
             if (kind == null)
                 return null;
+            ask?.Apply();
             var plan = finder.Fit(sites[0], kind, size.w, size.h, validator, materials[0], out _);
             if (plan == null)
                 return null;
@@ -262,6 +281,10 @@ namespace AIPawnControl
             var cost = new RoomPlan { kind = kind, map = plan.map, footprint = plan.footprint };
             cost.entries.AddRange(furniture);
             string what = furniture.Count > 0 ? $"{items}; {SiteFinder.CostText(cost, materials)}" : kind.description;
+            if (ask?.floorTags != null)
+                what += "; all floored";
+            if (ask?.alsoWants.Count > 0)
+                what += "; it also wants: " + string.Join(", ", ask.alsoWants);
             string label = (name != null && name != "a " + kind.label ? $"{name}: a {kind.label}" : $"a {kind.label}") + $" ({plan.SizeLabel.Replace('×', 'x')}: {what})";
             // Minds stocked up for the next rung instead of laying it out: say where it counts that it fetches its own materials.
             if (group == "Next for the base")
@@ -317,7 +340,7 @@ namespace AIPawnControl
                 if (choice.kind != null)
                 {
                     int siteIndex = call.letters.IndexOf(site);
-                    return PlaceRoom(pawn, choice.kind, choice.size, call.sites[siteIndex >= 0 ? siteIndex : 0], stuff, out _);
+                    return PlaceRoom(pawn, choice.kind, choice.size, call.sites[siteIndex >= 0 ? siteIndex : 0], stuff, out _, choice.ask);
                 }
                 if (choice.layout != null)
                     return choice.layout(pawn, stuff);
@@ -336,22 +359,37 @@ namespace AIPawnControl
         /// sites are found again and the one nearest her pick is used. With no pick (the dev tools), site A, else the next
         /// site it fits at.
         /// </summary>
-        public static string PlaceRoom(Pawn pawn, RoomKindDef kind, (int w, int h) size, RoomPlan picked, ThingDef material, out BuildProject project)
+        public static string PlaceRoom(Pawn pawn, RoomKindDef kind, (int w, int h) size, RoomPlan picked, ThingDef material, out BuildProject project,
+                                       AskedFor.Ask ask = null)
         {
             Map map = pawn.Map;
             project = null;
+            ask?.Apply();
             var other = BuildManager.Instance.ActiveOn(map).FirstOrDefault(p => p.kindDef == kind && p.pawn != pawn && !kind.owned);
             if (other != null)
                 return $"{other.pawn.LabelShort} already started a {kind.label}, so I left it to them.";
             var finder = new SiteFinder(map, SiteFinder.BaseCenter(map));
             var validator = new RoomValidator(map, finder.center, finder.weights.maxWalk);
+            finder.For(kind);
             var sites = finder.Sites(validator, material, out _);
             if (picked != null)
                 sites = sites.OrderBy(s => s.Interior.CenterCell.DistanceToSquared(picked.Interior.CenterCell)).Take(1).ToList();
             var plan = sites.Select(s => finder.Fit(s, kind, size.w, size.h, validator, material, out _)).FirstOrDefault(p => p != null);
+            if (plan != null && ask?.precept != null)
+                foreach (var e in plan.entries.Where(e => e.def == ask.precept.ThingDef))
+                    e.precept = ask.precept;
             project = plan != null ? BuildManager.Instance.Place(pawn, plan, material, validator, finder.Where(plan)) : null;
             if (project == null)
+            {
+                ModLog.Message($"No {kind.label} fits at {sites.Count} sites; the placer's last failure: {RoomPlacer.LastFailure ?? "none"}.");
                 return $"Wanted a {kind.label}, but it didn't fit anywhere near the base.";
+            }
+            if (ask != null)
+            {
+                project.occupant = ask.who; // the throne's owner, or nobody's
+                if (AskedFor.LayFloor(ask, project) is TerrainDef floor)
+                    ModLog.Message($"{pawn.LabelShort} laid {floor.label} in the new {kind.label}.");
+            }
             if (kind.owned && pawn.ownership?.OwnedRoom != null)
             {
                 // Hers if she has no room of her own; else for someone who has none (the ladder's private bedrooms); else free.

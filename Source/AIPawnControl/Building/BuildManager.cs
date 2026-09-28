@@ -44,7 +44,7 @@ namespace AIPawnControl
         /// <summary>The one she built it for died, left, or got a room of their own elsewhere: the bed stays unclaimed, an ordinary room.</summary>
         private bool OccupantGone(PlanEntry bedEntry) =>
             occupant != null && (occupant.Dead || occupant.Destroyed || occupant.Map != map
-                                 || (occupant.ownership?.OwnedRoom != null && occupant.ownership.OwnedBed?.Position != bedEntry.cell));
+                                 || (bedEntry != null && occupant.ownership?.OwnedRoom != null && occupant.ownership.OwnedBed?.Position != bedEntry.cell));
 
         public bool Active => state == State.Placed;
         public string Kind => kindDef?.label ?? "room";
@@ -130,6 +130,8 @@ namespace AIPawnControl
             foreach (var e in entries)
                 if (e.medical && e.cell.GetFirstThing<Building_Bed>(map) is Building_Bed medicalBed && medicalBed.def == e.def && !medicalBed.Medical)
                     medicalBed.Medical = true;
+                else if (e.prisoner && e.cell.GetFirstThing<Building_Bed>(map) is Building_Bed prisonBed && prisonBed.def == e.def && !prisonBed.ForPrisoners)
+                    prisonBed.ForPrisoners = true;
             PlanEntry bedEntry = Bed;
             Pawn owner = Owner;
             if (bedEntry != null && owner.ownership != null && !OccupantGone(bedEntry) && bedEntry.cell.GetFirstThing<Building_Bed>(map) is Building_Bed bed
@@ -149,7 +151,7 @@ namespace AIPawnControl
                     Remember($"The {KindFor} I designed is finished ({SizeAndMaterial}) {where}.", 6);
                 if (occupant != null && !OccupantGone(Bed))
                     MindManager.Instance?.MindOf(occupant)?.memory.Record(occupant, "build", kindDef?.defName,
-                        $"{pawn.LabelShort} built me a bedroom {where}.", 6, MemoryEvent.TookPart, new[] { pawn.LabelShort });
+                        $"{pawn.LabelShort} built me a {Kind} {where}.", 6, MemoryEvent.TookPart, new[] { pawn.LabelShort });
             }
         }
 
@@ -467,7 +469,7 @@ namespace AIPawnControl
             }
             plan.ApplyMaterial(material);
             foreach (var e in plan.entries)
-                GenConstruct.PlaceBlueprintForBuild(e.def, e.cell, plan.map, e.rot, Faction.OfPlayer, e.stuff);
+                GenConstruct.PlaceBlueprintForBuild(e.def, e.cell, plan.map, e.rot, Faction.OfPlayer, e.stuff, e.precept);
             var project = new BuildProject
             {
                 pawn = pawn,
@@ -482,7 +484,8 @@ namespace AIPawnControl
             };
             projects.Add(project);
             RecordDoors(project);
-            ModLog.Message($"{pawn.LabelShort} laid out a {plan.kind.label} ({plan.SizeLabel}) in {material.label}, {where}\n{TextMap.Draw(plan)}");
+            ModLog.Message($"{pawn.LabelShort} laid out a {plan.kind.label} ({plan.SizeLabel}) in {material.label}, {where}"
+                           + (plan.near.Count > 0 ? $"; near {string.Join(" and ", plan.near)}" : "") + $"\n{TextMap.Draw(plan)}");
             project.Remember($"I laid out a {plan.kind.label} ({plan.SizeLabel}, {material.label}) {where}.", 5);
             return project;
         }

@@ -42,19 +42,26 @@ namespace AIPawnControl
             return PlaceCells(pawn, rect.Cells.ToList(), where, $"{rect.Width}×{rect.Height}");
         }
 
-        /// <summary>Lays out the zone on cells already checked (a room's free floor, or a square), and records it as hers.</summary>
-        public static string PlaceCells(Pawn pawn, List<IntVec3> cells, string where, string size)
+        /// <summary>
+        /// Lays out the zone on cells already checked (a room's free floor, or a square), and records it as hers. With a
+        /// filter (a food store's), it takes only that, at the given priority.
+        /// </summary>
+        public static string PlaceCells(Pawn pawn, List<IntVec3> cells, string where, string size, ThingFilter filter = null,
+                                        StoragePriority priority = StoragePriority.Normal, string what = "everything")
         {
             Map map = pawn.Map;
             var zone = new Zone_Stockpile(StorageSettingsPreset.DefaultStockpile, map.zoneManager);
+            if (filter != null)
+                zone.settings.filter.CopyAllowancesFrom(filter);
+            zone.settings.Priority = priority;
             map.zoneManager.RegisterZone(zone);
             foreach (var c in cells)
                 zone.AddCell(c);
-            var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Stockpile, "everything");
+            var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Stockpile, what);
             chore.zone = zone;
-            chore.Remember($"I laid out a stockpile for everything ({size}), {where}.", 3);
-            ModLog.Message($"{pawn.LabelShort} laid out a stockpile for everything ({size}), {where}.");
-            return $"Laid out a stockpile for everything ({size}), {where}.";
+            chore.Remember($"I laid out a stockpile for {what} ({size}), {where}.", 3);
+            ModLog.Message($"{pawn.LabelShort} laid out a stockpile for {what} ({size}), {where}.");
+            return $"Laid out a stockpile for {what} ({size}), {where}.";
         }
     }
 }

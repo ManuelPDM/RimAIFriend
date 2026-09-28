@@ -15,3 +15,6 @@ item           = -0.5   # per item to haul
 home           = 5      # inside the home area
 bigRoom        = 4      # the 5x5 size over 4x4
 insideDoor     = 8      # per door that opens inside the base instead of outdoors (BASE_LAYOUT.md); a new wall costs 1
+goodsWalk      = -0.5   # per tile to each room its goods flow to or from (BASE_GROWTH.md §6.2: a kitchen and its storeroom and dining room)
+wallTemp       = -0.3   # per shared wall cell per 10°C between the temperatures the two rooms hold (a freezer beside a bedroom)
+apartGap       = 2      # a site "apart" keeps this many cells from anything built: a building of its own (BASE_GROWTH.md §6.4)

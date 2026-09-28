@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using RimWorld;
 using Verse;
 
@@ -42,6 +43,49 @@ namespace AIPawnControl
 
         /// <summary>Outdoor ground (a doorway is neither indoors nor out).</summary>
         public static bool Outdoors(Room room) => room != null && !room.IsDoorway && !Indoor(room);
+
+        /// <summary>
+        /// Outdoor ground people can walk away on: it reaches the map edge, directly or through doors into more outdoor
+        /// ground (a yard inside a perimeter wall, through its gate). A pocket of open sky the walls close in (between three
+        /// rooms) is outdoors but no way out: it's left only through an indoor room.
+        /// </summary>
+        public static bool OpenAir(Room room)
+        {
+            if (!Outdoors(room))
+                return false;
+            if (room.TouchesMapEdge)
+                return true;
+            var seen = new HashSet<Room> { room };
+            var queue = new Queue<Room>();
+            queue.Enqueue(room);
+            while (queue.Count > 0)
+            {
+                Room r = queue.Dequeue();
+                foreach (var door in Layout.Doors(r))
+                    foreach (var side in Layout.Sides(door))
+                    {
+                        if (!Outdoors(side) || !seen.Add(side))
+                            continue;
+                        if (side.TouchesMapEdge)
+                            return true;
+                        queue.Enqueue(side);
+                    }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// OpenAir, remembered per room for one scan of an unchanging map. Per-cell loops ask it for the same few rooms, and
+        /// for a yard inside a perimeter wall each answer is a walk over rooms.
+        /// </summary>
+        public static bool OpenAir(Room room, Dictionary<Room, bool> known)
+        {
+            if (room == null)
+                return false;
+            if (!known.TryGetValue(room, out bool open))
+                known[room] = open = OpenAir(room);
+            return open;
+        }
 
         /// <summary>No role of its own: vanilla gives a proper room with nothing role-defining the generic "Room" role, and others None.</summary>
         public static bool NoRole(Room room) => room.Role == null || room.Role == RoomRoleDefOf.None || room.Role.defName == "Room";

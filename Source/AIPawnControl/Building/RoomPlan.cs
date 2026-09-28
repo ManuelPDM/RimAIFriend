@@ -13,6 +13,8 @@ namespace AIPawnControl
         public Rot4 rot;
         public ThingDef stuff;
         public bool medical; // a bed code sets to medical once built (hospital)
+        public bool prisoner; // a bed code sets for prisoners once built (a prison cell)
+        public Precept_Building precept; // an ideo building: placed in its ideoligion's style (BASE_GROWTH.md §6.6)
 
         public PlanEntry() { }
 
@@ -32,9 +34,11 @@ namespace AIPawnControl
             Scribe_Values.Look(ref rot, "rot");
             Scribe_Defs.Look(ref stuff, "stuff");
             Scribe_Values.Look(ref medical, "medical");
+            Scribe_Values.Look(ref prisoner, "prisoner");
+            Scribe_References.Look(ref precept, "precept");
         }
 
-        public PlanEntry Moved(IntVec3 by) => new PlanEntry(def, cell + by, rot) { stuff = stuff, medical = medical };
+        public PlanEntry Moved(IntVec3 by) => new PlanEntry(def, cell + by, rot) { stuff = stuff, medical = medical, prisoner = prisoner, precept = precept };
     }
 
     /// <summary>A planned room at one site: the footprint (walls included), reused walls, and every new thing to place.</summary>
@@ -54,6 +58,8 @@ namespace AIPawnControl
         public int trees, items;
         public float score;
         public int waysOutSaved; // a hub's
+        public bool joined, apart; // its style (BASE_GROWTH.md §6.4)
+        public List<string> near = new List<string>(); // rooms its goods flow to or from, nearest first: "the storeroom (3 tiles)"
 
         /// <summary>The cell inside each of its doors, its own first: nothing may stand there.</summary>
         public List<IntVec3> DoorsInside
@@ -85,7 +91,7 @@ namespace AIPawnControl
         }
 
         /// <summary>A wall of the finished room, new or reused: what people can't walk through once it's built.</summary>
-        public bool IsWall(IntVec3 c) => footprint.IsOnEdge(c) && (reusedWalls.Contains(c) || entries.Exists(e => e.cell == c && e.def == ThingDefOf.Wall));
+        public bool IsWall(IntVec3 c) => footprint.IsOnEdge(c) && (reusedWalls.Contains(c) || entries.Exists(e => e.cell == c && e.def != ThingDefOf.Door));
 
         /// <summary>The material each entry would use: the chosen one where the def allows it, else the allowed one storage has most of (leather for a couch when there's no cloth), else vanilla's default.</summary>
         public static ThingDef StuffFor(ThingDef def, ThingDef material, Map map = null)

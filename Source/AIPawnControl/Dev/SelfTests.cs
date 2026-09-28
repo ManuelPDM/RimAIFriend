@@ -224,6 +224,10 @@ namespace AIPawnControl
                 log.Line($"{pawn.LabelShort}: {call.Count} choices in {clock.ElapsedMilliseconds} ms");
                 foreach (var label in call.Labels)
                     log.Line("  " + label);
+                // The site letters as the mind reads them (one per style, BASE_GROWTH.md §6.4).
+                if (call.messages != null)
+                    foreach (var line in call.messages.Last().Value.Split('\n').Where(l => Regex.IsMatch(l, "^[A-C]: ")))
+                        log.Line("  site " + line.Trim());
                 if (Ladder.Current(Map)?.kind != null && Ladder.Current(Map).waiting == null)
                     log.Check(call.Count > 0, $"{pawn.LabelShort}: the ladder's next room can be built, but the Base call offers nothing");
             }
@@ -241,7 +245,8 @@ namespace AIPawnControl
             var sites = finder.Sites(validator, material, out var candidates);
             log.Line($"{sites.Count} sites from {candidates.Count} candidates in {clock.ElapsedMilliseconds} ms");
             log.Check(sites.Count > 0, "no site for a room near the base");
-            foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => !k.layout))
+            log.Line(finder.Rejections(5, 5));
+            foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => !k.layout && k.askedFor == null)) // asked-for kinds: Every kind builds
             {
                 if (!kind.BuildableNow(map))
                 {
@@ -309,9 +314,16 @@ namespace AIPawnControl
         {
             Map map = Map;
             Pawn pawn = Colonists.FirstOrDefault();
-            foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => !k.layout && k.BuildableNow(map)))
+            // Rooms the game asks for are built through what it asks for (their items come from there), the rest as they are.
+            var asks = AskedFor.Current(map);
+            foreach (var d in AskedFor.Dropped)
+                log.Line("not asked for now: " + d);
+            foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => !k.layout && (k.askedFor == null ? k.BuildableNow(map) : asks.Any(a => a.kind == k))))
             {
-                string result = DevTools.PlaceRoom(pawn, kind, out BuildProject project);
+                var ask = asks.FirstOrDefault(a => a.kind == kind);
+                string result = ask != null
+                    ? BaseCall.PlaceRoom(pawn, kind, AskedFor.SizeFor(ask, map), null, Supplies.WallMaterials(pawn)[0].stuff, out BuildProject project, ask)
+                    : DevTools.PlaceRoom(pawn, kind, out project);
                 if (project == null)
                 {
                     log.Fail($"{kind.label}: {result}");
@@ -372,7 +384,7 @@ namespace AIPawnControl
             Map map = room.Map;
             bool found = false;
             Flood.Run(Flood.All(map), Layout.Doors(room).Select(d => d.Position), c => c.Walkable(map),
-                stop: c => found = Ground.Outdoors(c.GetRoom(map)));
+                stop: c => found = Ground.OpenAir(c.GetRoom(map)));
             return found;
         }
 

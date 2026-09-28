@@ -2,9 +2,11 @@
 <!--
   Room kinds a mind can build (PHASE4.md §1). A kind is the set of items that makes vanilla give a room its role; the
   project is done when vanilla really gives it. Item rules: backToWall (the default), centre, nextTo (index of an
-  earlier item), repeat/min, optional, preferNew, medical, clearAround. need (bed, seat, shelf, accessory) picks the
+  earlier item), inWall (in the wall facing out, a cooler), repeat/min, forEveryone (one per sleeper, at least repeat), perAnchor (with nextTo: this many per copy
+  of the anchor, which repeats until all fit), optional, preferNew, medical, clearAround. need (bed, seat, shelf, accessory) picks the
   best buildable def by what it does instead of a defs list (FURNISHING.md §4), so research and mods reach it. minSize: x = the short side, z = the long side.
-  size: the interior code builds it at (default 5x5; STREAMLINE.md §7). Order matters: it's the order the kinds are listed
+  stores: what its stockpile and shelves take (Root = vanilla's default stockpile), storePriority, holdTemperature (its
+  coolers' setting). size: the interior code builds it at (default 5x5; STREAMLINE.md §7). Order matters: it's the order the kinds are listed
   to the model.
 -->
 <Defs>
@@ -27,7 +29,7 @@
     <description>beds for several colonists</description>
     <role>Barracks</role>
     <items>
-      <li><need>bed</need><backToWall>true</backToWall><repeat>6</repeat><min>2</min></li>
+      <li><need>bed</need><backToWall>true</backToWall><repeat>6</repeat><min>4</min></li> <!-- at least 4 (BASE_GROWTH.md §6.1) -->
     </items>
   </AIPawnControl.RoomKindDef>
 
@@ -44,12 +46,12 @@
 
   <AIPawnControl.RoomKindDef>
     <defName>AIPC_DiningRoom</defName>
-    <label>dining room</label>
-    <description>a table and seats</description>
+    <label>dining hall</label>
+    <description>tables and seats for everyone</description>
     <role>DiningRoom</role>
-    <items>
+    <items> <!-- a seat for every sleeper, at least 4, 4 to a table (BASE_GROWTH.md §6.1) -->
       <li><defs><li>Table2x2c</li><li>Table1x2c</li></defs><centre>true</centre></li>
-      <li><need>seat</need><nextTo>0</nextTo><repeat>4</repeat></li>
+      <li><need>seat</need><nextTo>0</nextTo><repeat>4</repeat><forEveryone>true</forEveryone><perAnchor>4</perAnchor></li>
     </items>
   </AIPawnControl.RoomKindDef>
 
@@ -108,12 +110,97 @@
     <items>
       <li><need>shelf</need><backToWall>true</backToWall><repeat>6</repeat></li>
     </items>
+    <stores><li>Root</li></stores> <!-- vanilla's default "everything" stockpile on its free floor -->
+  </AIPawnControl.RoomKindDef>
+
+  <!-- BASE_GROWTH.md §6.3: food kept apart, near the kitchen (the goods walk pulls it there). Its stockpile is above the
+       storeroom's priority, so haulers move food over. A cooler only if the base has power to spare: then it's a freezer. -->
+  <AIPawnControl.RoomKindDef>
+    <defName>AIPC_FoodStore</defName>
+    <label>food store</label>
+    <description>shelves for food, and a cooler if there's power</description>
+    <role>Storeroom</role>
+    <size>(4,4)</size>
+    <items>
+      <li><need>shelf</need><backToWall>true</backToWall><repeat>4</repeat><min>2</min></li>
+      <li><need>cooler</need><inWall>true</inWall><optional>true</optional></li>
+    </items>
+    <stores><li>Foods</li></stores>
+    <storePriority>Important</storePriority>
+    <holdTemperature>-10</holdTemperature>
   </AIPawnControl.RoomKindDef>
 
   <AIPawnControl.RoomKindDef>
     <defName>AIPC_PlainRoom</defName>
     <label>plain room</label>
     <description>empty, to furnish later</description>
+  </AIPawnControl.RoomKindDef>
+
+  <!-- BASE_GROWTH.md §6.6 group 3: other rooms, offered only when the colony has what they're for. -->
+  <AIPawnControl.RoomKindDef>
+    <defName>AIPC_Barn</defName>
+    <label>barn</label>
+    <description>beds for the colony's animals</description>
+    <role>Barn</role>
+    <offeredWhen>animals</offeredWhen>
+    <items>
+      <li><need>animalBed</need><backToWall>true</backToWall><repeat>4</repeat></li>
+    </items>
+  </AIPawnControl.RoomKindDef>
+
+  <AIPawnControl.RoomKindDef MayRequire="Ludeon.RimWorld.Biotech">
+    <defName>AIPC_Classroom</defName>
+    <label>classroom</label>
+    <description>school desks and a blackboard</description>
+    <role>Classroom</role>
+    <offeredWhen>children</offeredWhen>
+    <items>
+      <li><defs><li>SchoolDesk</li></defs><backToWall>true</backToWall><repeat>2</repeat></li>
+      <li><defs><li>Blackboard</li></defs><backToWall>true</backToWall><optional>true</optional></li>
+    </items>
+  </AIPawnControl.RoomKindDef>
+
+  <!-- BASE_GROWTH.md §6.6: rooms the game asks for (AskedFor.cs). Offered only when vanilla's alert or state asks, first
+       under "Other rooms"; their items come from vanilla's own requirement lists there, so none are listed here. -->
+  <AIPawnControl.RoomKindDef MayRequire="Ludeon.RimWorld.Royalty">
+    <defName>AIPC_ThroneRoom</defName>
+    <label>throne room</label>
+    <description>a throne and what the title asks for</description>
+    <role>ThroneRoom</role>
+    <askedFor>throne</askedFor>
+  </AIPawnControl.RoomKindDef>
+
+  <AIPawnControl.RoomKindDef MayRequire="Ludeon.RimWorld.Ideology">
+    <defName>AIPC_Temple</defName>
+    <label>temple</label>
+    <description>the building the ideoligion asks for, in a room of its own</description>
+    <askedFor>ideoBuilding</askedFor>
+  </AIPawnControl.RoomKindDef>
+
+  <AIPawnControl.RoomKindDef MayRequire="Ludeon.RimWorld.Biotech">
+    <defName>AIPC_Nursery</defName>
+    <label>nursery</label>
+    <description>cribs for the babies</description>
+    <role>Nursery</role>
+    <askedFor>nursery</askedFor>
+  </AIPawnControl.RoomKindDef>
+
+  <AIPawnControl.RoomKindDef MayRequire="Ludeon.RimWorld.Biotech">
+    <defName>AIPC_DeathrestChamber</defName>
+    <label>deathrest chamber</label>
+    <description>a deathrest casket</description>
+    <role>DeathrestChamber</role>
+    <askedFor>deathrest</askedFor>
+    <size>(4,4)</size>
+  </AIPawnControl.RoomKindDef>
+
+  <AIPawnControl.RoomKindDef>
+    <defName>AIPC_PrisonCell</defName>
+    <label>prison cell</label>
+    <description>a bed for a prisoner</description>
+    <role>PrisonCell</role>
+    <askedFor>prison</askedFor>
+    <size>(4,4)</size>
   </AIPawnControl.RoomKindDef>
 
   <!-- BASE_LAYOUT.md: made by the layout code, never offered as rooms of their own (layout). A hall is a hub

@@ -12,7 +12,7 @@ namespace AIPawnControl
     /// </summary>
     public static class Needs
     {
-        public const string Bed = "bed", Seat = "seat", Shelf = "shelf", Accessory = "accessory";
+        public const string Bed = "bed", Seat = "seat", Shelf = "shelf", Accessory = "accessory", Cooler = "cooler", Crib = "crib", AnimalBed = "animalBed";
 
         /// <summary>The best def for the need, or null. Accessory needs the anchor it links to (a bed).</summary>
         public static ThingDef Best(string need, Map map, ThingDef anchor = null, int count = 1) =>
@@ -22,7 +22,7 @@ namespace AIPawnControl
         public static IEnumerable<ThingDef> Candidates(string need, Map map, ThingDef anchor = null, int count = 1) =>
             DefDatabase<ThingDef>.AllDefsListForReading
                 .Where(d => d.category == ThingCategory.Building && d.BuildableByPlayer && Meets(need, d, anchor)
-                            && RoomKindDef.Buildable(d) && OtherCostsInStorage(d, map) && StuffCanBeHad(d, map, count))
+                            && RoomKindDef.Buildable(d) && OtherCostsInStorage(d, map) && StuffCanBeHad(d, map, count) && CanRun(d, map))
                 .OrderByDescending(d => Score(need, d))
                 .ThenBy(d => d.GetStatValueAbstract(StatDefOf.MarketValue, GenStuff.DefaultStuffFor(d)));
 
@@ -35,15 +35,42 @@ namespace AIPawnControl
             {
                 case Bed: // a colonist's bed: not medical, not a crib
                     return d.IsBed && b.bed_humanlike && !b.bed_defaultMedical && b.bed_maxBodySize >= LifeStageDefOf.HumanlikeAdult.bodySizeFactor;
+                case Crib: // a baby's bed (a nursery needs 2)
+                    return d.IsBed && b.bed_humanlike && !b.bed_defaultMedical && b.bed_maxBodySize < LifeStageDefOf.HumanlikeChild.bodySizeFactor;
+                case AnimalBed: // a bed or sleeping spot for animals (a barn)
+                    return d.IsBed && !b.bed_humanlike;
                 case Seat: // a plain seat; special classes (a throne) make rooms of their own
                     return b.isSittable && !d.IsBed && d.thingClass == typeof(Building);
                 case Shelf:
                     return typeof(Building_Storage).IsAssignableFrom(d.thingClass) && d.designationCategory?.defName == "Furniture";
                 case Accessory:
                     return anchor?.GetCompProperties<CompProperties_AffectedByFacilities>()?.linkableFacilities?.Contains(d) == true;
+                case Cooler: // one that goes in a wall and cools below freezing (a passive cooler stops at 17°C, BASE_GROWTH.md §4)
+                    return b.canPlaceOverWall && d.GetCompProperties<CompProperties_TempControl>() is CompProperties_TempControl temp
+                           && temp.energyPerSecond < 0f && temp.minTargetTemperature < 0f;
                 default:
                     return false;
             }
+        }
+
+        /// <summary>
+        /// This cooler or heater works on the room: it stands in it, or it's in the wall with its cold side facing in (a
+        /// cooler's cold side is behind it, PlaceWorker_Cooler; its hot side vents into the other room).
+        /// </summary>
+        public static bool Controls(Thing t, Room room) =>
+            t.def.building?.canPlaceOverWall == true ? room.ContainsCell(t.Position + IntVec3.South.RotatedBy(t.Rotation)) : room.ContainsCell(t.Position);
+
+        /// <summary>
+        /// It can run here (BASE_GROWTH.md §6.3): a thing that draws power only when the base's power nets have that much to
+        /// spare. Power itself is the player's: code never places generators or conduits.
+        /// </summary>
+        public static bool CanRun(ThingDef d, Map map)
+        {
+            var power = d.GetCompProperties<CompProperties_Power>();
+            if (power == null || power.compClass != typeof(CompPowerTrader) || power.PowerConsumption <= 0f)
+                return true;
+            float spare = map.powerNetManager.AllNetsListForReading.Sum(n => n.CurrentEnergyGainRate()) / CompPower.WattsToWattDaysPerTick;
+            return spare >= power.PowerConsumption;
         }
 
         private static float Score(string need, ThingDef d)
@@ -52,6 +79,8 @@ namespace AIPawnControl
             switch (need)
             {
                 case Bed:
+                case Crib:
+                case AnimalBed:
                     return d.GetStatValueAbstract(StatDefOf.BedRestEffectiveness, stuff) * 10f + d.GetStatValueAbstract(StatDefOf.Comfort, stuff);
                 case Seat:
                     return d.GetStatValueAbstract(StatDefOf.Comfort, stuff);
@@ -59,6 +88,8 @@ namespace AIPawnControl
                     return d.building.maxItemsInCell * d.size.Area;
                 case Accessory:
                     return FacilityBonus(d);
+                case Cooler:
+                    return -d.GetCompProperties<CompProperties_TempControl>().energyPerSecond;
                 default:
                     return 0f;
             }

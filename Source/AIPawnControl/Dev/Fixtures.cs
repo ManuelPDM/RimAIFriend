@@ -208,5 +208,95 @@ namespace AIPawnControl
             t.stackCount = count;
             GenSpawn.Spawn(t, c, map, WipeMode.Vanish);
         }
+
+        // ---------- colony conditions (BASE_GROWTH.md build checks) ----------
+
+        /// <summary>New adult colonists next to the first one, so rooms that grow with the colony can be checked.</summary>
+        public static string AddColonists(Map map, int count)
+        {
+            Pawn near = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            if (near == null)
+                return "No colonist to stand next to.";
+            for (int i = 0; i < count; i++)
+            {
+                Pawn pawn = PawnGenerator.GeneratePawn(new PawnGenerationRequest(PawnKindDefOf.Colonist, Faction.OfPlayer, forceGenerateNewPawn: true));
+                GenSpawn.Spawn(pawn, CellFinder.StandableCellNear(near.Position, map, 5), map);
+            }
+            return $"Added {count} colonists: {map.mapPawns.FreeColonistsSpawnedCount} now.";
+        }
+
+        /// <summary>
+        /// A condition a room is asked for by (BASE_GROWTH.md §6.6): "title" (the first colonist becomes an Empire acolyte),
+        /// "prisoner" (a captured enemy), "baby" (a newborn colonist), "deathrest" (the first colonist gets the gene).
+        /// </summary>
+        public static string AddCondition(Map map, string what)
+        {
+            Pawn first = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            if (first == null)
+                return "No colonist.";
+            IntVec3 spot = CellFinder.StandableCellNear(first.Position, map, 5);
+            switch (what)
+            {
+                case "title":
+                    if (!ModsConfig.RoyaltyActive || Find.FactionManager.OfEmpire == null)
+                        return "No Empire (Royalty).";
+                    first.royalty.SetTitle(Find.FactionManager.OfEmpire, DefDatabase<RoyalTitleDef>.GetNamed("Acolyte"), grantRewards: false, sendLetter: false);
+                    return $"{first.LabelShort} is now an acolyte of the Empire.";
+                case "prisoner":
+                    Faction enemy = Find.FactionManager.RandomEnemyFaction(allowNonHumanlike: false);
+                    Pawn prisoner = PawnGenerator.GeneratePawn(new PawnGenerationRequest(enemy?.def.basicMemberKind ?? PawnKindDefOf.Villager, enemy, forceGenerateNewPawn: true));
+                    GenSpawn.Spawn(prisoner, spot, map);
+                    prisoner.guest.CapturedBy(Faction.OfPlayer);
+                    return $"{prisoner.LabelShort} is held prisoner.";
+                case "baby":
+                    if (!ModsConfig.BiotechActive)
+                        return "No babies without Biotech.";
+                    Pawn baby = PawnGenerator.GeneratePawn(new PawnGenerationRequest(PawnKindDefOf.Colonist, Faction.OfPlayer, forceGenerateNewPawn: true,
+                        allowDowned: true, developmentalStages: DevelopmentalStage.Baby));
+                    GenSpawn.Spawn(baby, spot, map);
+                    return $"{baby.LabelShort}, a baby, joined the colony.";
+                case "deathrest":
+                    if (!ModsConfig.BiotechActive || DefDatabase<GeneDef>.GetNamedSilentFail("Deathrest") is not GeneDef gene)
+                        return "No deathrest gene (Biotech).";
+                    first.genes.AddGene(gene, xenogene: true);
+                    if (DefDatabase<ResearchProjectDef>.GetNamedSilentFail("Deathrest") is ResearchProjectDef research && !research.IsFinished)
+                        Find.ResearchManager.FinishProject(research); // the casket needs it
+                    return $"{first.LabelShort} now deathrests (deathrest researched).";
+                default:
+                    return "Unknown condition " + what;
+            }
+        }
+
+        /// <summary>Power at the base: electricity and air conditioning researched, a fueled wood-fired generator by the first colonist.</summary>
+        public static string AddPower(Map map)
+        {
+            foreach (var name in new[] { "Electricity", "AirConditioning" })
+                if (DefDatabase<ResearchProjectDef>.GetNamedSilentFail(name) is ResearchProjectDef project && !project.IsFinished)
+                    Find.ResearchManager.FinishProject(project);
+            Pawn near = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            ThingDef def = DefDatabase<ThingDef>.GetNamed("WoodFiredGenerator");
+            if (near == null || !CellFinder.TryFindRandomCellNear(near.Position, map, 20, c => GenAdj.OccupiedRect(c, Rot4.North, def.size).ExpandedBy(1).All(x => x.InBounds(map) && Ground.Open(x, map) && x.Standable(map) && !x.Roofed(map)), out IntVec3 cell))
+                return "No spot for a generator.";
+            Thing generator = ThingMaker.MakeThing(def);
+            generator.SetFactionDirect(Faction.OfPlayer);
+            GenSpawn.Spawn(generator, cell, map, Rot4.North);
+            generator.TryGetComp<CompRefuelable>()?.Refuel(1000f);
+            // A conduit under it: a lone generator is on no power net (only transmitters make one).
+            Thing conduit = ThingMaker.MakeThing(ThingDefOf.PowerConduit);
+            conduit.SetFactionDirect(Faction.OfPlayer);
+            GenSpawn.Spawn(conduit, cell, map);
+            // What a cooler costs beyond the walls (steel, components), in reach: code only picks items whose costs are in storage.
+            // They're counted only in storage, so a small stockpile goes under them.
+            var zone = new Zone_Stockpile(StorageSettingsPreset.DefaultStockpile, map.zoneManager);
+            map.zoneManager.RegisterZone(zone);
+            IntVec3 pile = CellFinder.StandableCellNear(near.Position, map, 6, c => Ground.Open(c, map));
+            foreach (var (stack, count) in new[] { (ThingDefOf.Steel, 75), (ThingDefOf.Steel, 75), (ThingDefOf.ComponentIndustrial, 10) })
+            {
+                pile = CellFinder.StandableCellNear(pile, map, 4, c => Ground.Open(c, map) && c.GetFirstItem(map) == null);
+                zone.AddCell(pile);
+                Stack(map, stack, count, pile);
+            }
+            return $"Researched electricity and air conditioning; a fueled wood-fired generator on a conduit at {cell}; 150 steel and 10 components stored by {near.LabelShort}.";
+        }
     }
 }

@@ -219,10 +219,25 @@ namespace AIPawnControl
         /// <summary>A kind laid out for the selected colonist as the Base call would (site A, code's size, the best wall material), with its missing materials marked. No LLM.</summary>
         [DebugAction(Category, "Build room now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         private static List<DebugActionNode> BuildRoomNow() =>
-            DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => !k.layout).Select(kind => new DebugActionNode(kind.LabelCap, DebugActionType.Action, () =>
+            DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => !k.layout && k.askedFor == null).Select(kind => new DebugActionNode(kind.LabelCap, DebugActionType.Action, () =>
             {
                 if (SelectedColonist() is Pawn pawn)
                     ModLog.Message($"Build room now ({kind.label}): {PlaceRoom(pawn, kind, out _)}");
+            })).ToList();
+
+        /// <summary>As Build room now, at the site of the "apart" style (a building of its own, BASE_GROWTH.md §6.4), as a mind picking it would.</summary>
+        [DebugAction(Category, "Build room apart", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static List<DebugActionNode> BuildRoomApart() =>
+            DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => !k.layout && k.askedFor == null).Select(kind => new DebugActionNode(kind.LabelCap, DebugActionType.Action, () =>
+            {
+                if (!(SelectedColonist() is Pawn pawn))
+                    return;
+                var finder = new SiteFinder(pawn.Map, SiteFinder.BaseCenter(pawn.Map));
+                finder.For(kind);
+                ThingDef material = Supplies.WallMaterials(pawn)[0].stuff;
+                var site = finder.Sites(new RoomValidator(pawn.Map, finder.center, finder.weights.maxWalk), material, out _).FirstOrDefault(s => s.apart);
+                ModLog.Message($"Build room apart ({kind.label}): " + (site == null ? "no site apart"
+                    : BaseCall.PlaceRoom(pawn, kind, BaseCall.SizeFor(kind, pawn.Map), site, material, out _)));
             })).ToList();
 
         internal static string PlaceRoom(Pawn pawn, RoomKindDef kind, out BuildProject project) =>
@@ -263,6 +278,15 @@ namespace AIPawnControl
                     foreach (var t in c.GetThingList(map).ToList())
                         if (t.def.category == ThingCategory.Plant || t.def.category == ThingCategory.Item || t.def.category == ThingCategory.Filth)
                             t.Destroy(DestroyMode.Vanish);
+            // Floor blueprints the room came with (a throne room "all floored", BASE_GROWTH.md §6.6).
+            if (!project.roomCell.IsValid)
+                foreach (var c in project.footprint.ContractedBy(1))
+                    foreach (var t in c.GetThingList(map).ToList())
+                        if (t is Blueprint && t.def.entityDefToBuild is TerrainDef laid)
+                        {
+                            t.Destroy(DestroyMode.Vanish);
+                            map.terrainGrid.SetTerrain(c, laid);
+                        }
             foreach (var e in project.entries)
             {
                 foreach (var c in e.Rect)
@@ -273,6 +297,8 @@ namespace AIPawnControl
                     continue;
                 Thing thing = ThingMaker.MakeThing(e.def, e.stuff);
                 thing.SetFactionDirect(Faction.OfPlayer);
+                if (e.precept != null)
+                    thing.StyleSourcePrecept = e.precept;
                 GenSpawn.Spawn(thing, e.cell, map, e.rot, WipeMode.Vanish);
             }
             if (project.floor != null)
@@ -287,7 +313,7 @@ namespace AIPawnControl
             Room room = project.Room;
             // A layout project (a doorway, a closed door) has no box of its own: roof the room it opens or closes.
             var roofed = project.roomCell.IsValid
-                ? (room != null && !room.TouchesMapEdge && (Ground.Indoor(room) || room.UsesOutdoorTemperature) ? room.Cells : Enumerable.Empty<IntVec3>())
+                ? (room != null && Ground.Indoor(room) ? room.Cells : Enumerable.Empty<IntVec3>()) // never a pocket of open sky
                 : project.footprint.ContractedBy(1).Cells;
             foreach (var c in roofed.ToList())
                 map.roofGrid.SetRoof(c, RoofDefOf.RoofConstructed);
@@ -357,13 +383,17 @@ namespace AIPawnControl
             Pawn pawn = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
             if (pawn == null)
                 return "No colonist.";
-            var names = new[] { "AIPC_Barracks", "AIPC_Kitchen", "AIPC_Storeroom", "AIPC_DiningRoom", "AIPC_Workshop", "AIPC_Hospital", "AIPC_Bedroom", "AIPC_Bedroom" };
+            // The ladder's own rungs in turn (BASE_GROWTH.md §6.6), until better rooms or a rung that waits.
             int built = 0;
-            foreach (var name in names)
+            for (int step = 0; step < 20; step++)
             {
-                var kind = DefDatabase<RoomKindDef>.GetNamedSilentFail(name);
-                if (kind == null)
-                    continue;
+                var rung = Ladder.Current(map);
+                if (rung == null || rung.rooms || rung.kind == null || rung.waiting != null)
+                {
+                    ModLog.Message($"Grow: stopped at {(rung == null ? "the top of the ladder" : rung.label + (rung.waiting != null ? $" ({rung.waiting})" : ""))}.");
+                    break;
+                }
+                var kind = rung.kind;
                 BuildProject project = null;
                 // As a mind picking the rung as a hub when it can be walked through and one fits.
                 if (layout && LayoutLines(pawn, new Ladder.Rung { kind = kind, label = kind.label }).FirstOrDefault(o => o.group == "Next for the base") is Layout.Option asHub)
@@ -371,17 +401,28 @@ namespace AIPawnControl
                     ModLog.Message($"Grow: {asHub.label}: {PlaceLine(pawn, asHub, out project)}");
                 }
                 if (project == null)
-                    PlaceRoom(pawn, kind, out project);
+                    ModLog.Message($"Grow: {rung.label}: {PlaceRoom(pawn, kind, out project)}");
                 if (project == null)
-                    continue;
+                    break;
                 FinishInstantly(project);
                 built++;
                 // As if a mind took every layout line: halls, surplus ways out, doors between neighbours.
                 for (int i = 0; layout && i < 10 && BuildBestLayoutLine(map) is string line; i++)
                     ModLog.Message("Grow: " + line);
             }
+            // Then everything the game asks for (BASE_GROWTH.md §6.6), as if a mind took each.
+            foreach (var ask in AskedFor.Current(map))
+            {
+                ModLog.Message($"Grow: asked for ({ask.why}): {BaseCall.PlaceRoom(pawn, ask.kind, AskedFor.SizeFor(ask, map), null, Supplies.WallMaterials(pawn)[0].stuff, out BuildProject asked, ask)}");
+                if (asked != null)
+                {
+                    FinishInstantly(asked);
+                    built++;
+                }
+            }
             string result = $"Grew a test base: {built} rooms, {Layout.Line(map)}.";
             ModLog.Message(result);
+            BaseMap.Write(map);
             return result;
         }
 
@@ -477,6 +518,18 @@ namespace AIPawnControl
             new DebugActionNode("mixed ground", DebugActionType.Action, () => Report(Fixtures.MixedGround(Find.CurrentMap))),
             new DebugActionNode("street base", DebugActionType.Action, () => Report(Fixtures.StreetBase(Find.CurrentMap))),
             new DebugActionNode("fields at the doors", DebugActionType.Action, () => Report(Fixtures.FieldsAtTheDoors(Find.CurrentMap))),
+        };
+
+        /// <summary>Colony conditions the ladder and the rooms asked for react to (BASE_GROWTH.md build checks).</summary>
+        [DebugAction(Category, "Test setup", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static List<DebugActionNode> TestSetup() => new List<DebugActionNode>
+        {
+            new DebugActionNode("add 3 colonists", DebugActionType.Action, () => ModLog.Message(Fixtures.AddColonists(Find.CurrentMap, 3))),
+            new DebugActionNode("add power", DebugActionType.Action, () => ModLog.Message(Fixtures.AddPower(Find.CurrentMap))),
+            new DebugActionNode("grant a title", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "title"))),
+            new DebugActionNode("take a prisoner", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "prisoner"))),
+            new DebugActionNode("add a baby", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "baby"))),
+            new DebugActionNode("add a deathrester", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "deathrest"))),
         };
 
         // ---------- Reports ----------

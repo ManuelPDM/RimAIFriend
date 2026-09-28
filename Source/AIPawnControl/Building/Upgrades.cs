@@ -59,12 +59,20 @@ namespace AIPawnControl
 
         /// <summary>
         /// The room most worth upgrading for her (the ladder's last rung): one vanilla gives a bad mood for (dark, too hot
-        /// or cold) first, then the least impressive, of these rooms (the ones with an upgrade to offer). Null if none.
+        /// or cold) first, then the least impressive, of the rooms with an upgrade to offer. Null if none. Rooms are
+        /// ranked first and asked for upgrades (the slow part) in that order until one has some.
         /// </summary>
-        public static Room Worst(IEnumerable<Room> rooms, Pawn pawn) =>
-            rooms.OrderByDescending(r => (Dark(r) ? 1 : 0) + (TooHot(r, pawn) || TooCold(r, pawn) ? 1 : 0))
-                .ThenBy(r => r.GetStat(RoomStatDefOf.Impressiveness))
-                .FirstOrDefault();
+        public static Room Worst(IEnumerable<Room> rooms, Pawn pawn)
+        {
+            List<(ThingDef stuff, int stock, int nearby)> materials = null; // read once for every room asked
+            return rooms.OrderByDescending(r => (Dark(r) ? 1 : 0) + (TooHot(r, pawn) || TooCold(r, pawn) ? 1 : 0))
+                .ThenBy(r =>
+                {
+                    r.Notify_TerrainChanged(); // read fresh, as For does (Stats.Of)
+                    return r.GetStat(RoomStatDefOf.Impressiveness);
+                })
+                .FirstOrDefault(r => For(r, pawn, materials ??= Supplies.WallMaterials(pawn)).Count > 0);
+        }
 
         /// <summary>Vanilla's darkness: most of the room is dark to the eye (the "in darkness" mood).</summary>
         private static bool Dark(Room room) => room.Cells.Count(c => room.Map.glowGrid.PsychGlowAt(c) == PsychGlow.Dark) * 2 > room.CellCount;
@@ -76,10 +84,11 @@ namespace AIPawnControl
         /// Up to 3 upgrades for the room: the most gain for its cost of each kind first, then the next best of any kind, so
         /// there's a real choice even when only looks can improve. Never the same item or floor twice.
         /// </summary>
-        public static List<Upgrade> For(Room room, Pawn pawn)
+        /// <param name="materials">Her wall materials (Supplies.WallMaterials), when the caller already has them.</param>
+        public static List<Upgrade> For(Room room, Pawn pawn, List<(ThingDef stuff, int stock, int nearby)> materials = null)
         {
             var all = new List<Upgrade>();
-            var ctx = new Context(room, pawn);
+            var ctx = new Context(room, pawn, materials ?? Supplies.WallMaterials(pawn));
             all.AddRange(ItemUpgrades(ctx));
             all.AddRange(Replacements(ctx));
             if (FloorUpgrade(ctx) is Upgrade floor)
@@ -105,12 +114,12 @@ namespace AIPawnControl
             public readonly List<Thing> things;
             public readonly Stats stats;
 
-            public Context(Room room, Pawn pawn)
+            public Context(Room room, Pawn pawn, List<(ThingDef stuff, int stock, int nearby)> materials)
             {
                 this.room = room;
                 this.pawn = pawn;
                 map = room.Map;
-                materials = Supplies.WallMaterials(pawn);
+                this.materials = materials;
                 things = room.ContainedAndAdjacentThings.Where(t => t.def.category == ThingCategory.Building && room.ContainsCell(t.Position)).Distinct().ToList();
                 stats = Stats.Of(room);
             }
@@ -144,9 +153,7 @@ namespace AIPawnControl
             /// <summary>What it needs to work once built is there: power from a generator for what draws power, some fuel for what burns it.</summary>
             public bool CanRun(ThingDef def)
             {
-                var power = def.GetCompProperties<CompProperties_Power>();
-                if (power != null && power.compClass == typeof(CompPowerTrader) && power.PowerConsumption > 0f
-                    && !map.listerBuildings.allBuildingsColonist.Any(b => b.TryGetComp<CompPowerPlant>()?.PowerOutput > 0f))
+                if (!Needs.CanRun(def, map))
                     return false;
                 var fuel = def.GetCompProperties<CompProperties_Refuelable>();
                 return fuel?.fuelFilter == null || fuel.fuelFilter.AllowedThingDefs.Any(f => CanHave(f, 1));
@@ -177,7 +184,9 @@ namespace AIPawnControl
                     continue;
                 if (def.PlaceWorkers != null && def.PlaceWorkers.Any(w => w is PlaceWorker_Cooler || w is PlaceWorker_Vent))
                     continue; // they sit in a wall: the walls step
-                if (!ctx.CanPay(def, out ThingDef stuff) || !ctx.CanRun(def) || !KeepsRole(room, def, stuff))
+                if (typeof(Building_Throne).IsAssignableFrom(def.thingClass))
+                    continue; // a throne makes its room a throne room (RoomRoleWorker_ThroneRoom reads the room's cached things, so KeepsRole can't see it); the title asks for that room itself
+                if (!ctx.CanPay(def, out ThingDef stuff) || !ctx.CanRun(def))
                     continue;
                 var u = new Upgrade { def = def, stuff = stuff, cost = Cost(def, stuff) };
                 Thing anchor = ctx.things.FirstOrDefault(t => LinksTo(def, t));
@@ -218,6 +227,9 @@ namespace AIPawnControl
                     u.predicted = s.Impressiveness;
                     u.label = $"{def.label}{CostText(def, stuff)}: {LooksText(ctx.stats, s)}";
                 }
+                // For offers gains only, so the slow checks (the room's role, a free slot) are left for those.
+                if (u.value <= 0f || !KeepsRole(room, def, stuff))
+                    continue;
                 u.entry = Slot(ctx, def, anchor);
                 if (u.entry == null)
                     continue;

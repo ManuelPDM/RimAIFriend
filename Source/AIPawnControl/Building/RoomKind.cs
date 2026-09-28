@@ -29,17 +29,31 @@ namespace AIPawnControl
         public bool preferNew;
         /// <summary>Beds: set to medical once built (a hospital without hospital beds).</summary>
         public bool medical;
+        /// <summary>Beds: set for prisoners once built (a prison cell).</summary>
+        public bool prisoner;
         /// <summary>Free cardinal neighbours to keep around it (a chess table's players).</summary>
         public int clearAround;
+        /// <summary>Goes in the room's wall, facing out (a cooler: its hot side outdoors). Placed by the site finder, not the placer.</summary>
+        public bool inWall;
+        /// <summary>One for every sleeper, and at least repeat (a dining hall's seats; BASE_GROWTH.md §6.1).</summary>
+        public bool forEveryone;
+        /// <summary>With nextTo: this many per copy of the anchor, and the anchor is repeated until all of them fit (4 seats per table).</summary>
+        public int perAnchor;
+
+        /// <summary>How many the room places: repeat, or one per sleeper (at least repeat).</summary>
+        public int Count(Map map) => forEveryone ? Mathf.Max(repeat, Ladder.Sleepers(map).Count) : repeat;
+
+        /// <summary>How many must fit: all of them for forEveryone, else min.</summary>
+        public int MinCount(Map map) => forEveryone ? Count(map) : Mathf.Min(min, repeat);
 
         public ThingDef Resolve(Map map, ThingDef anchor = null)
         {
             if (need != null)
-                return Needs.Best(need, map, anchor, repeat);
+                return Needs.Best(need, map, anchor, Count(map));
             ThingDef first = null;
             foreach (var def in defs)
             {
-                if (def == null || !RoomKindDef.Buildable(def))
+                if (def == null || !RoomKindDef.Buildable(def) || !Needs.CanRun(def, map))
                     continue;
                 if (!preferNew || map.listerBuildings.ColonistsHaveBuilding(def) == false)
                     return def;
@@ -65,6 +79,46 @@ namespace AIPawnControl
         public List<RoomItem> items = new List<RoomItem>();
         /// <summary>Made by the base-layout code (a hall, a doorway, a closed doorway), never offered as a room of its own.</summary>
         public bool layout;
+        /// <summary>A room the game asks for (AskedFor: throne, ideoBuilding, nursery, deathrest, prison): its items come from there, and it's only offered when asked.</summary>
+        public string askedFor;
+        /// <summary>Offered under "Other rooms" only when the colony has them: "animals", "children" (BASE_GROWTH.md §6.6 group 3).</summary>
+        public string offeredWhen;
+
+        /// <summary>Whatever offeredWhen names is on the map, or there's no condition.</summary>
+        public bool Wanted(Map map)
+        {
+            switch (offeredWhen)
+            {
+                case null: return true;
+                case "animals": return map.mapPawns.SpawnedColonyAnimals.Any();
+                case "children": return map.mapPawns.FreeColonistsSpawned.Any(p => p.DevelopmentalStage.Child());
+                default: return false;
+            }
+        }
+        /// <summary>
+        /// What its stockpile and shelves take once it's done (BASE_GROWTH.md §6.3): these categories, or Root for vanilla's
+        /// default "everything" stockpile. Null: no stockpile.
+        /// </summary>
+        public List<ThingCategoryDef> stores;
+        /// <summary>Its stockpile's priority (a food store's is above the storeroom's, so food moves over).</summary>
+        public StoragePriority storePriority = StoragePriority.Normal;
+        /// <summary>The temperature its coolers or heaters are set to once it's done (a freezer: -10). NaN: vanilla's default.</summary>
+        public float holdTemperature = float.NaN;
+
+        /// <summary>The filter its storage gets.</summary>
+        public ThingFilter StoreFilter()
+        {
+            var settings = new StorageSettings();
+            if (stores.Contains(ThingCategoryDefOf.Root))
+            {
+                settings.SetFromPreset(StorageSettingsPreset.DefaultStockpile);
+                return settings.filter;
+            }
+            settings.filter.SetDisallowAll();
+            foreach (var category in stores)
+                settings.filter.SetAllow(category, true);
+            return settings.filter;
+        }
 
         public static RoomKindDef Bedroom => DefDatabase<RoomKindDef>.GetNamed("AIPC_Bedroom");
         public static RoomKindDef Plain => DefDatabase<RoomKindDef>.GetNamed("AIPC_PlainRoom");
@@ -100,35 +154,71 @@ namespace AIPawnControl
             public HashSet<PlanEntry> boxedInBefore;             // items with no free neighbour already
         }
 
+        /// <summary>Why the last Place failed ("throne: 0 of 1 placed"), for the dev log.</summary>
+        public static string LastFailure;
+
         /// <summary>The kind's items in an empty room. False if a required item doesn't fit.</summary>
         public static bool Place(RoomPlan plan)
         {
             var s = NewState(plan, new List<PlanEntry>());
-            var firstOf = new List<PlanEntry>();
-
+            Map map = plan.map;
             var kindItems = plan.kind.items;
-            foreach (var item in kindItems)
+            var firstOf = new PlanEntry[kindItems.Count];
+            var done = new bool[kindItems.Count];
+            for (int index = 0; index < kindItems.Count; index++)
             {
-                ThingDef anchorDef = item.nextTo >= 0 && item.nextTo < kindItems.Count ? kindItems[item.nextTo].Resolve(plan.map) : null;
-                ThingDef def = item.Resolve(plan.map, anchorDef);
-                PlanEntry first = null;
+                var item = kindItems[index];
+                if (done[index] || item.inWall)
+                    continue;
+                ThingDef anchorDef = item.nextTo >= 0 && item.nextTo < kindItems.Count ? kindItems[item.nextTo].Resolve(map) : null;
+                ThingDef def = item.Resolve(map, anchorDef);
+                // Items that go perAnchor next to this one: each copy of it gets its share right away (a table, then its seats),
+                // and it's repeated until they're all placed.
+                var deps = Enumerable.Range(index + 1, kindItems.Count - index - 1).Where(j => kindItems[j].nextTo == index && kindItems[j].perAnchor > 0).ToList();
+                var depDefs = deps.ToDictionary(j => j, j => def != null ? kindItems[j].Resolve(map, def) : null);
+                var depPlaced = deps.ToDictionary(j => j, j => 0);
+                int target = deps.Count > 0 ? deps.Max(j => (kindItems[j].Count(map) + kindItems[j].perAnchor - 1) / kindItems[j].perAnchor) : item.Count(map);
                 int count = 0;
                 if (def != null)
-                    while (count < item.repeat)
+                    while (count < target)
                     {
-                        PlanEntry anchor = item.nextTo >= 0 && item.nextTo < firstOf.Count ? firstOf[item.nextTo] : null;
+                        PlanEntry anchor = item.nextTo >= 0 && item.nextTo < firstOf.Length ? firstOf[item.nextTo] : null;
                         PlanEntry entry = item.nextTo >= 0 ? (anchor != null ? NextTo(def, anchor, s, item) : null)
                             : item.centre ? Centre(def, s, item)
                             : AgainstWall(def, s, item);
                         if (entry == null)
                             break;
                         Commit(entry, s, item);
-                        first = first ?? entry;
+                        firstOf[index] = firstOf[index] ?? entry;
                         count++;
+                        foreach (int j in deps)
+                        {
+                            var dep = kindItems[j];
+                            for (int k = 0; k < dep.perAnchor && depPlaced[j] < dep.Count(map) && depDefs[j] != null; k++)
+                            {
+                                PlanEntry seat = NextTo(depDefs[j], entry, s, dep);
+                                if (seat == null)
+                                    break;
+                                Commit(seat, s, dep);
+                                firstOf[j] = firstOf[j] ?? seat;
+                                depPlaced[j]++;
+                            }
+                        }
                     }
-                if (!item.optional && count < Mathf.Min(item.min, item.repeat))
+                if (!item.optional && count < Mathf.Min(item.MinCount(map), target))
+                {
+                    LastFailure = $"{def?.defName ?? "no buildable def"}: {count} of {Mathf.Min(item.MinCount(map), target)} placed in {plan.Width}x{plan.Height}";
                     return false;
-                firstOf.Add(first);
+                }
+                foreach (int j in deps)
+                {
+                    if (!kindItems[j].optional && depPlaced[j] < kindItems[j].MinCount(map))
+                    {
+                        LastFailure = $"{depDefs[j]?.defName ?? "no buildable def"}: {depPlaced[j]} of {kindItems[j].MinCount(map)} placed in {plan.Width}x{plan.Height}";
+                        return false;
+                    }
+                    done[j] = true;
+                }
             }
             plan.entries.AddRange(s.placed);
             return true;
@@ -185,6 +275,8 @@ namespace AIPawnControl
                 s.reserved.Add(c);
             if (item.medical)
                 entry.medical = true;
+            if (item.prisoner)
+                entry.prisoner = true;
             s.placed.Add(entry);
         }
 
@@ -337,7 +429,7 @@ namespace AIPawnControl
             if (clear == null)
                 return false;
             foreach (var c in clear)
-                if (!s.inner.Contains(c) || s.taken.Contains(c) || rect.Contains(c))
+                if (!rect.Contains(c) && (!s.inner.Contains(c) || s.taken.Contains(c))) // a throne's interaction cell is its own: it's sat on
                     return false;
             // Every placed item (this one too) keeps a free neighbour to be used and built from.
             if (!HasFreeNeighbour(rect, s, rect))
