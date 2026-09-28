@@ -54,18 +54,15 @@ namespace AIPawnControl
         private int lastMoodBand;
         private int lastInjuryCount;
         private readonly HashSet<int> ourJobIds = new HashSet<int>(); // jobs we ordered, to tell them apart from the player's
-        private List<ActionCatalog.ActOption> pendingMenu;
         private int talkLineJobId = -1;
         private string talkLine;
         private bool chatWokeHer;
         private bool chatThinking;
         private bool reflecting; // a Reflect is somewhere between its query embedding and its commit
         private int reflectRun;  // bumped to abandon a running Reflect
-        private bool recalling;  // an Act or Chat is waiting for its situation's query vector
-        private Recall pendingRecall;
+        private bool recalling;  // an Act, Chat or Reply is waiting for its situation's query vector
 
         public bool Thinking => current != null || reflecting || recalling;
-        public bool Reflecting => reflecting;
         public float ThinkingSeconds => UnityEngine.Time.realtimeSinceStartup - requestStartedRealtime;
         public bool Unreachable => failures >= FailuresBeforeBackoff;
         public int ActsLeft => AIPawnControlMod.Settings.actsPerDay - (LocalDay == actsDay ? actsToday : 0);
@@ -105,15 +102,13 @@ namespace AIPawnControl
             {
                 decisions = decisions ?? new List<string>();
                 decisionTicks = decisionTicks ?? new List<int>();
-                while (decisionTicks.Count < decisions.Count)
-                    decisionTicks.Insert(0, -1); // an old save: those days aren't known
                 lastInteractionTicks = lastInteractionTicks ?? new Dictionary<string, int>();
                 chat = chat ?? new List<ChatLine>();
                 memory = memory ?? new MindMemory();
             }
         }
 
-        private int LocalDay => pawn.Map != null ? GenLocalDate.Year(pawn.Map) * GenDate.DaysPerYear + GenLocalDate.DayOfYear(pawn.Map) : -1;
+        private int LocalDay => pawn.Map != null ? GameTime.Today(pawn.Map) : -1;
 
         /// <summary>Why the mind must not think right now, or null if it may. Checked before sending and again before applying.</summary>
         public string PausedReason(bool ignoreSleep = false)
@@ -320,31 +315,30 @@ namespace AIPawnControl
             bool mayAct = ActsLeft > 0;
             var menu = mayAct ? ActionCatalog.BuildActMenu(pawn, this, inConversation: true) : new List<ActionCatalog.ActOption>();
             string speaker = h.speaker.LabelShort;
-            recalling = true;
-            Recall.WithQuery(this, $"{h.line} ({speaker})", (vector, tag) =>
+            AfterRecall($"{h.line} ({speaker})", (vector, tag) =>
             {
-                if (!recalling || pawn == null || !pawn.Spawned)
-                    return; // cancelled meanwhile
-                recalling = false;
-                var recall = Recall.Reply(this, speaker, vector, tag);
-                var messages = PromptBuilder.Build("reply", this, new Dictionary<string, string>
-                {
-                    ["speaker"] = speaker,
-                    ["line"] = h.line,
-                    ["kind"] = h.def.label,
-                    ["menu"] = mayAct ? ActionCatalog.DescribeMenu(menu) : "(you've made all your decisions for today; just answer)",
-                }, recall.Sections);
-                Send("reply", messages, ActionCatalog.ChatSchema(menu, recall.Shown), reply => OnReply(h, reply, menu, recall),
-                    maxAgeTicks: ReplyMaxAgeTicks, stillValid: () => PausedReason());
+                var recall = Recall.Conversation(this, speaker, vector, tag, 3);
+                string menuText = mayAct ? ActionCatalog.DescribeMenu(menu) : "(you've made all your decisions for today; just answer)";
+                Send("reply", ReplyMessages(speaker, h.line, h.def.label, menuText, recall), ActionCatalog.ChatSchema(menu, recall.Shown),
+                    reply => OnReply(h, reply, menu, recall), maxAgeTicks: ReplyMaxAgeTicks, stillValid: () => PausedReason());
             });
         }
+
+        /// <summary>The Reply call's prompt: answering another mind's line.</summary>
+        internal List<KeyValuePair<string, string>> ReplyMessages(string speaker, string line, string kind, string menu, Recall recall) =>
+            PromptBuilder.Build("reply", this, new Dictionary<string, string>
+            {
+                ["speaker"] = speaker,
+                ["line"] = line,
+                ["kind"] = kind,
+                ["menu"] = menu,
+            }, recall.Sections);
 
         private void OnReply(Heard h, Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
         {
             string speaker = h.speaker.LabelShort;
-            int memoryId = reply.TryGetValue("memory", out object m) && m is double md ? (int)md : 0;
-            recall.MarkUsed(this, memoryId, speaker);
-            string text = SpeechLog.Clean(reply.TryGetValue("reply", out object r) ? r as string : null, ActionCatalog.MaxChatReply);
+            recall.MarkUsed(this, reply.Int("memory"), speaker);
+            string text = SpeechLog.Clean(reply.Str("reply"), ActionCatalog.MaxChatReply);
             if (text == null)
                 return;
             SpeechLog.Say(pawn, text);
@@ -353,20 +347,11 @@ namespace AIPawnControl
                 3, MemoryEvent.Told, new[] { pawn.LabelShort });
 
             string result = $"Answered {speaker}: \"{text}\"";
-            int choice = reply.TryGetValue("act", out object a) && a is double d ? (int)d : 0;
-            var option = menu.FirstOrDefault(o => o.Id == choice);
+            var option = menu.FirstOrDefault(o => o.Id == reply.Int("act"));
             if (option != null)
             {
                 CountAct(); // acting on it is her decision (§4); just answering is free
-                try
-                {
-                    result += $" Then: {option.Label}: {option.Apply(null)}";
-                }
-                catch (Exception e)
-                {
-                    result += " That went wrong: " + e.Message;
-                    ModLog.Error($"{pawn.LabelShort}: applying \"{option.Label}\" from a reply threw: {e}");
-                }
+                result += $" Then: {option.Label}: {MindActions.Safely(pawn, option.Label, () => option.Apply(null))}";
             }
             AddDecision(result, importance: 0); // the talk events above are the memory
             ModLog.Message($"{pawn.LabelShort} reply to {speaker}: \"{text}\" | act: {option?.Label ?? "none"}");
@@ -396,22 +381,36 @@ namespace AIPawnControl
             idleSinceTick = -1;
             var menu = ActionCatalog.BuildActMenu(pawn, this);
             var present = Recall.Present(pawn);
+            AfterRecall(Recall.ActQuery(pawn, present), (query, tag) =>
+            {
+                var recall = Recall.Act(this, present, query, tag);
+                Send("act", ActMessages(trigger, menu, recall), ActionCatalog.ActSchema(menu, recall.Shown), reply => OnAct(reply, menu, recall),
+                    maxAgeTicks: GenDate.TicksPerHour);
+            });
+        }
+
+        /// <summary>The Act call's prompt: the trigger, the menu and who's around.</summary>
+        internal List<KeyValuePair<string, string>> ActMessages(string trigger, List<ActionCatalog.ActOption> menu, Recall recall) =>
+            PromptBuilder.Build("act", this, new Dictionary<string, string>
+            {
+                ["trigger"] = trigger,
+                ["menu"] = ActionCatalog.DescribeMenu(menu),
+                ["talkto"] = TalkToText(menu),
+            }, recall.Sections);
+
+        /// <summary>
+        /// Embeds the situation's query (when memory is on), then goes on with the vector on the main thread, unless the
+        /// call was cancelled meanwhile (Cancel clears recalling).
+        /// </summary>
+        private void AfterRecall(string query, Action<float[], string> then)
+        {
             recalling = true;
-            Recall.WithQuery(this, Recall.ActQuery(pawn, present), (query, tag) =>
+            Recall.WithQuery(this, query, (vector, tag) =>
             {
                 if (!recalling || pawn == null || !pawn.Spawned)
-                    return; // cancelled meanwhile
+                    return;
                 recalling = false;
-                var recall = Recall.Act(this, present, query, tag);
-                var messages = PromptBuilder.Build("act", this, new Dictionary<string, string>
-                {
-                    ["trigger"] = trigger,
-                    ["menu"] = ActionCatalog.DescribeMenu(menu),
-                    ["talkto"] = TalkToText(menu),
-                }, recall.Sections);
-                pendingMenu = menu;
-                pendingRecall = recall;
-                Send("act", messages, ActionCatalog.ActSchema(menu, recall.Shown), OnAct, maxAgeTicks: GenDate.TicksPerHour);
+                then(vector, tag);
             });
         }
 
@@ -429,38 +428,29 @@ namespace AIPawnControl
                 actsToday--;
         }
 
-        private void OnAct(Dictionary<string, object> reply)
+        private void OnAct(Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
         {
-            var menu = pendingMenu;
-            pendingMenu = null;
-            int choice = reply.TryGetValue("choice", out object c) && c is double d ? (int)d : -1;
-            var option = menu?.FirstOrDefault(o => o.Id == choice);
+            int choice = reply.Int("choice", -1);
+            var option = menu.FirstOrDefault(o => o.Id == choice);
             if (option == null)
             {
                 Fail($"act reply chose {choice}, which isn't on the menu");
                 return;
             }
-            string say = SpeechLog.Clean(reply.TryGetValue("say", out object sayRaw) ? sayRaw as string : null);
-            string result;
-            try
+            string say = SpeechLog.Clean(reply.Str("say"));
+            string result = MindActions.Safely(pawn, option.Label, () =>
             {
-                result = option.ApplyReply != null ? option.ApplyReply(reply, say) : option.Apply(say);
+                string applied = option.ApplyReply != null ? option.ApplyReply(reply, say) : option.Apply(say);
                 if (!option.IsTalk && !option.OwnRemark && say != null && AIPawnControlMod.Settings.speakLines)
                 {
                     SpeechLog.Say(pawn, say);
-                    result += $" Said: \"{say}\"";
+                    applied += $" Said: \"{say}\"";
                 }
-            }
-            catch (Exception e)
-            {
-                result = "That went wrong: " + e.Message;
-                ModLog.Error($"{pawn.LabelShort}: applying \"{option.Label}\" threw: {e}");
-            }
+                return applied;
+            });
             AddDecision($"{option.Label}: {result}");
             ModLog.Message($"{pawn.LabelShort} act: {option.Label} | {result} | Reason: {lastReason}");
-            int memoryId = reply.TryGetValue("memory", out object m) && m is double md ? (int)md : 0;
-            pendingRecall?.MarkUsed(this, memoryId, option.IsTalk ? option.Target?.LabelShort : null);
-            pendingRecall = null;
+            recall.MarkUsed(this, reply.Int("memory"), option.IsTalk ? option.Target?.LabelShort : null);
         }
 
         // ---------- Player chat ----------
@@ -512,22 +502,12 @@ namespace AIPawnControl
             chatWokeHer = false;
             string message = string.Join("\n", unanswered);
             string query = Recall.ChatQuery(this, message, out var mentioned);
-            recalling = true;
             chatThinking = true;
-            Recall.WithQuery(this, query, (vector, tag) =>
+            AfterRecall(query, (vector, tag) =>
             {
-                if (!recalling || pawn == null || !pawn.Spawned)
-                    return; // cancelled meanwhile
-                recalling = false;
-                var recall = Recall.Chat(this, mentioned, vector, tag);
-                var messages = PromptBuilder.Build("chat", this, new Dictionary<string, string>
-                {
-                    ["situation"] = situation,
-                    ["history"] = earlier.Count > 0 ? string.Join("\n", earlier) : "(this is the start of the conversation)",
-                    ["message"] = message,
-                    ["menu"] = cantAct == null ? ActionCatalog.DescribeMenu(menu) : $"(you can't do anything else right now: {cantAct})",
-                }, recall.Sections);
-                Send("chat", messages, ActionCatalog.ChatSchema(menu, recall.Shown), reply => OnChat(reply, menu, recall),
+                var recall = Recall.Conversation(this, PersonFile.Player, vector, tag, 5, mentioned);
+                string menuText = cantAct == null ? ActionCatalog.DescribeMenu(menu) : $"(you can't do anything else right now: {cantAct})";
+                Send("chat", ChatMessages(situation, earlier, message, menuText, recall), ActionCatalog.ChatSchema(menu, recall.Shown), reply => OnChat(reply, menu, recall),
                     stillValid: () => pawn == null || pawn.Destroyed || pawn.Dead || !pawn.Spawned ? "gone" : null,
                     onError: error =>
                     {
@@ -538,32 +518,31 @@ namespace AIPawnControl
             });
         }
 
+        /// <summary>The Chat call's prompt: the conversation so far and the player's new message.</summary>
+        internal List<KeyValuePair<string, string>> ChatMessages(string situation, List<string> earlier, string message, string menu, Recall recall) =>
+            PromptBuilder.Build("chat", this, new Dictionary<string, string>
+            {
+                ["situation"] = situation,
+                ["history"] = earlier.Count > 0 ? string.Join("\n", earlier) : "(this is the start of the conversation)",
+                ["message"] = message,
+                ["menu"] = menu,
+            }, recall.Sections);
+
         private void OnChat(Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
         {
             chatThinking = false;
-            int memoryId = reply.TryGetValue("memory", out object m) && m is double md ? (int)md : 0;
-            recall.MarkUsed(this, memoryId, PersonFile.Player);
-            string text = SpeechLog.Clean(reply.TryGetValue("reply", out object r) ? r as string : null, ActionCatalog.MaxChatReply) ?? "...";
+            recall.MarkUsed(this, reply.Int("memory"), PersonFile.Player);
+            string text = SpeechLog.Clean(reply.Str("reply"), ActionCatalog.MaxChatReply) ?? "...";
             AddChat(ChatLine.From.Mind, text);
             memory.Record(pawn, "chat", null, $"I told the player: \"{text}\"", 3, MemoryEvent.TookPart, new[] { PersonFile.Player });
             lastChatTick = Find.TickManager.TicksGame;
             if (AIPawnControlMod.Settings.chatBubbles)
                 SpeechLog.Say(pawn, text);
 
-            int choice = reply.TryGetValue("act", out object a) && a is double d ? (int)d : 0;
-            var option = PausedReason(ignoreSleep: true) == null ? menu.FirstOrDefault(o => o.Id == choice) : null;
+            var option = PausedReason(ignoreSleep: true) == null ? menu.FirstOrDefault(o => o.Id == reply.Int("act")) : null;
             if (option == null)
                 return;
-            string result;
-            try
-            {
-                result = option.Apply(null);
-            }
-            catch (Exception e)
-            {
-                result = "That went wrong: " + e.Message;
-                ModLog.Error($"{pawn.LabelShort}: applying \"{option.Label}\" from chat threw: {e}");
-            }
+            string result = MindActions.Safely(pawn, option.Label, () => option.Apply(null));
             AddDecision($"Asked by the player: {option.Label}: {result}");
             ModLog.Message($"{pawn.LabelShort} chat act: {option.Label} | {result}");
         }
@@ -590,23 +569,22 @@ namespace AIPawnControl
             RequestPersona();
         }
 
-        private void RequestPersona()
+        private void RequestPersona() => Send("persona", PersonaMessages(), ActionCatalog.PersonaSchema(), OnPersona);
+
+        /// <summary>The Persona call's prompt: who she is from the game, and the player's note. No system prompt.</summary>
+        internal List<KeyValuePair<string, string>> PersonaMessages() => new List<KeyValuePair<string, string>>
         {
-            var values = new Dictionary<string, string>
+            new KeyValuePair<string, string>("user", Prompts.Fill("persona", new Dictionary<string, string>
             {
                 ["identity"] = SnapshotBuilder.Identity(pawn),
                 ["note"] = string.IsNullOrWhiteSpace(note) ? "(none)" : note,
-            };
-            var messages = new List<KeyValuePair<string, string>>
-            {
-                new KeyValuePair<string, string>("user", Prompts.Fill("persona", values)),
-            };
-            Send("persona", messages, ActionCatalog.PersonaSchema(), OnPersona);
-        }
+            })),
+        };
 
         private void OnPersona(Dictionary<string, object> reply)
         {
-            if (!(reply.TryGetValue("persona", out object p) && p is string text) || string.IsNullOrWhiteSpace(text))
+            string text = reply.Str("persona");
+            if (string.IsNullOrWhiteSpace(text))
             {
                 Fail("persona reply had no persona");
                 return;
@@ -614,7 +592,7 @@ namespace AIPawnControl
             bool first = !decisions.Any();
             persona = text.Trim();
             AddDecision(first ? "I got a mind of my own." : "Persona rewritten.");
-            string say = SpeechLog.Clean(reply.TryGetValue("say", out object sayRaw) ? sayRaw as string : null);
+            string say = SpeechLog.Clean(reply.Str("say"));
             if (first && say != null && AIPawnControlMod.Settings.speakLines)
             {
                 SpeechLog.Say(pawn, say);
@@ -626,14 +604,7 @@ namespace AIPawnControl
         // ---------- Nightly Reflect (PHASE3.md §4) ----------
 
         /// <summary>The night that began most recently at 22:00, as a local day index.</summary>
-        private int CurrentNight => NightOf(pawn.Map);
-
-        /// <summary>The night that began most recently at 22:00 on this map, as a local day index.</summary>
-        public static int NightOf(Map map)
-        {
-            int day = GenLocalDate.Year(map) * GenDate.DaysPerYear + GenLocalDate.DayOfYear(map);
-            return GenLocalDate.HourOfDay(map) >= 22 ? day : day - 1;
-        }
+        private int CurrentNight => GameTime.Night(pawn.Map);
 
         private bool IsNight
         {
@@ -725,21 +696,21 @@ namespace AIPawnControl
         private void SendReflect(Reflection reflection, int run, int night)
         {
             var messages = PromptBuilder.Build("reflect", this, reflection.PromptValues());
-            Send("reflect", messages, reflection.Schema(), reply =>
+            Send("reflect", messages, reflection.ReplySchema(), reply =>
                 {
                     if (run != reflectRun)
                         return;
                     reflection.Parse(reply);
-                    var texts = reflection.TextsToEmbed(out var reembed);
+                    var texts = reflection.TextsToEmbed();
                     if (texts.Count == 0)
                     {
-                        FinishReflect(reflection, null, reembed, night);
+                        FinishReflect(reflection, null, night);
                         return;
                     }
                     EmbedClient.Embed(texts, query: false, embedded =>
                     {
                         if (run == reflectRun)
-                            FinishReflect(reflection, embedded, reembed, night);
+                            FinishReflect(reflection, embedded, night);
                     });
                 },
                 stillValid: () =>
@@ -753,42 +724,11 @@ namespace AIPawnControl
                 maxTokens: ReflectTokens);
         }
 
-        private void FinishReflect(Reflection reflection, EmbedResult embedded, List<MemoryRecord> reembed, int night)
+        private void FinishReflect(Reflection reflection, EmbedResult embedded, int night)
         {
             reflecting = false;
-            string summary = reflection.Commit(embedded, reembed, night);
+            string summary = reflection.Commit(embedded, night);
             ModLog.Message($"{pawn.LabelShort} reflected{(reflection.Dev ? " (dev)" : "")}: {summary}");
-        }
-
-        /// <summary>Dev "Show retrieval": logs the ranked memories for her current situation, each score part, and what [On my mind] would get.</summary>
-        public void ShowRetrieval()
-        {
-            var present = Recall.Present(pawn);
-            string query = Recall.ActQuery(pawn, present);
-            Recall.WithQuery(this, query, (vector, tag) =>
-            {
-                var names = present.Select(p => p.LabelShort).ToList();
-                var watch = System.Diagnostics.Stopwatch.StartNew();
-                var ranked = Retrieval.Rank(memory, vector, tag, names, SnapshotBuilder.RoomLabel(pawn), names);
-                var picked = Retrieval.Pick(ranked, 2, Retrieval.MinOnMind);
-                double ms = watch.Elapsed.TotalMilliseconds;
-                int gap = Find.TickManager.TicksGame - memory.lastOnMindTick;
-                var toPlayer = Retrieval.Rank(memory, vector, tag, names.Concat(new[] { PersonFile.Player }).ToList(), null, new[] { PersonFile.Player });
-                ModLog.Message($"{pawn.LabelShort} retrieval for \"{query}\" (scored {memory.memories.Count} memories in {ms:0.00} ms; vector: {(vector != null ? tag : "none")}, " +
-                               $"[On my mind] {(gap >= Retrieval.OnMindGapTicks ? "allowed" : $"waits {(Retrieval.OnMindGapTicks - gap) / (float)GenDate.TicksPerHour:0.0}h")}, " +
-                               $"minimum {Retrieval.MinOnMind}):\n" +
-                               string.Join("\n", ranked.Take(10).Select(s => (picked.Contains(s) ? "* " : "  ") + s)) +
-                               $"\n{ranked.Count - Math.Min(10, ranked.Count)} more; * = would show\n" +
-                               "Same situation with the player as the audience (as in Chat):\n" + string.Join("\n", toPlayer.Take(10).Select(s => "  " + s)) +
-                               $"\nPenalised with {(names.Count > 0 ? string.Join(", ", names) : "nobody")} as the audience: " + Penalised(ranked) +
-                               "\nPenalised with the player as the audience: " + Penalised(toPlayer));
-            });
-        }
-
-        private static string Penalised(List<Retrieval.Scored> ranked)
-        {
-            var lines = ranked.Where(s => s.penalty > 0f).Select(s => $"M{s.memory.id} pen {s.penalty:0.00}").ToList();
-            return lines.Count > 0 ? string.Join(", ", lines) : "none";
         }
 
         private void CancelReflect()
@@ -802,9 +742,8 @@ namespace AIPawnControl
         /// <summary>Reflect's one work change (STREAMLINE.md §8): applied and remembered in her decisions.</summary>
         public void ChangeWork(WorkTypeDef work, string priority, string why)
         {
-            string result = MindActions.ChangePriority(pawn, work, priority);
-            bool applied = !result.StartsWith("I can't") && !result.EndsWith("where it is.");
-            AddDecision($"{result}{(why != null ? $" ({why})" : "")}", importance: applied ? 4 : 0);
+            string result = MindActions.ChangePriority(pawn, work, priority, out bool changed);
+            AddDecision($"{result}{(why != null ? $" ({why})" : "")}", importance: changed ? 4 : 0);
             ModLog.Message($"{pawn.LabelShort} work: {work.defName} to {priority} | {result} | why: {why}");
         }
 
@@ -863,8 +802,8 @@ namespace AIPawnControl
                     return;
                 }
                 failures = 0;
-                if (reply.TryGetValue("reason", out object reason) && reason is string r)
-                    lastReason = r.Trim();
+                if (reply.Str("reason") is string reason)
+                    lastReason = reason.Trim();
                 onReply(reply);
             });
             current = request;

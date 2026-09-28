@@ -98,10 +98,10 @@ namespace AIPawnControl
                 var talk = new ActOption { Id = options.Count + 1, Label = "talk to someone", IsTalk = true, TalkTargets = targets };
                 talk.ApplyReply = (reply, say) =>
                 {
-                    string name = reply.TryGetValue("with", out object w) ? w as string : null;
+                    string name = reply.Str("with");
                     Pawn target = targets.FirstOrDefault(p => p.LabelShort == name) ?? targets[0];
                     talk.Target = target;
-                    bool positive = (reply.TryGetValue("tone", out object t) ? t as string : null) != "negative";
+                    bool positive = reply.Str("tone") != "negative";
                     return MindActions.Talk(mind, target, positive, say);
                 };
                 options.Add(talk);
@@ -137,36 +137,23 @@ namespace AIPawnControl
 
         public static string DescribeMenu(List<ActOption> menu) => string.Join("\n", menu.Select(o => $"{o.Id}: {o.Label}"));
 
-        /// <summary>Looser than the 160 characters we show, because maxLength cuts mid-sentence (SpeechLog.Clean trims to a sentence end).</summary>
-        public static Dictionary<string, object> SaySchema() => new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 220 };
-
-        /// <summary>Caps rambling (a confused model once wrote 3,000 characters). Constrained decoding enforces it.</summary>
-        private static Dictionary<string, object> ReasonSchema() => new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 400 };
-
         /// <param name="memories">The memory ids shown in [On my mind]; "memory" names the one she drew on, or 0.</param>
         public static Dictionary<string, object> ActSchema(List<ActOption> menu, List<int> memories)
         {
-            var names = menu.FirstOrDefault(o => o.TalkTargets != null)?.TalkTargets.Select(p => (object)p.LabelShort).ToList() ?? new List<object>();
+            var names = menu.FirstOrDefault(o => o.TalkTargets != null)?.TalkTargets.Select(p => p.LabelShort).ToList() ?? new List<string>();
             names.Add(NoOne);
-            return new Dictionary<string, object>
+            return Schema.Obj(new Dictionary<string, object>
             {
-                ["type"] = "object",
-                ["properties"] = new Dictionary<string, object>
-                {
-                    ["reason"] = ReasonSchema(),
-                    ["choice"] = new Dictionary<string, object> { ["type"] = "integer", ["enum"] = menu.Select(o => (object)o.Id).ToList() },
-                    ["with"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = names },
-                    ["tone"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = Tones.Cast<object>().ToList() },
-                    ["say"] = SaySchema(),
-                    ["memory"] = MemorySchema(memories),
-                },
-                ["required"] = new List<object> { "reason", "choice", "with", "tone", "say", "memory" },
-                ["additionalProperties"] = false,
-            };
+                ["reason"] = Schema.Reason(),
+                ["choice"] = Schema.IntEnum(menu.Select(o => o.Id)),
+                ["with"] = Schema.StrEnum(names),
+                ["tone"] = Schema.StrEnum(Tones),
+                ["say"] = Schema.Say(),
+                ["memory"] = MemorySchema(memories),
+            });
         }
 
-        private static Dictionary<string, object> MemorySchema(List<int> memories) =>
-            new Dictionary<string, object> { ["type"] = "integer", ["enum"] = new List<object> { 0 }.Concat(memories.Select(id => (object)id)).ToList() };
+        private static Dictionary<string, object> MemorySchema(List<int> memories) => Schema.IntEnum(new[] { 0 }.Concat(memories));
 
         /// <summary>
         /// Never offered: their workers assume prisoners, slaves, animals, rituals or roles, or they change
@@ -233,29 +220,17 @@ namespace AIPawnControl
         /// Chat and Reply: an optional action from the current menu (0 = none), then what she says back. "act" comes first so
         /// the words are written knowing what she does (PHASE6.md §4.1). Anything for later is just what she said.
         /// </summary>
-        public static Dictionary<string, object> ChatSchema(List<ActOption> menu, List<int> memories) => new Dictionary<string, object>
+        public static Dictionary<string, object> ChatSchema(List<ActOption> menu, List<int> memories) => Schema.Obj(new Dictionary<string, object>
         {
-            ["type"] = "object",
-            ["properties"] = new Dictionary<string, object>
-            {
-                ["act"] = new Dictionary<string, object> { ["type"] = "integer", ["enum"] = new List<object> { 0 }.Concat(menu.Select(o => (object)o.Id)).ToList() },
-                ["reply"] = new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = MaxChatReply + 60 },
-                ["memory"] = MemorySchema(memories),
-            },
-            ["required"] = new List<object> { "act", "reply", "memory" },
-            ["additionalProperties"] = false,
-        };
+            ["act"] = Schema.IntEnum(new[] { 0 }.Concat(menu.Select(o => o.Id))),
+            ["reply"] = Schema.Str(MaxChatReply + 60),
+            ["memory"] = MemorySchema(memories),
+        });
 
-        public static Dictionary<string, object> PersonaSchema() => new Dictionary<string, object>
+        public static Dictionary<string, object> PersonaSchema() => Schema.Obj(new Dictionary<string, object>
         {
-            ["type"] = "object",
-            ["properties"] = new Dictionary<string, object>
-            {
-                ["persona"] = new Dictionary<string, object> { ["type"] = "string" },
-                ["say"] = SaySchema(),
-            },
-            ["required"] = new List<object> { "persona", "say" },
-            ["additionalProperties"] = false,
-        };
+            ["persona"] = Schema.Str(),
+            ["say"] = Schema.Say(),
+        });
     }
 }

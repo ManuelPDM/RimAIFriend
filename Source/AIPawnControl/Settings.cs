@@ -83,7 +83,7 @@ namespace AIPawnControl
             if (list.ButtonText("AIPawnControl_TestConnection".Translate()))
             {
                 testStatus = "AIPawnControl_Testing".Translate();
-                LlmTests.Ping(r => testStatus = r.Ok
+                LlmClient.Ping(r => testStatus = r.Ok
                     ? "AIPawnControl_TestOk".Translate(r.Seconds.ToString("0.0"), r.Content.Trim())
                     : "AIPawnControl_TestFailed".Translate(r.Error));
             }

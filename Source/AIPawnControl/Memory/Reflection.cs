@@ -129,18 +129,13 @@ namespace AIPawnControl
             return $"[{name}] " + string.Join("; ", sb);
         }
 
-        public Dictionary<string, object> Schema()
+        public Dictionary<string, object> ReplySchema()
         {
-            Dictionary<string, object> Str(int max) => new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = max + max / 5 };
-            Dictionary<string, object> Enum(IEnumerable<object> values) => new Dictionary<string, object> { ["enum"] = values.ToList() };
-            Dictionary<string, object> Obj(Dictionary<string, object> props) => new Dictionary<string, object>
-            {
-                ["type"] = "object",
-                ["properties"] = props,
-                ["required"] = props.Keys.Cast<object>().ToList(),
-                ["additionalProperties"] = false,
-            };
-            Dictionary<string, object> Arr(object items, int max) => new Dictionary<string, object> { ["type"] = "array", ["items"] = items, ["maxItems"] = max };
+            // maxLength a fifth over the text caps: it cuts mid-sentence, and Clean trims to the cap at a sentence end.
+            Dictionary<string, object> Str(int max) => Schema.Str(max + max / 5);
+            Dictionary<string, object> Enum(IEnumerable<object> values) => Schema.Enum(values);
+            Dictionary<string, object> Obj(Dictionary<string, object> props) => Schema.Obj(props);
+            Dictionary<string, object> Arr(object items, int max) => Schema.Arr(items, max);
             IEnumerable<object> Numbers(int count) => Enumerable.Range(0, count + 1).Cast<object>();
 
             var memory = Obj(new Dictionary<string, object>
@@ -207,12 +202,7 @@ namespace AIPawnControl
 
         private static readonly Regex NumberList = new Regex(@"\s*\([EMFG]\d+(\s*,\s*[EMFG]\d+)*\)|\s+[EMFG]\d+(\s*,\s*[EMFG]\d+)*\s*$");
 
-        private static string Clean(object raw, int max) => SpeechLog.Clean(raw is string s ? NumberList.Replace(s, "") : null, max); // "(E4, M1)" or a trailing "E6, E7" belongs in "events"/"id"
-
-        private static int Int(Dictionary<string, object> d, string key) => d.TryGetValue(key, out object v) && v is double n ? (int)n : 0;
-
-        private static List<Dictionary<string, object>> List(Dictionary<string, object> d, string key) =>
-            d.TryGetValue(key, out object v) && v is List<object> list ? list.OfType<Dictionary<string, object>>().ToList() : new List<Dictionary<string, object>>();
+        private static string Clean(string raw, int max) => SpeechLog.Clean(raw != null ? NumberList.Replace(raw, "") : null, max); // "(E4, M1)" or a trailing "E6, E7" belongs in "events"/"id"
 
         /// <summary>
         /// Reads the reply with the code-side guards: a memory needs at least one real event (no evidence, no memory),
@@ -221,16 +211,15 @@ namespace AIPawnControl
         /// </summary>
         public void Parse(Dictionary<string, object> reply)
         {
-            diary = Clean(reply.TryGetValue("diary", out object d) ? d : null, MaxDiary);
-            newLately = Clean(reply.TryGetValue("lately", out object l) ? l : null, MindMemory.MaxLately);
-            foreach (var m in List(reply, "memories"))
+            diary = Clean(reply.Str("diary"), MaxDiary);
+            newLately = Clean(reply.Str("lately"), MindMemory.MaxLately);
+            foreach (var m in reply.Objects("memories"))
             {
-                var ids = (m.TryGetValue("events", out object e) && e is List<object> list ? list : new List<object>())
-                    .OfType<double>().Select(n => (int)n - 1).Where(i => i >= 0 && i < events.Count).Distinct()
+                var ids = m.Ints("events").Select(n => n - 1).Where(i => i >= 0 && i < events.Count).Distinct()
                     .Select(i => events[i].id).ToList();
-                string text = Clean(m.TryGetValue("text", out object t) ? t : null, MaxMemoryText);
-                int shownIndex = Int(m, "id") - 1;
-                bool update = (m.TryGetValue("op", out object op) ? op as string : null) == "update";
+                string text = Clean(m.Str("text"), MaxMemoryText);
+                int shownIndex = m.Int("id") - 1;
+                bool update = m.Str("op") == "update";
                 if (ids.Count == 0 || text == null || (update && (shownIndex < 0 || shownIndex >= shown.Count)))
                 {
                     dropped++;
@@ -246,53 +235,59 @@ namespace AIPawnControl
                 {
                     target = update ? shown[shownIndex] : null,
                     text = text,
-                    importance = Math.Max(Math.Max(1, Math.Min(10, Int(m, "importance"))), prior - 2),
+                    importance = Math.Max(Math.Max(1, Math.Min(10, m.Int("importance"))), prior - 2),
                     eventIds = ids,
                 });
             }
-            foreach (var p in List(reply, "people"))
-                if (p.TryGetValue("name", out object n) && n is string name && names.Contains(name))
+            foreach (var p in reply.Objects("people"))
+                if (p.Str("name") is string name && names.Contains(name))
                     personOps.Add((name, p));
             workChange = WorkChange(reply);
         }
 
-        /// <summary>Texts to embed after the call: the drafts, the diary, then older memories without a current vector.</summary>
-        public List<string> TextsToEmbed(out List<MemoryRecord> reembed)
-        {
-            string model = AIPawnControlMod.Settings.embedModel;
-            var draftTargets = new HashSet<MemoryRecord>(drafts.Where(x => x.target != null).Select(x => x.target));
-            reembed = Memory.memories
-                .Where(m => !m.archived && !draftTargets.Contains(m) && (m.vector == null || m.vectorTag == null || !m.vectorTag.StartsWith(model + "|")))
-                .Take(MaxReembed).ToList();
-            var texts = drafts.Select(x => x.text).ToList();
-            if (diary != null)
-                texts.Add(diary);
-            texts.AddRange(reembed.Select(m => m.text));
-            // Person-file facts: the new ones, and the open ones in the files she's updating that have no current vector.
-            newFacts = personOps.SelectMany(op => List(op.item, "facts"))
-                .Where(f => (f.TryGetValue("op", out object o) ? o as string : null) == "add")
-                .Select(f => Clean(f.TryGetValue("text", out object x) ? x : null, MaxFactText)).Where(t => t != null).Distinct().ToList();
-            factsToEmbed = personOps.Select(op => Memory.File(op.name, create: false)).Where(f => f != null).Distinct()
-                .SelectMany(f => f.facts).Where(f => f.Open && (f.vector == null || f.vectorTag == null || !f.vectorTag.StartsWith(model + "|"))).ToList();
-            texts.AddRange(newFacts);
-            texts.AddRange(factsToEmbed.Select(f => f.text));
-            return texts;
-        }
-
-        private List<string> newFacts = new List<string>();
-        private List<Fact> factsToEmbed = new List<Fact>();
+        /// <summary>A text to embed after the call, and where its vector goes (the vector and its tag).</summary>
+        private readonly List<(string text, Action<float[], string> store)> toEmbed = new List<(string, Action<float[], string>)>();
+        private float[] diaryVector;
         private readonly Dictionary<string, string> newFactVectors = new Dictionary<string, string>();
         private string factTag;
         private int factsMerged;
 
+        /// <summary>
+        /// Texts to embed after the call: the drafts, the diary, older memories without a current vector, new person-file
+        /// facts, and open facts in the files she's updating that have no current vector. Commit stores each vector where it goes.
+        /// </summary>
+        public List<string> TextsToEmbed()
+        {
+            string model = AIPawnControlMod.Settings.embedModel;
+            bool Stale(string tag) => tag == null || !tag.StartsWith(model + "|");
+            toEmbed.Clear();
+            foreach (var draft in drafts)
+                toEmbed.Add((draft.text, (v, tag) => draft.vector = v));
+            if (diary != null)
+                toEmbed.Add((diary, (v, tag) => diaryVector = v));
+            var draftTargets = new HashSet<MemoryRecord>(drafts.Where(x => x.target != null).Select(x => x.target));
+            foreach (var m in Memory.memories.Where(m => !m.archived && !draftTargets.Contains(m) && (m.vector == null || Stale(m.vectorTag))).Take(MaxReembed))
+                toEmbed.Add((m.text, (v, tag) => { m.vector = Embedding.Pack(v); m.vectorTag = tag; }));
+            foreach (var text in personOps.SelectMany(op => op.item.Objects("facts")).Where(f => f.Str("op") == "add")
+                         .Select(f => Clean(f.Str("text"), MaxFactText)).Where(t => t != null).Distinct())
+                toEmbed.Add((text, (v, tag) => newFactVectors[text] = Embedding.Pack(v)));
+            foreach (var fact in personOps.Select(op => Memory.File(op.name, create: false)).Where(f => f != null).Distinct()
+                         .SelectMany(f => f.facts).Where(f => f.Open && (f.vector == null || Stale(f.vectorTag))))
+                toEmbed.Add((fact.text, (v, tag) => { fact.vector = Embedding.Pack(v); fact.vectorTag = tag; }));
+            return toEmbed.Select(x => x.text).ToList();
+        }
+
         /// <summary>Applies everything. With vectors, memories that say the same thing are then merged (MindMemory.Consolidate).</summary>
-        public string Commit(EmbedResult embedded, List<MemoryRecord> reembed, int night)
+        public string Commit(EmbedResult embedded, int night)
         {
             int now = Find.TickManager.TicksGame;
             bool haveVectors = embedded != null && embedded.Ok;
             if (haveVectors)
-                for (int i = 0; i < drafts.Count; i++)
-                    drafts[i].vector = embedded.Vectors[i];
+            {
+                for (int i = 0; i < toEmbed.Count; i++)
+                    toEmbed[i].store(embedded.Vectors[i], embedded.Tag);
+                factTag = embedded.Tag;
+            }
             int merged = 0;
             foreach (var draft in drafts)
             {
@@ -316,34 +311,11 @@ namespace AIPawnControl
             }
 
             if (diary != null)
-            {
-                var entry = new DiaryEntry { tick = now, text = diary };
-                if (haveVectors)
+                Memory.diary.Add(new DiaryEntry
                 {
-                    entry.vector = Embedding.Pack(embedded.Vectors[drafts.Count]);
-                    entry.vectorTag = embedded.Tag;
-                }
-                Memory.diary.Add(entry);
-            }
-            if (haveVectors)
-            {
-                int offset = drafts.Count + (diary != null ? 1 : 0);
-                for (int i = 0; i < reembed.Count; i++)
-                {
-                    reembed[i].vector = Embedding.Pack(embedded.Vectors[offset + i]);
-                    reembed[i].vectorTag = embedded.Tag;
-                }
-                offset += reembed.Count;
-                for (int i = 0; i < newFacts.Count; i++)
-                    newFactVectors[newFacts[i]] = Embedding.Pack(embedded.Vectors[offset + i]);
-                offset += newFacts.Count;
-                for (int i = 0; i < factsToEmbed.Count; i++)
-                {
-                    factsToEmbed[i].vector = Embedding.Pack(embedded.Vectors[offset + i]);
-                    factsToEmbed[i].vectorTag = embedded.Tag;
-                }
-                factTag = embedded.Tag;
-            }
+                    tick = now, text = diary,
+                    vector = diaryVector != null ? Embedding.Pack(diaryVector) : null, vectorTag = diaryVector != null ? embedded.Tag : null,
+                });
             if (haveVectors)
                 merged = Memory.Consolidate(embedded.Tag); // new, updated and old memories that say the same thing become one
             if (newLately != null)
@@ -365,31 +337,32 @@ namespace AIPawnControl
 
         private (WorkTypeDef, string, string) WorkChange(Dictionary<string, object> reply)
         {
-            if (!(reply.TryGetValue("work", out object o) && o is Dictionary<string, object> item))
+            var item = reply.Obj("work");
+            if (item == null)
                 return (null, null, null);
-            string label = item.TryGetValue("type", out object t) ? t as string : null;
-            string change = item.TryGetValue("priority", out object c) ? c?.ToString() : null;
+            string label = item.Str("type");
+            string change = item.TryGetValue("priority", out object c) ? c?.ToString() : null; // "1"-"4" or "off"; a bare number reads the same
             var type = workTypes.FirstOrDefault(w => w.labelShort == label);
-            return type != null && MindActions.Priorities.Contains(change) ? (type, change, Clean(item.TryGetValue("why", out object y) ? y : null, MaxWhy)) : (null, null, null);
+            return type != null && MindActions.Priorities.Contains(change) ? (type, change, Clean(item.Str("why"), MaxWhy)) : (null, null, null);
         }
 
         private void ApplyPerson(PersonFile file, Dictionary<string, object> item, int now)
         {
-            string impression = Clean(item.TryGetValue("impression", out object i) ? i : null, MaxImpression);
+            string impression = Clean(item.Str("impression"), MaxImpression);
             if (impression != null)
                 file.impression = impression;
-            if (item.TryGetValue("threads", out object t) && t is string threads)
+            if (item.Str("threads") is string threads)
                 file.threads = Clean(threads, MaxThreads) ?? "";
             var open = file.facts.Where(f => f.Open).ToList();
-            foreach (var fact in List(item, "facts"))
+            foreach (var fact in item.Objects("facts"))
             {
-                string op = fact.TryGetValue("op", out object o) ? o as string : null;
-                int id = Int(fact, "id");
+                string op = fact.Str("op");
+                int id = fact.Int("id");
                 if (op == "end" && id >= 1 && id <= open.Count)
                     open[id - 1].until = now;
                 else if (op == "add")
                 {
-                    string text = Clean(fact.TryGetValue("text", out object x) ? x : null, MaxFactText);
+                    string text = Clean(fact.Str("text"), MaxFactText);
                     if (text == null)
                         continue;
                     newFactVectors.TryGetValue(text, out string vector);
@@ -398,20 +371,10 @@ namespace AIPawnControl
                         factsMerged++;
                         continue;
                     }
-                    file.facts.Add(new Fact { text = text, source = fact.TryGetValue("source", out object s) ? s as string : MemoryEvent.Told, since = now,
+                    file.facts.Add(new Fact { text = text, source = fact.Str("source") ?? MemoryEvent.Told, since = now,
                                               vector = vector, vectorTag = vector != null ? factTag : null });
                 }
             }
-            // Open facts that already repeat each other (older saves): the first one stays.
-            var withVectors = file.facts.Where(f => f.Open && f.vectorTag == factTag && f.vector != null).ToList();
-            for (int a = 0; a < withVectors.Count; a++)
-                for (int j = withVectors.Count - 1; j > a; j--)
-                    if (Embedding.Cosine(Embedding.Unpack(withVectors[a].vector), Embedding.Unpack(withVectors[j].vector)) >= MindMemory.SameMemoryCosine)
-                    {
-                        file.facts.Remove(withVectors[j]);
-                        withVectors.RemoveAt(j);
-                        factsMerged++;
-                    }
             while (file.facts.Count > PersonFile.MaxFacts)
                 file.facts.Remove(file.facts.FirstOrDefault(f => !f.Open) ?? file.facts[0]);
         }

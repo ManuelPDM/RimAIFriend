@@ -45,31 +45,34 @@ namespace AIPawnControl
         public CellRect footprint;
         public IntVec3 door, doorOutside, doorInside;
         public HashSet<IntVec3> reusedWalls = new HashSet<IntVec3>();
+        public List<IntVec3> broughtIn = new List<IntVec3>(); // existing doors in its ring that now open into it (a hub), or other doors of the room (an upgrade)
         public List<PlanEntry> entries = new List<PlanEntry>();
 
         // Scoring and description inputs, filled by the site finder.
         public int walk;
         public int sharedSides;
-        public int trees, plants, items;
-        public bool inHome;
+        public int trees, items;
         public float score;
-        public Dictionary<string, float> terms = new Dictionary<string, float>();
+        public int waysOutSaved; // a hub's
 
-        public string TermsText()
+        /// <summary>The cell inside each of its doors, its own first: nothing may stand there.</summary>
+        public List<IntVec3> DoorsInside
         {
-            var parts = new List<string>();
-            foreach (var kv in terms)
-                if (kv.Value != 0f)
-                    parts.Add($"{kv.Key} {kv.Value:+0.#;-0.#}");
-            return $"score {score:0.0} = " + string.Join(", ", parts);
+            get
+            {
+                var cells = new List<IntVec3> { doorInside };
+                foreach (var d in broughtIn)
+                    foreach (var dir in GenAdj.CardinalDirections)
+                        if (Interior.Contains(d + dir))
+                            cells.Add(d + dir);
+                return cells;
+            }
         }
 
         public CellRect Interior => footprint.ContractedBy(1);
         public int Width => footprint.Width - 2;
         public int Height => footprint.Height - 2;
         public string SizeLabel => $"{Width}×{Height}";
-
-        public PlanEntry Find(ThingDef def) => entries.Find(e => e.def == def);
 
         public IEnumerable<PlanEntry> Furniture
         {
@@ -81,8 +84,8 @@ namespace AIPawnControl
             }
         }
 
-        /// <summary>Walls and the door: cells a flood fill can't pass. Reused walls included.</summary>
-        public bool IsRingSolid(IntVec3 c) => footprint.IsOnEdge(c) && (reusedWalls.Contains(c) || entries.Exists(e => e.cell == c && (e.def == ThingDefOf.Wall || e.def == ThingDefOf.Door)));
+        /// <summary>A wall of the finished room, new or reused: what people can't walk through once it's built.</summary>
+        public bool IsWall(IntVec3 c) => footprint.IsOnEdge(c) && (reusedWalls.Contains(c) || entries.Exists(e => e.cell == c && e.def == ThingDefOf.Wall));
 
         /// <summary>The material each entry would use: the chosen one where the def allows it, else the allowed one storage has most of (leather for a couch when there's no cloth), else vanilla's default.</summary>
         public static ThingDef StuffFor(ThingDef def, ThingDef material, Map map = null)

@@ -192,7 +192,7 @@ namespace AIPawnControl
                 .OrderByDescending(e => e.importance).ThenByDescending(e => e.lastTick)
                 .Take(max)
                 .OrderBy(e => e.tick)
-                .Select(e => $"{SnapshotBuilder.DayLabel(e.tick, map)} {e.Clock(map)} {e.Text}")
+                .Select(e => $"{GameTime.DayLabel(e.tick, map)} {GameTime.Clock(e.tick, map)} {e.Text}")
                 .ToList();
             return top.Count > 0 ? string.Join(" · ", top) : null;
         }

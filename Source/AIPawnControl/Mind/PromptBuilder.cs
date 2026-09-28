@@ -46,14 +46,15 @@ namespace AIPawnControl
             new Section("About", cap: 700, drop: 2, labelled: true),
             new Section("On my mind", cap: 600, drop: 3),
             new Section("I remember", cap: 1200, drop: 4),
+            new Section("From my diary", cap: 400, drop: 5),
         }).ToArray();
 
         // Which sections each call type gets. The call type is also the name of its task template in Prompts/.
         private static readonly Dictionary<string, HashSet<string>> Recipes = new Dictionary<string, HashSet<string>>
         {
             ["act"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "On my mind" },
-            ["chat"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember" },
-            ["reply"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember" }, // Chat, with a colonist in the player's place
+            ["chat"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember", "From my diary" },
+            ["reply"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember", "From my diary" }, // Chat, with a colonist in the player's place
             ["base"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
             ["reflect"] = new HashSet<string> { "Me", "Time" }, // its events and people come in the task values
             ["upgrade"] = new HashSet<string> { "Me", "Time", "Condition", "Feelings" }, // small: the Base call just picked the room
@@ -73,7 +74,7 @@ namespace AIPawnControl
                     texts[pair.Key] = pair.Value;
             var values = new Dictionary<string, string>(task)
             {
-                ["time"] = SnapshotBuilder.TimeString(mind.pawn.Map),
+                ["time"] = GameTime.Now(mind.pawn.Map),
                 ["snapshot"] = Context(call, texts),
             };
             return new List<KeyValuePair<string, string>>

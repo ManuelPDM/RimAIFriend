@@ -40,8 +40,8 @@ namespace AIPawnControl
             Map map = pawn.Map;
             var busy = new HashSet<Room>(BuildManager.Instance?.ActiveOnAll(map).Select(p => p.Room).Where(r => r != null) ?? Enumerable.Empty<Room>());
             return map.regionGrid.AllRooms
-                .Where(r => r.ProperRoom && !r.PsychologicallyOutdoors && !r.Fogged && r.OpenRoofCount == 0 && r.Role != null
-                            && r.Role != RoomRoleDefOf.None && !busy.Contains(r) && SnapshotBuilder.Furniture(r).Any(t => t.Faction == Faction.OfPlayer))
+                .Where(r => Ground.Indoor(r) && r.ProperRoom && !r.Fogged && r.OpenRoofCount == 0 && Ground.AnyRole(r)
+                            && !busy.Contains(r) && SnapshotBuilder.Furniture(r).Any(t => t.Faction == Faction.OfPlayer))
                 .OrderByDescending(r => r.Owners.Contains(pawn))
                 .ToList();
         }
@@ -433,7 +433,9 @@ namespace AIPawnControl
                 return null;
             IntVec3 door = doors[0];
             Rot4 side = SiteFinder.SideOf(footprint, door);
+            // Every door counts, not just the first: nothing right inside one, and the walk between each pair stays clear.
             var plan = new RoomPlan { map = map, footprint = footprint, door = door, doorInside = door - side.FacingCell, doorOutside = door + side.FacingCell };
+            plan.broughtIn.AddRange(doors.Skip(1));
             var existing = ctx.things.Where(t => interior.Contains(t.Position))
                 .Select(t => new PlanEntry(t is Blueprint || t is Frame ? (ThingDef)t.def.entityDefToBuild : t.def, t.Position, t.Rotation)).ToList();
             PlanEntry next = anchor != null ? existing.Find(e => e.cell == anchor.Position)

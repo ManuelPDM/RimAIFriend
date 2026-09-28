@@ -24,7 +24,7 @@ namespace AIPawnControl
         public readonly IntVec3 center;
         public readonly int colonists;
         public readonly float foodDays; // -1 = unknown (no storage yet)
-        private int[] walk;
+        private Flood walk;
 
         public ChoreScan(Pawn pawn)
         {
@@ -43,7 +43,7 @@ namespace AIPawnControl
         {
             if (walk == null)
                 walk = SiteFinder.Walk(map, center, int.MaxValue);
-            return c.InBounds(map) ? walk[c.z * map.Size.x + c.x] : -1;
+            return walk[c];
         }
 
         public static string Near(int steps) => steps <= 20 ? "right by the base" : steps <= 45 ? "near the base" : steps <= 100 ? "a walk from the base" : "far from the base";
@@ -89,21 +89,6 @@ namespace AIPawnControl
             Try(Chore.Kind.Hunt, Hunting.Options);
             Try(Chore.Kind.Gather, WildFood.Options);
             return options.OrderByDescending(o => o.useful).ToList();
-        }
-
-        /// <summary>"call off my tree cutting": the words for her own stop (dev tool).</summary>
-        public static string StopLabel(Chore chore)
-        {
-            switch (chore.kind)
-            {
-                case Chore.Kind.Hunt: return "call off my hunt: " + chore.label;
-                case Chore.Kind.Cut: return "call off my tree cutting";
-                case Chore.Kind.Gather: return "call off my wild food gathering";
-                case Chore.Kind.Mine: return "call off my mining: " + chore.label;
-                case Chore.Kind.Bill: return "cancel my order: " + chore.label;
-                case Chore.Kind.Field: return "remove my field: " + chore.label;
-                default: return "remove my stockpile: " + chore.label;
-            }
         }
 
         /// <summary>Why nothing could be marked: another mind got there first, or the given reason.</summary>

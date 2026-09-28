@@ -9,7 +9,7 @@ namespace AIPawnControl
 {
     /// <summary>
     /// The Base call (STREAMLINE.md §5): after she picks "work on the base", code lists what the base could get now, in
-    /// groups (the ladder's next rung, food, stock-ups, other rooms), each with code's amounts and sizes. She
+    /// groups (the ladder's next rung, the layout, food, stock-ups, other rooms), each with code's amounts and sizes. She
     /// picks one, plus a site and a material for a room, and makes one remark; code applies it. The call is free: picking
     /// the menu line was the decision.
     /// </summary>
@@ -17,8 +17,11 @@ namespace AIPawnControl
     {
         private const int MaxStockUps = 7;
         private const int MaxPerKind = 2;
+        private const string None = "-";
+        private static readonly string[] GroupOrder = { "Next for the base", "Inside the base", "Food", "Storage", "Stock up", "Other rooms" };
 
-        private class Choice
+        /// <summary>One numbered line. Exactly one of kind, layout, crop, upgrade, pile or chore is set.</summary>
+        internal class Choice
         {
             public string group;
             public string label;
@@ -28,9 +31,23 @@ namespace AIPawnControl
             public Room upgrade;          // a room to upgrade: the Upgrade call follows
             public ThingDef crop;         // a field
             public CellRect field;
-            public string fieldWhere;
+            public string where;          // a field's or stockpile's place in words
             public CellRect pile;         // a stockpile, when the colony has none
-            public Func<Pawn, ThingDef, string> layout; // a common room, a door between rooms, a way out closed (BASE_LAYOUT.md)
+            public Func<Pawn, ThingDef, string> layout; // a hub, a door between rooms, a way out closed (BASE_LAYOUT.md)
+        }
+
+        /// <summary>The call, built but not sent: its prompt, schema and what each number means.</summary>
+        public class Prepared
+        {
+            internal List<Choice> choices = new List<Choice>();
+            internal List<RoomPlan> sites = new List<RoomPlan>();
+            internal List<string> letters = new List<string>();
+            internal List<ThingDef> materials = new List<ThingDef>();
+            internal bool noSites; // a room could have been planned, but no site was found
+            public List<KeyValuePair<string, string>> messages;
+            public Dictionary<string, object> schema;
+            public int Count => choices.Count;
+            public IEnumerable<string> Labels => choices.Select(c => $"{c.group}: {c.label}");
         }
 
         /// <summary>Whether the Act menu offers "work on the base": a room can be planned, or there's anything to stock up or grow.</summary>
@@ -76,9 +93,30 @@ namespace AIPawnControl
         public static string Start(PawnMind mind, bool dev = false)
         {
             Pawn pawn = mind.pawn;
-            Map map = pawn.Map;
             var clock = Stopwatch.StartNew();
-            var choices = new List<Choice>();
+            var call = Prepare(mind, dev);
+            if (call.noSites && !dev)
+                BuildManager.Instance.EmptyScan(pawn);
+            if (call.Count == 0)
+            {
+                if (!dev)
+                    mind.GiveBackAct();
+                return "There's nothing I can do for the base right now.";
+            }
+            Map map = pawn.Map;
+            ModLog.Message($"{pawn.LabelShort}: base call with {call.Count} choices ({clock.ElapsedMilliseconds} ms to build).");
+            mind.Send("base", call.messages, call.schema, reply => OnReply(mind, reply, call),
+                stillValid: () => pawn.Destroyed || pawn.Dead || !pawn.Spawned || pawn.Map != map ? "gone" : null);
+            return "Thinking about what the base needs.";
+        }
+
+        /// <summary>The choices, prompt and schema, without sending anything or changing the map.</summary>
+        public static Prepared Prepare(PawnMind mind, bool dev)
+        {
+            Pawn pawn = mind.pawn;
+            Map map = pawn.Map;
+            var call = new Prepared();
+            var choices = call.choices;
             var manager = BuildManager.Instance;
             bool canPlan = manager != null && (manager.CantPlanReason(pawn) == null
                                                || (dev && AIPawnControlMod.Settings.allowBuilding && manager.ActiveProject(pawn) == null));
@@ -89,36 +127,32 @@ namespace AIPawnControl
                 : rung.waiting != null ? $"Next for the base: {rung.label} ({rung.waiting})."
                 : $"Next for the base: {rung.label}.";
             SiteFinder finder = null;
-            RoomValidator validator = null;
-            var sites = new List<RoomPlan>();
-            var materials = new List<ThingDef>();
             string materialsLine = null;
             if (canPlan)
             {
                 finder = new SiteFinder(map, SiteFinder.BaseCenter(map));
                 var had = Supplies.WallMaterials(pawn);
-                materials = had.Select(m => m.stuff).ToList();
+                call.materials = had.Select(m => m.stuff).ToList();
                 materialsLine = Supplies.WallMaterialsLine(had);
-                validator = new RoomValidator(map, finder.center, finder.weights.maxWalk);
-                sites = finder.Sites(validator, materials[0], out _);
-                if (sites.Count == 0)
+                var validator = new RoomValidator(map, finder.center, finder.weights.maxWalk);
+                call.sites = finder.Sites(validator, call.materials[0], out _);
+                if (call.sites.Count == 0)
                 {
-                    manager.EmptyScan(pawn);
+                    call.noSites = true;
                     rungText += " There's no space for a new room near the base.";
                 }
+                else
+                {
+                    if (rung?.kind != null && rung.waiting == null
+                        && RoomChoice(rung.kind, SizeFor(rung.kind, map), "Next for the base", rung.label, finder, validator, call.sites, call.materials) is Choice next)
+                        choices.Add(next);
+                    foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => k != rung?.kind && OtherRoom(k, pawn)))
+                        if (RoomChoice(kind, SizeFor(kind, map), "Other rooms", kind == RoomKindDef.Bedroom ? "my own bedroom" : null, finder, validator, call.sites, call.materials) is Choice other)
+                            choices.Add(other);
+                }
+                // Fewer ways out (BASE_LAYOUT.md §5.7): the rung as a hub, a hall, a closed way out, a door between rooms.
+                choices.AddRange(Layout.Options(map, rung, finder, validator, call.materials).Select(o => new Choice { group = o.group, label = o.label, layout = o.apply }));
             }
-            if (sites.Count > 0)
-            {
-                if (rung != null && rung.kind != null && rung.waiting == null && RoomChoice(rung.kind, SizeFor(rung.kind, map), "Next for the base", rung.label, finder, validator, sites, materials) is Choice next)
-                    choices.Add(next);
-                foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => k != rung?.kind && OtherRoom(k, pawn)))
-                    if (RoomChoice(kind, SizeFor(kind, map), "Other rooms", kind == RoomKindDef.Bedroom ? "my own bedroom" : null, finder, validator, sites, materials) is Choice other)
-                        choices.Add(other);
-            }
-
-            // Fewer ways out (BASE_LAYOUT.md §5.7): the rung as a common room, a plain common room, a closed way out, a door between rooms.
-            if (canPlan)
-                choices.AddRange(Layout.Options(map, rung).Select(o => new Choice { group = o.group, label = o.label, layout = o.apply }));
 
             // Food: a field only when the outlook falls short (STREAMLINE.md §6).
             var outlook = FoodOutlook.For(map);
@@ -133,8 +167,14 @@ namespace AIPawnControl
                     .Select(o => new Choice { group = "Stock up", label = o.label, chore = o }));
 
             if (AIPawnControlMod.Settings.allowChores && ChoreManager.Instance != null && map.haulDestinationManager.AllGroupsListForReading.Count == 0
-                && PileChoice(pawn) is Choice pile)
-                choices.Add(pile);
+                && Stockpiles.FindSite(pawn, out CellRect pile, out string pileWhere))
+                choices.Add(new Choice
+                {
+                    group = "Storage",
+                    label = $"a stockpile for everything ({pile.Width}x{pile.Height}, {pileWhere}): there's none yet, so nothing is stored or counted",
+                    pile = pile,
+                    where = pileWhere,
+                });
 
             // Past the early base, the ladder's last rung is the room most worth upgrading (the only way upgrades are
             // offered); the Upgrade call offers the concrete upgrades.
@@ -148,45 +188,45 @@ namespace AIPawnControl
                 rungText = rungText.TrimEnd('.') + ", " + blocker + ".";
 
             if (choices.Count == 0)
-            {
-                if (!dev)
-                    mind.GiveBackAct();
-                return "There's nothing I can do for the base right now.";
-            }
+                return call;
             // Numbered in group order, so the list reads as groups.
-            string[] order = { "Next for the base", "Inside the base", "Food", "Storage", "Stock up", "Other rooms" };
-            choices = choices.OrderBy(c => Array.IndexOf(order, c.group)).ToList();
+            call.choices = choices.OrderBy(c => Array.IndexOf(GroupOrder, c.group)).ToList();
             var lines = new List<string>();
             string lastGroup = null;
-            for (int i = 0; i < choices.Count; i++)
+            for (int i = 0; i < call.choices.Count; i++)
             {
-                if (choices[i].group != lastGroup)
-                    lines.Add(choices[i].group);
-                lastGroup = choices[i].group;
-                lines.Add($" {i + 1}: {choices[i].label}");
+                if (call.choices[i].group != lastGroup)
+                    lines.Add(call.choices[i].group);
+                lastGroup = call.choices[i].group;
+                lines.Add($" {i + 1}: {call.choices[i].label}");
             }
-            bool anyRoom = choices.Any(c => c.kind != null);
-            bool walls = anyRoom || choices.Any(c => c.layout != null);
-            var letters = anyRoom ? sites.Select((s, i) => ((char)('A' + i)).ToString()).ToList() : new List<string>();
+            bool anyRoom = call.choices.Any(c => c.kind != null);
+            bool walls = anyRoom || call.choices.Any(c => c.layout != null);
+            if (anyRoom)
+                call.letters = call.sites.Select((s, i) => ((char)('A' + i)).ToString()).ToList();
             string rooms = (anyRoom
-                ? "Sites for a room (walls and door cost at 5x5):\n" + string.Join("\n", sites.Select((s, i) => finder.Describe(s, letters[i][0], materials, finder.MaxFit(s)))) + "\n"
+                ? "Sites for a room (walls and door cost at 5x5):\n" + string.Join("\n", call.sites.Select((s, i) => finder.Describe(s, call.letters[i][0], call.materials, finder.MaxFit(s)))) + "\n"
                 : "")
                 + (walls ? $"Wall materials: {materialsLine}. The colony marks trees or ore for what's missing, but only what's nearby can be had." : "");
-            var messages = PromptBuilder.Build("base", mind, new Dictionary<string, string>
+            call.messages = PromptBuilder.Build("base", mind, new Dictionary<string, string>
             {
                 ["rung"] = rungText,
                 ["options"] = string.Join("\n", lines),
                 ["rooms"] = rooms,
             });
-            var schema = Schema(choices.Count, letters, walls ? materials.Select(m => m.label).ToList() : new List<string>());
-            ModLog.Message($"{pawn.LabelShort}: base call with {choices.Count} choices ({clock.ElapsedMilliseconds} ms to build).");
-            mind.Send("base", messages, schema, reply => OnReply(mind, reply, choices, sites, letters, materials),
-                stillValid: () => pawn.Destroyed || pawn.Dead || !pawn.Spawned || pawn.Map != map ? "gone" : null);
-            return "Thinking about what the base needs.";
+            call.schema = Schema.Obj(new Dictionary<string, object>
+            {
+                ["reason"] = Schema.Reason(),
+                ["choice"] = Schema.Pick(call.Count),
+                ["site"] = Schema.StrEnum(call.letters.Append(None)),
+                ["material"] = Schema.StrEnum((walls ? call.materials.Select(m => m.label) : Enumerable.Empty<string>()).Append(None)),
+                ["say"] = Schema.Say(),
+            });
+            return call;
         }
 
         /// <summary>Code's size for a kind (STREAMLINE.md §7): the kind's own, and a barracks sized to the beds missing.</summary>
-        private static (int w, int h) SizeFor(RoomKindDef kind, Map map)
+        public static (int w, int h) SizeFor(RoomKindDef kind, Map map)
         {
             if (kind.defName == "AIPC_Barracks")
                 return Ladder.Sleepers(map).Count - Ladder.BedSlots(map) > 4 ? (6, 6) : (5, 5);
@@ -197,7 +237,7 @@ namespace AIPawnControl
         private static bool OtherRoom(RoomKindDef kind, Pawn pawn)
         {
             Map map = pawn.Map;
-            if (kind == RoomKindDef.Plain || !kind.BuildableNow(map) || kind.defName == "AIPC_Barracks")
+            if (kind == RoomKindDef.Plain || kind.layout || !kind.BuildableNow(map) || kind.defName == "AIPC_Barracks")
                 return false;
             if (kind.owned)
                 return pawn.ownership?.OwnedRoom == null;
@@ -205,10 +245,10 @@ namespace AIPawnControl
                 return false;
             if (kind.items.Any(i => i.preferNew) && kind.items.Where(i => i.preferNew).All(i => i.Resolve(map) is ThingDef def && !map.listerBuildings.ColonistsHaveBuilding(def)))
                 return true;
-            return kind.role != null && !map.regionGrid.AllRooms.Any(r => r.Role == kind.role && !r.PsychologicallyOutdoors);
+            return kind.role != null && !map.regionGrid.AllRooms.Any(r => r.Role == kind.role && Ground.Indoor(r));
         }
 
-        /// <summary>"a kitchen: a fueled stove. At 5x5: fueled stove, butcher table; 80 steel." Null when it doesn't fit at the best site.</summary>
+        /// <summary>"a kitchen (5x5: fueled stove, butcher table; 80 steel)". Null when it doesn't fit at the best site.</summary>
         private static Choice RoomChoice(RoomKindDef kind, (int w, int h) size, string group, string name, SiteFinder finder, RoomValidator validator,
                                          List<RoomPlan> sites, List<ThingDef> materials)
         {
@@ -232,141 +272,91 @@ namespace AIPawnControl
         private static Choice FieldChoice(Pawn pawn, FoodOutlook outlook)
         {
             Map map = pawn.Map;
-            if (!map.mapPawns.FreeColonistsSpawned.Any(p => !p.WorkTypeIsDisabled(WorkTypeDefOf.Growing)))
+            if (!map.mapPawns.FreeColonistsSpawned.Any(p => !p.WorkTypeIsDisabled(WorkTypeDefOf.Growing))
+                || !Fields.FindSite(pawn, outlook.FieldSide, out CellRect rect, out string where, out string ground))
                 return null;
-            int side = outlook.FieldSide;
-            var foci = SiteFinder.NoBuildFoci(map);
-            var zones = new ZoneSites(new ChoreScan(pawn), c => Fields.CellOk(c, map, foci), c => Fields.CellScore(c, map));
-            var site = zones.Find(new[] { 4, side }, 1).FirstOrDefault();
-            if (site == null)
-                return null;
-            var rect = site.Rect(site.maxSize);
             var why = new List<string>();
             if (outlook.growPerDay < outlook.needPerDay)
                 why.Add(outlook.growPerDay <= 0f ? $"there are no food fields for {outlook.colonists} people" : $"the fields grow ~{outlook.growPerDay / outlook.needPerDay:P0} of what {outlook.colonists} people eat");
             if (outlook.hasWinter && outlook.daysToWinter > 0 && outlook.WinterCover < outlook.needPerDay * outlook.winterDays)
                 why.Add($"winter is {outlook.daysToWinter} days off and the stores won't last it");
-            string where = zones.Where(rect, site.steps);
             return new Choice
             {
                 group = "Food",
-                label = $"more field ({string.Join("; ", why)}): {rect.Width}x{rect.Height} of {outlook.crop.label}, {zones.Ground(rect)}, {where}",
+                label = $"more field ({string.Join("; ", why)}): {rect.Width}x{rect.Height} of {outlook.crop.label}, {ground}, {where}",
                 crop = outlook.crop,
                 field = rect,
-                fieldWhere = where,
+                where = where,
             };
         }
 
-        /// <summary>"a stockpile (6x6, right by the base)": offered only while the colony has no stockpile or shelf.</summary>
-        private static Choice PileChoice(Pawn pawn)
-        {
-            Map map = pawn.Map;
-            var zones = new ZoneSites(new ChoreScan(pawn), c => Stockpiles.CellOk(c, map), c => Stockpiles.CellScore(c, map));
-            var site = zones.Find(new[] { 3, 6 }, 1).FirstOrDefault();
-            if (site == null)
-                return null;
-            var rect = site.Rect(site.maxSize);
-            string where = zones.Where(rect, site.steps);
-            return new Choice
-            {
-                group = "Storage",
-                label = $"a stockpile for everything ({rect.Width}x{rect.Height}, {where}): there's none yet, so nothing is stored or counted",
-                pile = rect,
-                fieldWhere = where,
-            };
-        }
-
-        private const string None = "-";
-
-        private static Dictionary<string, object> Schema(int count, List<string> sites, List<string> materials) => new Dictionary<string, object>
-        {
-            ["type"] = "object",
-            ["properties"] = new Dictionary<string, object>
-            {
-                ["reason"] = new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = 400 },
-                ["choice"] = new Dictionary<string, object> { ["type"] = "integer", ["enum"] = Enumerable.Range(0, count + 1).Cast<object>().ToList() },
-                ["site"] = Enum(sites.Append(None).ToList()),
-                ["material"] = Enum(materials.Append(None).ToList()),
-                ["say"] = ActionCatalog.SaySchema(),
-            },
-            ["required"] = new List<object> { "reason", "choice", "site", "material", "say" },
-            ["additionalProperties"] = false,
-        };
-
-        private static Dictionary<string, object> Enum(List<string> values) =>
-            new Dictionary<string, object> { ["type"] = "string", ["enum"] = values.Cast<object>().ToList() };
-
-        private static void OnReply(PawnMind mind, Dictionary<string, object> reply, List<Choice> choices, List<RoomPlan> sites, List<string> letters,
-                                    List<ThingDef> materials)
+        private static void OnReply(PawnMind mind, Dictionary<string, object> reply, Prepared call)
         {
             Pawn pawn = mind.pawn;
-            string Get(string key) => reply.TryGetValue(key, out object v) ? v as string : null;
-            int pick = reply.TryGetValue("choice", out object c) && c is double d ? (int)d : -1;
+            string say = reply.Str("say"), site = reply.Str("site"), material = reply.Str("material");
+            int pick = reply.Int("choice", -1);
             if (pick == 0)
             {
-                RemarkAndLog(mind, Get("say"), "Looked over the base and let the stores build up for now.", "base: not now");
+                RemarkAndLog(mind, say, "Looked over the base and let the stores build up for now.", "base: not now");
                 return;
             }
-            var choice = pick >= 1 && pick <= choices.Count ? choices[pick - 1] : null;
+            var choice = pick >= 1 && pick <= call.Count ? call.choices[pick - 1] : null;
             if (choice == null)
             {
                 ModLog.Warning($"{pawn.LabelShort}: base reply chose {pick}, which isn't on the list.");
                 return;
             }
-            string result;
-            try
+            if (choice.upgrade != null)
+            {
+                RemarkAndLog(mind, say, UpgradeCall.Start(mind, choice.upgrade), $"base: upgrade {Upgrades.RoomLine(choice.upgrade, pawn)}");
+                return;
+            }
+            ThingDef stuff = call.materials.Find(m => m.label == material) ?? call.materials.FirstOrDefault();
+            string result = MindActions.Safely(pawn, choice.label, () =>
             {
                 if (choice.kind != null)
                 {
-                    int siteIndex = letters.IndexOf(Get("site"));
-                    result = PlaceRoom(pawn, choice, sites[siteIndex >= 0 ? siteIndex : 0], materials.Find(m => m.label == Get("material")) ?? materials[0]);
+                    int siteIndex = call.letters.IndexOf(site);
+                    return PlaceRoom(pawn, choice.kind, choice.size, call.sites[siteIndex >= 0 ? siteIndex : 0], stuff, out _);
                 }
-                else if (choice.layout != null)
-                    result = choice.layout(pawn, materials.Find(m => m.label == Get("material")) ?? materials[0]);
-                else if (choice.crop != null)
-                    result = Fields.Place(pawn, choice.field, choice.crop, choice.fieldWhere);
-                else if (choice.upgrade != null)
-                {
-                    RemarkAndLog(mind, Get("say"), UpgradeCall.Start(mind, choice.upgrade), $"base: upgrade {Upgrades.RoomLine(choice.upgrade, mind.pawn)}");
-                    return;
-                }
-                else if (choice.group == "Storage")
-                    result = Stockpiles.Place(pawn, choice.pile, "everything", choice.fieldWhere);
-                else
-                    result = StockUp(mind, choice.chore);
-            }
-            catch (Exception e)
-            {
-                result = "That went wrong: " + e.Message;
-                ModLog.Error($"{pawn.LabelShort}: applying \"{choice.label}\" threw: {e}");
-            }
-            RemarkAndLog(mind, Get("say"), result, $"base: {choice.label} [{Get("site")}, {Get("material")}]");
+                if (choice.layout != null)
+                    return choice.layout(pawn, stuff);
+                if (choice.crop != null)
+                    return Fields.Place(pawn, choice.field, choice.crop, choice.where);
+                if (choice.group == "Storage")
+                    return Stockpiles.Place(pawn, choice.pile, choice.where);
+                return StockUp(mind, choice.chore);
+            });
+            RemarkAndLog(mind, say, result, $"base: {choice.label} [{site}, {material}]");
         }
 
         /// <summary>
         /// Places the room at code's size, picks whose bed it is, and marks what materials are missing. Another mind may have
         /// started the same room, or put blueprints on her site, while she was thinking: then she leaves it to them, or the
-        /// sites are found again and the one nearest her pick is used.
+        /// sites are found again and the one nearest her pick is used. With no pick (the dev tools), site A, else the next
+        /// site it fits at.
         /// </summary>
-        private static string PlaceRoom(Pawn pawn, Choice choice, RoomPlan picked, ThingDef material)
+        public static string PlaceRoom(Pawn pawn, RoomKindDef kind, (int w, int h) size, RoomPlan picked, ThingDef material, out BuildProject project)
         {
             Map map = pawn.Map;
-            var other = BuildManager.Instance.ActiveOn(map).FirstOrDefault(p => p.kindDef == choice.kind && p.pawn != pawn && !choice.kind.owned);
+            project = null;
+            var other = BuildManager.Instance.ActiveOn(map).FirstOrDefault(p => p.kindDef == kind && p.pawn != pawn && !kind.owned);
             if (other != null)
-                return $"{other.pawn.LabelShort} already started a {choice.kind.label}, so I left it to them.";
+                return $"{other.pawn.LabelShort} already started a {kind.label}, so I left it to them.";
             var finder = new SiteFinder(map, SiteFinder.BaseCenter(map));
             var validator = new RoomValidator(map, finder.center, finder.weights.maxWalk);
             var sites = finder.Sites(validator, material, out _);
-            var site = sites.OrderBy(s => s.Interior.CenterCell.DistanceToSquared(picked.Interior.CenterCell)).FirstOrDefault();
-            var plan = site != null ? finder.Fit(site, choice.kind, choice.size.w, choice.size.h, validator, material, out _) : null;
-            var project = plan != null ? BuildManager.Instance.Place(pawn, plan, material, validator, finder.Where(plan)) : null;
+            if (picked != null)
+                sites = sites.OrderBy(s => s.Interior.CenterCell.DistanceToSquared(picked.Interior.CenterCell)).Take(1).ToList();
+            var plan = sites.Select(s => finder.Fit(s, kind, size.w, size.h, validator, material, out _)).FirstOrDefault(p => p != null);
+            project = plan != null ? BuildManager.Instance.Place(pawn, plan, material, validator, finder.Where(plan)) : null;
             if (project == null)
-                return $"Wanted a {choice.kind.label}, but it didn't fit anywhere near the base.";
-            if (choice.kind.owned && pawn.ownership?.OwnedRoom != null)
+                return $"Wanted a {kind.label}, but it didn't fit anywhere near the base.";
+            if (kind.owned && pawn.ownership?.OwnedRoom != null)
             {
                 // Hers if she has no room of her own; else for someone who has none (the ladder's private bedrooms); else free.
-                var taken = new HashSet<Pawn>(BuildManager.Instance.ActiveOn(pawn.Map).Select(p => p.occupant).Where(p => p != null));
-                project.occupant = Ladder.Sleepers(pawn.Map).FirstOrDefault(p => p != pawn && p.ownership?.OwnedRoom == null && !taken.Contains(p));
+                var taken = new HashSet<Pawn>(BuildManager.Instance.ActiveOn(map).Select(p => p.occupant).Where(p => p != null));
+                project.occupant = Ladder.Sleepers(map).FirstOrDefault(p => p != pawn && p.ownership?.OwnedRoom == null && !taken.Contains(p));
                 project.unclaimed = project.occupant == null;
             }
             string marked = Supplies.MarkFor(pawn, project);

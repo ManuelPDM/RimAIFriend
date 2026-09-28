@@ -110,6 +110,22 @@ namespace AIPawnControl
             return list;
         }
 
+        /// <summary>
+        /// What these blueprints and frames still need, by material: a frame what hasn't been delivered, a blueprint its whole
+        /// cost. Install blueprints (a minified thing being placed) cost nothing, and vanilla logs an error if asked.
+        /// </summary>
+        public static Dictionary<ThingDef, int> StillNeeds(IEnumerable<Thing> pending)
+        {
+            var need = new Dictionary<ThingDef, int>();
+            foreach (var t in pending)
+            {
+                var costs = t is Frame frame ? frame.TotalMaterialCost() : t is Blueprint_Build blueprint ? blueprint.TotalMaterialCost() : null;
+                foreach (var cost in costs ?? new List<ThingDefCountClass>())
+                    need[cost.thingDef] = (need.TryGetValue(cost.thingDef, out int had) ? had : 0) + (t is Frame f ? f.ThingCountNeeded(cost.thingDef) : cost.count);
+            }
+            return need;
+        }
+
         /// <summary>Walls are wood or stone blocks: steel is for stoves, weapons and components.</summary>
         public static bool IsWallMaterial(ThingDef stuff) => stuff == ThingDefOf.WoodLog || stuff.IsWithinCategory(ThingCategoryDefOf.StoneBlocks);
 
@@ -133,14 +149,14 @@ namespace AIPawnControl
             if (existing != null)
                 return WorkOrders.Raise(existing, target);
             string why = null;
-            foreach (var table in map.listerBuildings.allBuildingsColonist.Where(b => b is IBillGiver giver && giver.BillStack != null))
+            foreach (var table in WorkOrders.Tables(map))
             {
                 var recipe = table.def.AllRecipes.FirstOrDefault(r => r.ProducedThingDef == blocks);
                 if (recipe == null)
                     continue;
                 why = WorkOrders.Check(table, recipe, ingredients: false);
                 if (why == null)
-                    return WorkOrders.AddBill(pawn, table, recipe, target, 0, $"until there are {target}", ingredients: false);
+                    return WorkOrders.AddBill(pawn, table, recipe, target, $"until there are {target}", ingredients: false);
                 why = $"couldn't order them at the {table.def.label}: {why}";
             }
             return $"About {need} {blocks.label} short: {why ?? "there's no stonecutter's table to cut them"}.";

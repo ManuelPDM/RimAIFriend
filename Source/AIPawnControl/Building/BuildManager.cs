@@ -205,7 +205,7 @@ namespace AIPawnControl
             room = Room;
             if (furnishing)
                 return room != null;
-            if (room == null || !room.ProperRoom || room.OpenRoofCount > 0 || room.PsychologicallyOutdoors)
+            if (!Ground.Indoor(room) || !room.ProperRoom || room.OpenRoofCount > 0)
                 return false;
             if (kindDef?.role != null && room.Role != kindDef.role)
                 return false;
@@ -241,30 +241,9 @@ namespace AIPawnControl
         /// <summary>Material the unbuilt parts still need, whatever is in storage.</summary>
         public Dictionary<ThingDef, int> Need()
         {
-            var need = new Dictionary<ThingDef, int>();
-            foreach (var c in floorCells)
-                if (floor != null && FloorPending(c) is Thing pendingFloor)
-                    foreach (var cost in pendingFloor is Frame f ? f.TotalMaterialCost() : ((Blueprint)pendingFloor).TotalMaterialCost())
-                        Add(need, cost.thingDef, pendingFloor is Frame fr ? fr.ThingCountNeeded(cost.thingDef) : cost.count);
-            foreach (var e in entries)
-            {
-                if (Built(e))
-                    continue;
-                var pending = Pending(e);
-                if (pending is Frame frame)
-                    foreach (var cost in frame.TotalMaterialCost())
-                        Add(need, cost.thingDef, frame.ThingCountNeeded(cost.thingDef));
-                else if (pending is Blueprint_Build blueprint)
-                    foreach (var cost in blueprint.TotalMaterialCost())
-                        Add(need, cost.thingDef, cost.count);
-            }
-            return need;
-        }
-
-        private static void Add(Dictionary<ThingDef, int> d, ThingDef def, int n)
-        {
-            d.TryGetValue(def, out int had);
-            d[def] = had + n;
+            var pending = floorCells.Where(c => floor != null).Select(FloorPending)
+                .Concat(entries.Where(e => !Built(e)).Select(Pending));
+            return Supplies.StillNeeds(pending.Where(t => t != null));
         }
 
         /// <summary>
@@ -349,7 +328,6 @@ namespace AIPawnControl
             Scribe_Values.Look(ref closeDoor, "closeDoor", IntVec3.Invalid);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
-                kindDef = kindDef ?? RoomKindDef.Bedroom; // saves from before room kinds held only bedrooms
                 builtOnce = builtOnce ?? new List<int>();
                 floorCells = floorCells ?? new List<IntVec3>();
             }
@@ -510,8 +488,8 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// A common room or a doorway (BASE_LAYOUT.md): its checks were the finder's, so it's placed as is. roomCell is a
-        /// cell inside the room it makes or opens.
+        /// A doorway or a closed way out (BASE_LAYOUT.md): one cell, its checks were Layout's, so it's placed as is. roomCell
+        /// is a cell inside the room it opens or closes.
         /// </summary>
         public BuildProject PlaceLayout(Pawn pawn, RoomPlan plan, ThingDef material, IntVec3 roomCell, string where, Building_Door close = null)
         {
@@ -544,6 +522,10 @@ namespace AIPawnControl
 
         public override void ExposeData()
         {
+            if (Scribe.mode == LoadSaveMode.Saving)
+                // Past the cooldown, an abandoned project or a finished upgrade has no use (finished rooms stay: [Me] and [Rooms] credit them).
+                projects.RemoveAll(p => (p.state == BuildProject.State.Abandoned || (p.state == BuildProject.State.Done && p.furnishing))
+                                        && Find.TickManager.TicksGame - p.placedTick > GenDate.TicksPerDay);
             Scribe_Collections.Look(ref projects, "projects", LookMode.Deep);
             Scribe_Collections.Look(ref emptyScans, "emptyScans", LookMode.Reference, LookMode.Value, ref emptyScanKeys, ref emptyScanValues);
             if (Scribe.mode == LoadSaveMode.Saving)
@@ -559,8 +541,6 @@ namespace AIPawnControl
                 ourDoors = new HashSet<(int, IntVec3)>();
                 for (int i = 0; ourDoorMaps != null && ourDoorCells != null && i < ourDoorMaps.Count && i < ourDoorCells.Count; i++)
                     ourDoors.Add((ourDoorMaps[i], ourDoorCells[i]));
-                foreach (var p in projects)
-                    RecordDoors(p); // saves from before the record, and projects about to be dropped
                 projects.RemoveAll(p => p.pawn == null || p.map == null);
                 emptyScans = emptyScans ?? new Dictionary<Pawn, int>();
                 emptyScans.RemoveAll(kv => kv.Key == null);

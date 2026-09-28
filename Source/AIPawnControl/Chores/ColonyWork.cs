@@ -25,7 +25,7 @@ namespace AIPawnControl
                 .Select(z => Field(z, map) + By(manager?.OwnerOf(z))).ToList();
             // Code lays stockpiles out and picks what they hold (STREAMLINE.md §7): just how many, and how many indoors.
             var piles = map.zoneManager.AllZones.OfType<Zone_Stockpile>().ToList();
-            int indoors = piles.Count(z => z.cells.Count > 0 && z.cells[0].GetRoom(map) is Room room && !room.PsychologicallyOutdoors);
+            int indoors = piles.Count(z => z.cells.Count > 0 && Ground.Indoor(z.cells[0].GetRoom(map)));
             string storage = "Stockpiles: " + (piles.Count == 0 ? "none" : indoors > 0 ? $"{piles.Count} ({indoors} indoors)" : piles.Count.ToString());
             var shelves = map.listerBuildings.allBuildingsColonist.Where(b => b is Building_Storage)
                 .GroupBy(b => b.def.label).Select(g => $"{g.Key} ×{g.Count()}").ToList();
@@ -83,29 +83,17 @@ namespace AIPawnControl
             foreach (var d in map.designationManager.AllDesignations)
             {
                 string key = null;
-                Pawn owner = null;
                 if (d.def == DesignationDefOf.Hunt && d.target.Thing is Pawn animal)
-                {
                     key = "hunt " + animal.kindDef.label;
-                    owner = manager?.OwnerOf(animal);
-                }
                 else if ((d.def == DesignationDefOf.HarvestPlant || d.def == DesignationDefOf.CutPlant) && d.target.Thing is Plant plant && plant.def.plant.IsTree)
-                {
                     key = "cut trees";
-                    owner = manager?.OwnerOf(plant);
-                }
                 else if (d.def == DesignationDefOf.HarvestPlant && d.target.Thing is Plant wild)
-                {
                     key = "harvest " + wild.def.label;
-                    owner = manager?.OwnerOf(wild);
-                }
                 else if (d.def == DesignationDefOf.Mine && d.target.Cell.GetFirstMineable(map) is Mineable rock)
-                {
                     key = "mine " + Mining.ResourceLabel(rock.def);
-                    owner = manager?.OwnerOf(d.target.Cell, map);
-                }
                 if (key == null)
                     continue;
+                Pawn owner = manager?.OwnerOf(d.target, map);
                 if (!groups.TryGetValue(key, out var g))
                     order.Add(key);
                 groups[key] = (g.count + 1, g.mine + (owner == pawn ? 1 : 0));
@@ -122,11 +110,9 @@ namespace AIPawnControl
         {
             var manager = ChoreManager.Instance;
             var result = new List<string>();
-            foreach (var building in map.listerBuildings.allBuildingsColonist)
+            foreach (var building in WorkOrders.Tables(map))
             {
-                if (!(building is IBillGiver giver) || giver.BillStack == null)
-                    continue;
-                foreach (var bill in giver.BillStack.Bills.OfType<Bill_Production>())
+                foreach (var bill in ((IBillGiver)building).BillStack.Bills.OfType<Bill_Production>())
                     result.Add($"{building.def.label}: {bill.recipe.label}, {Mode(bill)}" + (manager?.OwnerOf(bill) == pawn ? " (by me)" : ""));
             }
             return result;

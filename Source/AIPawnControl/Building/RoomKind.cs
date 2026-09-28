@@ -63,9 +63,12 @@ namespace AIPawnControl
         /// <summary>The interior code builds it at (STREAMLINE.md §7); a barracks is sized to the beds missing instead.</summary>
         public IntVec2 size = new IntVec2(5, 5);
         public List<RoomItem> items = new List<RoomItem>();
+        /// <summary>Made by the base-layout code (a hall, a doorway, a closed doorway), never offered as a room of its own.</summary>
+        public bool layout;
 
         public static RoomKindDef Bedroom => DefDatabase<RoomKindDef>.GetNamed("AIPC_Bedroom");
         public static RoomKindDef Plain => DefDatabase<RoomKindDef>.GetNamed("AIPC_PlainRoom");
+        public static RoomKindDef Hall => DefDatabase<RoomKindDef>.GetNamed("AIPC_Hall");
 
         public static bool Buildable(BuildableDef def) => BuildCopyCommandUtility.FindAllowedDesignator(def) != null;
 
@@ -79,8 +82,8 @@ namespace AIPawnControl
 
     /// <summary>
     /// Rule-based furniture placer: each item takes the best cell its rules allow, one at a time. Interaction cells,
-    /// watch cells and the cell inside the door stay clear, every item keeps a free neighbour, and every free cell stays
-    /// reachable from the door. Returns false if a required item doesn't fit. Pure geometry: the interior is empty.
+    /// watch cells, the cell inside each door and the walks between the doors stay clear, every item keeps a free
+    /// neighbour, and every free cell stays reachable from the door. Pure geometry on the plan's interior.
     /// </summary>
     public static class RoomPlacer
     {
@@ -91,18 +94,16 @@ namespace AIPawnControl
             public readonly HashSet<IntVec3> taken = new HashSet<IntVec3>();    // furniture
             public readonly HashSet<IntVec3> reserved = new HashSet<IntVec3>(); // walkable, but no furniture
             public readonly List<PlanEntry> placed = new List<PlanEntry>();
+            public readonly List<IntVec3> doorsInside = new List<IntVec3>(); // the cell inside every door: nothing goes next to one
             // A room that already has furniture (PlaceOne): one more item mustn't make it worse. Null for a new room.
             public HashSet<IntVec3> reachableBefore;              // free cells the door reaches now
             public HashSet<PlanEntry> boxedInBefore;             // items with no free neighbour already
         }
 
-        /// <param name="keepFree">More cells to leave walkable, like the cell inside a common room's door out.</param>
-        public static bool Place(RoomPlan plan, IEnumerable<IntVec3> keepFree = null)
+        /// <summary>The kind's items in an empty room. False if a required item doesn't fit.</summary>
+        public static bool Place(RoomPlan plan)
         {
-            var s = new State { plan = plan, inner = plan.Interior };
-            s.reserved.Add(plan.doorInside);
-            if (keepFree != null)
-                s.reserved.UnionWith(keepFree);
+            var s = NewState(plan, new List<PlanEntry>());
             var firstOf = new List<PlanEntry>();
 
             var kindItems = plan.kind.items;
@@ -139,12 +140,8 @@ namespace AIPawnControl
         /// </summary>
         public static PlanEntry PlaceOne(RoomPlan plan, ThingDef def, List<PlanEntry> existing, PlanEntry nextTo)
         {
-            var s = new State { plan = plan, inner = plan.Interior };
-            s.reserved.Add(plan.doorInside);
+            var s = NewState(plan, existing);
             var none = new RoomItem();
-            foreach (var e in existing)
-                foreach (var c in e.Rect)
-                    s.taken.Add(c);
             foreach (var e in existing)
             {
                 var clear = KeepClear(e, s, none);
@@ -159,6 +156,25 @@ namespace AIPawnControl
             s.boxedInBefore = new HashSet<PlanEntry>(existing.Where(e => !HasFreeNeighbour(e.Rect, s, CellRect.Empty)));
             var item = new RoomItem { defs = { def } };
             return (nextTo != null ? NextTo(def, nextTo, s, item) : null) ?? AgainstWall(def, s, item);
+        }
+
+        /// <summary>
+        /// The placer's state for a plan: what's already there is taken, and the cell inside each door plus the shortest
+        /// walk between each pair of doors (around what's there) stays free, so people cross the room unhindered.
+        /// </summary>
+        private static State NewState(RoomPlan plan, List<PlanEntry> existing)
+        {
+            var s = new State { plan = plan, inner = plan.Interior };
+            foreach (var e in existing)
+                foreach (var c in e.Rect)
+                    s.taken.Add(c);
+            var inside = plan.DoorsInside;
+            s.doorsInside.AddRange(inside);
+            s.reserved.UnionWith(inside);
+            for (int i = 0; i < inside.Count; i++)
+                for (int j = i + 1; j < inside.Count; j++)
+                    s.reserved.UnionWith(Flood.Path(s.inner, inside[i], inside[j], c => !s.taken.Contains(c)));
+            return s;
         }
 
         private static void Commit(PlanEntry entry, State s, RoomItem item)
@@ -314,7 +330,7 @@ namespace AIPawnControl
             {
                 if (!s.inner.Contains(c) || s.taken.Contains(c) || s.reserved.Contains(c))
                     return false;
-                if (awayFromDoor && c.AdjacentToCardinal(s.plan.doorInside))
+                if (awayFromDoor && s.doorsInside.Any(d => c.AdjacentToCardinal(d)))
                     return false;
             }
             var clear = KeepClear(entry, s, item);
@@ -401,23 +417,7 @@ namespace AIPawnControl
         }
 
         /// <summary>The free interior cells reached from the cell inside the door (4 neighbours).</summary>
-        private static HashSet<IntVec3> Reachable(CellRect inner, IntVec3 start, HashSet<IntVec3> taken, CellRect extra)
-        {
-            bool Blocked(IntVec3 c) => (taken.Contains(c) && c != start) || extra.Contains(c);
-            var seen = new HashSet<IntVec3> { start };
-            var queue = new Queue<IntVec3>();
-            queue.Enqueue(start);
-            while (queue.Count > 0)
-            {
-                var c = queue.Dequeue();
-                for (int r = 0; r < 4; r++)
-                {
-                    var n = c + new Rot4(r).FacingCell;
-                    if (inner.Contains(n) && !Blocked(n) && seen.Add(n))
-                        queue.Enqueue(n);
-                }
-            }
-            return seen;
-        }
+        private static HashSet<IntVec3> Reachable(CellRect inner, IntVec3 start, HashSet<IntVec3> taken, CellRect extra) =>
+            new HashSet<IntVec3>(Flood.Run(inner, new[] { start }, c => !taken.Contains(c) && !extra.Contains(c)).Reached);
     }
 }

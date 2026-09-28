@@ -11,7 +11,7 @@ namespace AIPawnControl
     /// </summary>
     public static class WorkOrders
     {
-        public enum Goal { Meal, Butcher, Medicine, Blocks, Clothes }
+        public enum Goal { Meal, Butcher, Blocks, Clothes }
 
         /// <summary>"stone blocks, enough for another room": an order at a stonecutter's table, when there are chunks to cut.</summary>
         public static IEnumerable<ChoreOption> StockOptions(ChoreScan scan)
@@ -19,7 +19,7 @@ namespace AIPawnControl
             Map map = scan.map;
             if (map.resourceCounter.GetCountIn(ThingCategoryDefOf.StoneBlocks) >= ChoreOptions.StockCap)
                 yield break;
-            foreach (var table in map.listerBuildings.allBuildingsColonist.Where(b => b is IBillGiver giver && giver.BillStack != null))
+            foreach (var table in Tables(map))
             {
                 var recipe = table.def.AllRecipes.FirstOrDefault(r => GoalOf(r) == Goal.Blocks);
                 if (recipe == null || Check(table, recipe) != null)
@@ -32,19 +32,15 @@ namespace AIPawnControl
                     label = $"stone blocks, enough for another room: an order at the {table.def.label} until there are {count}",
                     useful = 0.5f,
                     check = () => Check(t, recipe),
-                    apply = mind => AddBill(mind.pawn, t, recipe, count, 0, $"until there are {count}"),
+                    apply = mind => AddBill(mind.pawn, t, recipe, count, $"until there are {count}"),
                 };
                 yield break;
             }
         }
 
-        /// <summary>Dev report: each table's recipes that fit a goal, and the validator's verdict.</summary>
-        public static IEnumerable<string> Explain(Map map)
-        {
-            foreach (var table in map.listerBuildings.allBuildingsColonist.Where(b => b is IBillGiver giver && giver.BillStack != null))
-                foreach (var recipe in table.def.AllRecipes.Where(r => GoalOf(r) != null))
-                    yield return $"{table.def.label}: {recipe.label} ({GoalOf(recipe)}) → {Check(table, recipe) ?? "ok"}";
-        }
+        /// <summary>The colony's buildings that take bills: work tables, stoves, butcher spots.</summary>
+        public static IEnumerable<Building> Tables(Map map) =>
+            map.listerBuildings.allBuildingsColonist.Where(b => b is IBillGiver giver && giver.BillStack != null);
 
         public static Goal? GoalOf(RecipeDef recipe)
         {
@@ -57,8 +53,6 @@ namespace AIPawnControl
                 return null;
             if (product.ingestible != null && product.ingestible.IsMeal && product.IsNutritionGivingIngestible)
                 return Goal.Meal;
-            if (product.IsMedicine)
-                return Goal.Medicine;
             if (product.IsApparel && product.GetStatValueAbstract(StatDefOf.ArmorRating_Sharp, GenStuff.DefaultStuffFor(product)) < 0.3f)
                 return Goal.Clothes; // clothes, not armour
             return null;
@@ -68,9 +62,7 @@ namespace AIPawnControl
         private static string Key(RecipeDef recipe) => recipe.ProducedThingDef?.defName ?? recipe.defName;
 
         public static IEnumerable<Bill_Production> Bills(Map map) =>
-            map.listerBuildings.allBuildingsColonist
-                .Where(b => b is IBillGiver giver && giver.BillStack != null)
-                .SelectMany(b => ((IBillGiver)b).BillStack.Bills.OfType<Bill_Production>());
+            Tables(map).SelectMany(b => ((IBillGiver)b).BillStack.Bills.OfType<Bill_Production>());
 
         /// <summary>The validator: null if this table can take a bill for this recipe right now.</summary>
         /// <param name="ingredients">A room's own bills don't wait for ingredients: the bill waits instead.</param>
@@ -125,8 +117,8 @@ namespace AIPawnControl
             return $"Raised the order at the {table}: {bill.recipe.label}, until there are {target}.";
         }
 
-        /// <summary>Re-validates, then adds the bill (count = "until N", repeat = "×N", neither = forever) and records it as her chore.</summary>
-        public static string AddBill(Pawn pawn, Building table, RecipeDef recipe, int count, int repeat, string mode, bool ingredients = true)
+        /// <summary>Re-validates, then adds the bill (count = "until N", else forever) and records it as her chore.</summary>
+        public static string AddBill(Pawn pawn, Building table, RecipeDef recipe, int count, string mode, bool ingredients = true)
         {
             string why = Check(table, recipe, ingredients);
             if (why != null)
@@ -136,11 +128,6 @@ namespace AIPawnControl
             {
                 bill.repeatMode = BillRepeatModeDefOf.TargetCount;
                 bill.targetCount = count;
-            }
-            else if (repeat > 0)
-            {
-                bill.repeatMode = BillRepeatModeDefOf.RepeatCount;
-                bill.repeatCount = repeat;
             }
             else
                 bill.repeatMode = BillRepeatModeDefOf.Forever;

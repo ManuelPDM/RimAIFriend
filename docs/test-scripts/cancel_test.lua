@@ -17,12 +17,7 @@ while found == false and rounds < 45 do
 end
 if found then
   rb.call("rimworld/select_pawn", { pawnName = "Ia" })
-  local g = rb.call("rimworld/list_selected_gizmos")
-  for i, z in ipairs(g.result.gizmos) do
-    if z.label == "DEV: Chat: ask for a talk" then
-      rb.call("rimworld/execute_gizmo", { gizmoId = z.id })
-    end
-  end
+  rb.call("rimworld/execute_debug_action", { path = "Actions\\Chat as player...\\ask for a talk" })
 end
 local info = rb.call("rimworld/get_game_info")
 return { found = found, rounds = rounds, tick = info.result.ticksGame }

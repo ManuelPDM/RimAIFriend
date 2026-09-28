@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
+using UnityEngine;
 using Verse;
 
 namespace AIPawnControl
@@ -41,31 +42,32 @@ namespace AIPawnControl
 
         public static bool CellOk(IntVec3 c, Map map, List<(IntVec3 pos, float radius)> foci)
         {
-            if (!c.InBounds(map) || c.InNoBuildEdgeArea(map) || c.Fogged(map) || c.Roofed(map))
-                return false;
-            if (c.GetTerrain(map).fertility < MinFertility)
-                return false;
-            if (map.zoneManager.ZoneAt(c) != null || map.planManager.PlanAt(c) != null || SiteFinder.InFocusRadius(c, foci))
+            if (!Ground.Open(c, map) || c.Roofed(map) || c.GetTerrain(map).fertility < MinFertility || SiteFinder.InFocusRadius(c, foci) || Ground.BesideDoor(c, map))
                 return false;
             foreach (var t in c.GetThingList(map))
             {
-                if (t is Blueprint || t is Frame || t.def.category == ThingCategory.Building)
-                    return false;
                 if (t.def.category == ThingCategory.Plant && t.def.plant.IsTree)
                     return false; // a tree blocks sowing until someone cuts it
                 if (t.def.category == ThingCategory.Item && t.def.IsWithinCategory(ThingCategoryDefOf.Chunks))
                     return false;
             }
-            for (int r = 0; r < 4; r++)
-            {
-                var n = c + new Rot4(r).FacingCell;
-                if (n.InBounds(map) && n.GetEdifice(map) is Building_Door)
-                    return false; // keep doorways free
-            }
             return true;
         }
 
         public static int CellScore(IntVec3 c, Map map) => (int)UnityEngine.Mathf.Clamp(c.GetTerrain(map).fertility * 50f, 0f, 100f);
+
+        /// <summary>The best free soil for a square field, 4 cells up to this side: where it is in words and what ground it's on. False if none.</summary>
+        public static bool FindSite(Pawn pawn, int side, out CellRect rect, out string where, out string ground)
+        {
+            Map map = pawn.Map;
+            var foci = SiteFinder.NoBuildFoci(map);
+            var zones = new ZoneSites(new ChoreScan(pawn), c => CellOk(c, map, foci), c => CellScore(c, map));
+            var site = zones.Find(new[] { 4, side }, 1).FirstOrDefault();
+            rect = site?.Rect(site.maxSize) ?? CellRect.Empty;
+            where = site != null ? zones.Where(rect, site.steps) : null;
+            ground = site != null ? zones.TerrainLabel(rect) : null;
+            return site != null;
+        }
 
         /// <summary>Re-validates, then lays out the zone with the crop, and records it as hers.</summary>
         public static string Place(Pawn pawn, CellRect rect, ThingDef crop, string where)

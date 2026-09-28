@@ -27,15 +27,7 @@ namespace AIPawnControl
         public string Text => count > 1 ? $"{text} ×{count}" : text;
 
         /// <summary>"day 12, 14:05" in the map's local time.</summary>
-        public string When(Map map) => $"day {GenDate.DaysPassedAt(tick) + 1}, {Clock(map)}";
-
-        /// <summary>"14:05" in the map's local time.</summary>
-        public string Clock(Map map)
-        {
-            float longitude = map != null ? Find.WorldGrid.LongLatOf(map.Tile).x : 0f;
-            float hour = GenDate.HourFloat(GenDate.TickGameToAbs(tick), longitude);
-            return $"{(int)hour:00}:{(int)(hour % 1f * 60f):00}";
-        }
+        public string When(Map map) => $"day {GenDate.DaysPassedAt(tick) + 1}, {GameTime.Clock(tick, map)}";
 
         public void ExposeData()
         {

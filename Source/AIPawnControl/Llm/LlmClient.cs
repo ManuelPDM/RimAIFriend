@@ -137,6 +137,10 @@ namespace AIPawnControl
                            .Select(w => $"{w.callType} {w.since.Elapsed.TotalSeconds:0}s")) : "");
         }
 
+        /// <summary>The settings' "Test connection": one short free-text reply.</summary>
+        public static void Ping(Action<LlmResult> onResult) =>
+            Send("ping", new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("user", "Reply with one short friendly sentence.") }, null, onResult);
+
         /// <param name="messages">(role, content) pairs.</param>
         /// <param name="schema">JSON schema object for structured output, or null for free text.</param>
         public static LlmRequest Send(string callType, List<KeyValuePair<string, string>> messages, object schema, Action<LlmResult> onResult) =>

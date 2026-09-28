@@ -58,12 +58,7 @@ namespace AIPawnControl
             var marked = plants.Where(p => Check(p, pawn.Map) == null).ToList();
             if (marked.Count == 0)
                 return ChoreOptions.NoneLeft(plants.Select(p => Check(p, pawn.Map)), "Those plants can't be harvested now.");
-            var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Gather, "wild food");
-            foreach (var p in marked)
-            {
-                pawn.Map.designationManager.AddDesignation(new Designation(p, DesignationDefOf.HarvestPlant));
-                chore.things.Add(p);
-            }
+            var chore = ChoreManager.Instance.Mark(pawn, Chore.Kind.Gather, "wild food", marked.Select(p => new LocalTargetInfo(p)));
             chore.Remember($"I marked wild plants to gather for food: {kinds}.", 2);
             ModLog.Message($"{pawn.LabelShort} marked wild food to gather: {kinds}.");
             return $"Marked wild food to gather: {kinds}.";

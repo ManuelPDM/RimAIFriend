@@ -41,8 +41,8 @@ namespace AIPawnControl
                 int meat = animals.Sum(a => (int)a.GetStatValue(StatDefOf.MeatAmount));
                 if (meat < MinMeat)
                     continue; // a few sparrows aren't worth a hunter's trip
-                float distance = animals[0].Position.DistanceTo(scan.center);
-                string where = distance <= 30f ? "near the base" : distance <= 70f ? "a walk from the base" : "far from the base";
+                int steps = scan.WalkAt(animals[0].Position);
+                string where = steps >= 0 ? ChoreScan.Near(steps) : "far from the base"; // out of the walk (it reaches the colony, Check): far
                 string label = group.Key.label;
                 int n = animals.Count;
                 yield return new ChoreOption
@@ -120,12 +120,7 @@ namespace AIPawnControl
             var marked = animals.Where(a => Check(a, pawn) == null).ToList();
             if (marked.Count == 0)
                 return ChoreOptions.NoneLeft(animals.Select(a => Check(a, pawn)), $"The {label} are gone or can't be hunted now.");
-            var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Hunt, label);
-            foreach (var a in marked)
-            {
-                pawn.Map.designationManager.AddDesignation(new Designation(a, DesignationDefOf.Hunt));
-                chore.things.Add(a);
-            }
+            var chore = ChoreManager.Instance.Mark(pawn, Chore.Kind.Hunt, label, marked.Select(a => new LocalTargetInfo(a)));
             chore.Remember($"I marked animals for hunting: {label} ×{marked.Count}.", 2);
             ModLog.Message($"{pawn.LabelShort} marked {label} ×{marked.Count} for hunting.");
             return $"Marked for hunting: {label} ×{marked.Count}.";

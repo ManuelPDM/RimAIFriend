@@ -104,13 +104,36 @@ namespace AIPawnControl
             return lines.Count > 0 ? string.Join("\n", lines) : null;
         }
 
-        /// <summary>The picked memories as "M12 (3 days ago) text" lines, and marks them shown.</summary>
-        public static string Describe(List<Scored> picked)
+        /// <summary>The picked memories as "M12 (3 days ago) text" lines, and marks them shown (not when it is only a look).</summary>
+        public static string Describe(List<Scored> picked, bool markShown = true)
         {
             int now = Find.TickManager.TicksGame;
-            foreach (var s in picked)
-                s.memory.lastShownTick = now;
+            if (markShown)
+                foreach (var s in picked)
+                    s.memory.lastShownTick = now;
             return string.Join("\n", picked.Select(s => $"M{s.memory.id} ({Ago(now - s.memory.tick)}) {s.memory.text}"));
+        }
+
+        /// <summary>Diary entries this relevant or more may be quoted: a clear match, not just the same colony's words.</summary>
+        public const float MinDiaryRelevance = 0.5f;
+
+        /// <summary>
+        /// "[From my diary]" (PHASE3.md §12: the diary is searchable): the entry that best matches the query, older than a
+        /// day ([Since yesterday] has the last one), or null. Needs a query vector: a diary entry has no people or place to match.
+        /// </summary>
+        public static string Diary(MindMemory memory, float[] query, string tag)
+        {
+            if (query == null)
+                return null;
+            int now = Find.TickManager.TicksGame;
+            string model = AIPawnControlMod.Settings.embedModel;
+            var best = memory.diary
+                .Where(d => d.vector != null && d.vectorTag == tag && now - d.tick > GenDate.TicksPerDay)
+                .Select(d => (entry: d, relevance: Embedding.Relevance(model, Embedding.Cosine(query, Embedding.Unpack(d.vector)))))
+                .Where(x => x.relevance >= MinDiaryRelevance)
+                .OrderByDescending(x => x.relevance)
+                .FirstOrDefault();
+            return best.entry != null ? $"({Ago(now - best.entry.tick)}) {best.entry.text}" : null;
         }
 
         private static string Ago(int ticks)

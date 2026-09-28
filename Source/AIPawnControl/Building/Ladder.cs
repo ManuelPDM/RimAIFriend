@@ -17,6 +17,7 @@ namespace AIPawnControl
         {
             public string label;       // "a kitchen"
             public RoomKindDef kind;   // what to build for it; null past the last rung
+            public List<RoomKindDef> counts; // projects of these kinds make it underway (beds: a bedroom or a barracks); kind alone if null
             public bool met;
             public bool underway;      // someone's project is on it
             public string waiting;     // why it can't be built now, or null
@@ -27,14 +28,15 @@ namespace AIPawnControl
         public static List<Rung> Evaluate(Map map)
         {
             var buildings = map.listerBuildings.allBuildingsColonist;
-            bool Indoors(Thing t) => t.GetRoom() is Room r && !r.PsychologicallyOutdoors;
+            bool Indoors(Thing t) => Ground.Indoor(t.GetRoom());
             var sleepers = Sleepers(map);
             int slots = BedSlots(map);
             int gap = sleepers.Count - slots;
 
             var rungs = new List<Rung>
             {
-                new Rung { label = gap == 1 ? "a bed for everyone" : "beds for everyone", kind = Kind(gap == 1 ? "AIPC_Bedroom" : "AIPC_Barracks"), met = gap <= 0 },
+                new Rung { label = gap == 1 ? "a bed for everyone" : "beds for everyone", kind = Kind(gap == 1 ? "AIPC_Bedroom" : "AIPC_Barracks"), met = gap <= 0,
+                           counts = new List<RoomKindDef> { Kind("AIPC_Bedroom"), Kind("AIPC_Barracks") } },
                 new Rung { label = "a kitchen", kind = Kind("AIPC_Kitchen"), met = buildings.Any(b => b.def.building != null && b.def.building.isMealSource && Indoors(b)) },
                 new Rung { label = "a storeroom", kind = Kind("AIPC_Storeroom"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Storeroom")) },
                 new Rung { label = "a dining room", kind = Kind("AIPC_DiningRoom"), met = buildings.Any(b => b.def.surfaceType == SurfaceType.Eat && Indoors(b)) },
@@ -48,8 +50,7 @@ namespace AIPawnControl
             {
                 if (rung.met || rung.rooms)
                     continue;
-                // Beds are underway with any bedroom or barracks project, the rest with a project of their own kind.
-                rung.underway = rung.kind != null && active.Any(k => k == rung.kind || (rungs.IndexOf(rung) == 0 && (k?.defName == "AIPC_Bedroom" || k?.defName == "AIPC_Barracks")));
+                rung.underway = rung.kind != null && active.Any(k => (rung.counts ?? new List<RoomKindDef> { rung.kind }).Contains(k));
                 rung.waiting = rung.kind == null ? "no such room kind" : Waiting(rung.kind, map);
             }
             return rungs;
@@ -62,7 +63,7 @@ namespace AIPawnControl
         public static string Line(Map map)
         {
             var beds = map.listerBuildings.allBuildingsColonist.OfType<Building_Bed>().Where(IsColonistBed).ToList();
-            var rooms = beds.Select(b => b.GetRoom()).Where(r => r != null && !r.PsychologicallyOutdoors)
+            var rooms = beds.Select(b => b.GetRoom()).Where(Ground.Indoor)
                 .Select(r => r.GetRoomRoleLabel()).Distinct().ToList();
             string line = $"beds for {BedSlots(map)} of {Sleepers(map).Count}" + (rooms.Count > 0 ? $" ({string.Join(", ", rooms)})" : "")
                           + " · " + Layout.Line(map);
@@ -98,6 +99,6 @@ namespace AIPawnControl
         public static int BedSlots(Map map) => map.listerBuildings.allBuildingsColonist.OfType<Building_Bed>().Where(IsColonistBed).Sum(b => b.SleepingSlotsCount);
 
         private static bool HasRole(Map map, RoomRoleDef role) =>
-            role != null && map.regionGrid.AllRooms.Any(r => r.Role == role && !r.PsychologicallyOutdoors);
+            role != null && map.regionGrid.AllRooms.Any(r => r.Role == role && Ground.Indoor(r));
     }
 }

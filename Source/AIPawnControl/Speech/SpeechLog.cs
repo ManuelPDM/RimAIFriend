@@ -135,8 +135,6 @@ namespace AIPawnControl
             }
         }
 
-        public int Count => lines.Count;
-
         public void ExposeData()
         {
             var scribed = lines;

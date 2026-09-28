@@ -116,22 +116,27 @@
     <description>empty, to furnish later</description>
   </AIPawnControl.RoomKindDef>
 
-  <!-- BASE_LAYOUT.md: shaped by CommonRoomFinder and Layout.NeighbourDoors, never by the site finder. -->
+  <!-- BASE_LAYOUT.md: made by the layout code, never offered as rooms of their own (layout). A hall is a hub
+       (SiteFinder.Hubs) with no furniture: as narrow as the gap between rooms allows. -->
   <AIPawnControl.RoomKindDef>
-    <defName>AIPC_CommonRoom</defName>
-    <label>common room</label>
+    <defName>AIPC_Hall</defName>
+    <label>hall</label>
     <description>a shared room other rooms open into</description>
+    <minSize>(1,1)</minSize>
+    <layout>true</layout>
   </AIPawnControl.RoomKindDef>
 
   <AIPawnControl.RoomKindDef>
     <defName>AIPC_Doorway</defName>
     <label>doorway</label>
     <description>a door between two rooms</description>
+    <layout>true</layout>
   </AIPawnControl.RoomKindDef>
 
   <AIPawnControl.RoomKindDef>
     <defName>AIPC_ClosedDoor</defName>
     <label>closed doorway</label>
     <description>a wall where a way out was</description>
+    <layout>true</layout>
   </AIPawnControl.RoomKindDef>
 </Defs>

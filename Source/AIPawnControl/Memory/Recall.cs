@@ -8,7 +8,7 @@ using Verse;
 namespace AIPawnControl
 {
     /// <summary>
-    /// The memory sections of one Act, Chat or Plan prompt (PHASE3.md §6 budgets), and what she used of them. The
+    /// The memory sections of one Act, Chat or Reply prompt (PHASE3.md §6 budgets), and what she used of them. The
     /// situation's query is embedded in the background first; everything else runs on the main thread.
     /// </summary>
     public class Recall
@@ -61,7 +61,7 @@ namespace AIPawnControl
         /// </summary>
         public static void WithQuery(PawnMind mind, string query, Action<float[], string> then)
         {
-            if (!Enabled || !mind.memory.memories.Any(m => m.vector != null && !m.archived))
+            if (!Enabled || !mind.memory.memories.Any(m => m.vector != null && !m.archived) && !mind.memory.diary.Any(d => d.vector != null))
             {
                 then(null, null);
                 return;
@@ -74,76 +74,53 @@ namespace AIPawnControl
             });
         }
 
-        /// <summary>Act: [About X] for up to 3 people present, and [On my mind]: at most 2 strong matches, at most once every 4 hours.</summary>
-        public static Recall Act(PawnMind mind, List<Pawn> present, float[] query, string tag)
+        /// <summary>
+        /// Act: [About X] for up to 3 people present, the player first when their file has open threads (so yesterday's
+        /// conversation reaches the next day, PHASE6.md §2.2), and [On my mind]: at most 2 strong matches, at most once
+        /// every 4 hours. Without a query vector it ranks by people, place, importance and recency.
+        /// </summary>
+        /// <param name="peek">The dev tools and self-tests: build the sections without marking anything shown.</param>
+        public static Recall Act(PawnMind mind, List<Pawn> present, float[] query, string tag, bool peek = false)
         {
             var recall = new Recall();
             if (!Enabled)
                 return recall;
             var memory = mind.memory;
             var names = present.Select(p => p.LabelShort).ToList();
-            recall.Sections["About"] = Retrieval.About(mind, names, 3, 110);
+            bool threads = !string.IsNullOrEmpty(memory.File(PersonFile.Player, create: false)?.threads);
+            recall.Sections["About"] = Retrieval.About(mind, threads ? names.Prepend(PersonFile.Player) : names, threads ? 4 : 3, 110);
             int now = Find.TickManager.TicksGame;
             if (now - memory.lastOnMindTick < Retrieval.OnMindGapTicks)
                 return recall;
             var picked = Retrieval.Pick(Retrieval.Rank(memory, query, tag, names, SnapshotBuilder.RoomLabel(mind.pawn), names), 2, Retrieval.MinOnMind);
             if (picked.Count == 0)
                 return recall;
-            memory.lastOnMindTick = now;
+            if (!peek)
+                memory.lastOnMindTick = now;
             recall.Shown.AddRange(picked.Select(s => s.memory.id));
-            recall.Sections["On my mind"] = "(this came back to you; bring it up only if it fits, don't force it)\n" + Retrieval.Describe(picked)
+            recall.Sections["On my mind"] = "(this came back to you; bring it up only if it fits, don't force it)\n" + Retrieval.Describe(picked, !peek)
                                             + Line(Retrieval.BroughtUpToday(memory));
             return recall;
         }
 
-        /// <summary>Reply (PHASE6.md §4): the speaker's file and up to 3 memories matched to what they said, as [I remember].</summary>
-        public static Recall Reply(PawnMind mind, string speaker, float[] query, string tag)
-        {
-            var recall = new Recall();
-            if (!Enabled)
-                return recall;
-            var memory = mind.memory;
-            recall.Sections["About"] = Retrieval.About(mind, new[] { speaker }, 1, 400);
-            var picked = Retrieval.Pick(Retrieval.Rank(memory, query, tag, new List<string> { speaker }, null, new[] { speaker }), 3, Retrieval.MinRemember);
-            if (picked.Count == 0)
-                return recall;
-            recall.Shown.AddRange(picked.Select(s => s.memory.id));
-            recall.Sections["I remember"] = Retrieval.Describe(picked) + Line(Retrieval.BroughtUpToday(memory));
-            return recall;
-        }
-
-        /// <summary>Chat: the player's file and the files of anyone they mention, and up to 5 memories as [I remember].</summary>
-        public static Recall Chat(PawnMind mind, List<string> mentioned, float[] query, string tag)
-        {
-            var recall = new Recall();
-            if (!Enabled)
-                return recall;
-            var memory = mind.memory;
-            recall.Sections["About"] = Retrieval.About(mind, new[] { PersonFile.Player }.Concat(mentioned), 4, 400);
-            var people = mentioned.Concat(new[] { PersonFile.Player }).ToList();
-            var picked = Retrieval.Pick(Retrieval.Rank(memory, query, tag, people, null, new[] { PersonFile.Player }), 5, Retrieval.MinRemember);
-            if (picked.Count == 0)
-                return recall;
-            recall.Shown.AddRange(picked.Select(s => s.memory.id));
-            recall.Sections["I remember"] = Retrieval.Describe(picked) + Line(Retrieval.BroughtUpToday(memory));
-            return recall;
-        }
-
         /// <summary>
-        /// Plan: [About X] for the people in today's events, and the player's file first when it has open threads, so a
-        /// conversation from yesterday reaches the new day (PHASE6.md §2.2). Her lately is in the system prompt.
+        /// Chat and Reply: the file of whoever she's talking to (the player, or the mind whose line she answers) and of anyone
+        /// they mention, up to max memories matched to what was said as [I remember], and the closest diary entry.
         /// </summary>
-        public static Recall Plan(PawnMind mind)
+        public static Recall Conversation(PawnMind mind, string audience, float[] query, string tag, int max, List<string> mentioned = null, bool peek = false)
         {
             var recall = new Recall();
-            if (!Enabled || mind.pawn.Map == null)
+            if (!Enabled)
                 return recall;
-            int dayStart = Find.TickManager.TicksGame - GenLocalDate.DayTick(mind.pawn.Map);
-            var names = mind.memory.events.Where(e => e.lastTick >= dayStart).SelectMany(e => e.people)
-                .Where(n => n != PersonFile.Player && n != PersonFile.Colony);
-            if (!string.IsNullOrEmpty(mind.memory.File(PersonFile.Player, create: false)?.threads))
-                names = new[] { PersonFile.Player }.Concat(names);
-            recall.Sections["About"] = Retrieval.About(mind, names, 3, 110);
+            var memory = mind.memory;
+            var people = new[] { audience }.Concat(mentioned ?? new List<string>()).ToList();
+            recall.Sections["About"] = Retrieval.About(mind, people, 4, 400);
+            recall.Sections["From my diary"] = Retrieval.Diary(memory, query, tag);
+            var picked = Retrieval.Pick(Retrieval.Rank(memory, query, tag, people, null, new[] { audience }), max, Retrieval.MinRemember);
+            if (picked.Count == 0)
+                return recall;
+            recall.Shown.AddRange(picked.Select(s => s.memory.id));
+            recall.Sections["I remember"] = Retrieval.Describe(picked, !peek) + Line(Retrieval.BroughtUpToday(memory));
             return recall;
         }
 

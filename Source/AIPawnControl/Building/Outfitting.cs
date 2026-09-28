@@ -29,7 +29,7 @@ namespace AIPawnControl
                 if (DefaultBill(pawn, table, colonists) is string result)
                     results.Add(result);
             // Stockpiles only in storerooms (FURNISHING.md §3): food piled on a kitchen floor doesn't work.
-            if (project.kindDef?.defName == "AIPC_Storeroom" && RoomStockpile(pawn, room, "everything", project.Kind) is string pile)
+            if (project.kindDef?.defName == "AIPC_Storeroom" && RoomStockpile(pawn, room, project.Kind) is string pile)
                 results.Add(pile);
             ModLog.Message($"Outfitted {pawn.LabelShort}'s {project.Kind}: {(results.Count > 0 ? string.Join(" ", results) : "nothing to add")}");
         }
@@ -51,20 +51,20 @@ namespace AIPawnControl
                 {
                     case WorkOrders.Goal.Meal:
                         int meals = colonists * 4; // about two days: simple meals spoil in a few
-                        return WorkOrders.AddBill(pawn, table, recipe, meals, 0, $"until there are {meals}", ingredients: false);
+                        return WorkOrders.AddBill(pawn, table, recipe, meals, $"until there are {meals}", ingredients: false);
                     case WorkOrders.Goal.Butcher:
-                        return WorkOrders.AddBill(pawn, table, recipe, 0, 0, "whenever there are corpses", ingredients: false);
+                        return WorkOrders.AddBill(pawn, table, recipe, 0, "whenever there are corpses", ingredients: false);
                     case WorkOrders.Goal.Blocks:
-                        return WorkOrders.AddBill(pawn, table, recipe, 100, 0, "until there are 100", ingredients: false);
+                        return WorkOrders.AddBill(pawn, table, recipe, 100, "until there are 100", ingredients: false);
                     default:
-                        return WorkOrders.AddBill(pawn, table, recipe, colonists, 0, $"until there are {colonists}", ingredients: false);
+                        return WorkOrders.AddBill(pawn, table, recipe, colonists, $"until there are {colonists}", ingredients: false);
                 }
             }
             return null;
         }
 
         /// <summary>A stockpile on the room's free floor: no furniture, no work spot, not the cell inside a door, no zone yet.</summary>
-        private static string RoomStockpile(Pawn pawn, Room room, string holds, string kind)
+        private static string RoomStockpile(Pawn pawn, Room room, string kind)
         {
             Map map = room.Map;
             var blocked = new HashSet<IntVec3>();
@@ -81,7 +81,7 @@ namespace AIPawnControl
                 .ToList();
             if (cells.Count == 0)
                 return null;
-            return Stockpiles.PlaceCells(pawn, cells, holds, $"in the {kind}", $"{cells.Count} cells");
+            return Stockpiles.PlaceCells(pawn, cells, $"in the {kind}", $"{cells.Count} cells");
         }
     }
 }

@@ -12,9 +12,6 @@ for mind in t.iter('li'):
         continue
     print('mind', mind.findtext('pawn'), '| lastReflectTick', mem.findtext('lastReflectTick'), 'night', mem.findtext('lastReflectNight'))
     print('LATELY:', mem.findtext('lately'))
-    print('GOALS:')
-    for g in (mem.find('goals') or []):
-        print(f"  [{g.findtext('source')}] {g.findtext('text')} (why: {g.findtext('why')})")
     print('MEMORIES:')
     for m in (mem.find('memories') or []):
         v = m.findtext('vector') or ''

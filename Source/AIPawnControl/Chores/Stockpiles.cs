@@ -6,81 +6,55 @@ using Verse;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Stockpiles (STREAMLINE.md §7): code lays them out, the colony's first one and one in each new kitchen and storeroom.
-    /// Haulers fill them on their own.
+    /// Stockpiles (STREAMLINE.md §7): code lays them out, the colony's first one and one in each new storeroom, for
+    /// everything (vanilla's default stockpile). Haulers fill them on their own.
     /// </summary>
     public static class Stockpiles
     {
         public static bool CellOk(IntVec3 c, Map map)
         {
-            if (!c.InBounds(map) || c.InNoBuildEdgeArea(map) || c.Fogged(map) || !c.Standable(map) || c.GetTerrain(map).IsWater)
+            if (!Ground.Open(c, map) || !c.Standable(map) || c.GetTerrain(map).IsWater || Ground.BesideDoor(c, map))
                 return false;
-            if (map.zoneManager.ZoneAt(c) != null || map.planManager.PlanAt(c) != null)
-                return false;
-            foreach (var t in c.GetThingList(map))
-                if (t is Blueprint || t is Frame || t.def.category == ThingCategory.Building)
-                    return false;
             Room room = c.GetRoom(map);
-            if (room != null && !room.PsychologicallyOutdoors && !room.IsDoorway && !SiteFinder.NoRole(room))
-                return false; // not in someone's bedroom, the kitchen or the hospital
-            for (int r = 0; r < 4; r++)
-            {
-                var n = c + new Rot4(r).FacingCell;
-                if (n.InBounds(map) && n.GetEdifice(map) is Building_Door)
-                    return false;
-            }
-            return true;
+            return !(Ground.Indoor(room) && !Ground.NoRole(room)); // not in someone's bedroom, the kitchen or the hospital
+        }
+
+        /// <summary>The best spot for the colony's first stockpile (3 up to 6 cells square), and where it is in words. False if none.</summary>
+        public static bool FindSite(Pawn pawn, out CellRect rect, out string where)
+        {
+            Map map = pawn.Map;
+            var zones = new ZoneSites(new ChoreScan(pawn), c => CellOk(c, map), c => CellScore(c, map));
+            var site = zones.Find(new[] { 3, 6 }, 1).FirstOrDefault();
+            rect = site?.Rect(site.maxSize) ?? CellRect.Empty;
+            where = site != null ? zones.Where(rect, site.steps) : null;
+            return site != null;
         }
 
         /// <summary>Roofed ground keeps things from weathering: a bonus.</summary>
         public static int CellScore(IntVec3 c, Map map) => c.Roofed(map) ? 100 : 40;
 
-        public static void SetFilter(Zone_Stockpile zone, string kind)
-        {
-            var filter = zone.settings.filter;
-            switch (kind)
-            {
-                case "food":
-                    filter.SetDisallowAll();
-                    filter.SetAllow(ThingCategoryDefOf.Foods, true);
-                    break;
-                case "materials":
-                    filter.SetDisallowAll();
-                    filter.SetAllow(ThingCategoryDefOf.ResourcesRaw, true);
-                    filter.SetAllow(ThingCategoryDefOf.Manufactured, true);
-                    break;
-                case "weapons and clothes":
-                    filter.SetDisallowAll();
-                    filter.SetAllow(ThingCategoryDefOf.Weapons, true);
-                    filter.SetAllow(ThingCategoryDefOf.Apparel, true);
-                    break;
-            }
-        }
-
-        public static string Place(Pawn pawn, CellRect rect, string kind, string where)
+        public static string Place(Pawn pawn, CellRect rect, string where)
         {
             Map map = pawn.Map;
             string why = ZoneSites.Check(rect, map, c => CellOk(c, map));
             if (why != null)
                 return $"Couldn't lay out the stockpile: {why}.";
-            return PlaceCells(pawn, rect.Cells.ToList(), kind, where, $"{rect.Width}×{rect.Height}");
+            return PlaceCells(pawn, rect.Cells.ToList(), where, $"{rect.Width}×{rect.Height}");
         }
 
         /// <summary>Lays out the zone on cells already checked (a room's free floor, or a square), and records it as hers.</summary>
-        public static string PlaceCells(Pawn pawn, List<IntVec3> cells, string kind, string where, string size)
+        public static string PlaceCells(Pawn pawn, List<IntVec3> cells, string where, string size)
         {
             Map map = pawn.Map;
-            var preset = kind.StartsWith("dump") ? StorageSettingsPreset.DumpingStockpile : StorageSettingsPreset.DefaultStockpile;
-            var zone = new Zone_Stockpile(preset, map.zoneManager);
+            var zone = new Zone_Stockpile(StorageSettingsPreset.DefaultStockpile, map.zoneManager);
             map.zoneManager.RegisterZone(zone);
             foreach (var c in cells)
                 zone.AddCell(c);
-            SetFilter(zone, kind);
-            var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Stockpile, kind);
+            var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Stockpile, "everything");
             chore.zone = zone;
-            chore.Remember($"I laid out a stockpile for {kind} ({size}), {where}.", 3);
-            ModLog.Message($"{pawn.LabelShort} laid out a stockpile for {kind} ({size}), {where}.");
-            return $"Laid out a stockpile for {kind} ({size}), {where}.";
+            chore.Remember($"I laid out a stockpile for everything ({size}), {where}.", 3);
+            ModLog.Message($"{pawn.LabelShort} laid out a stockpile for everything ({size}), {where}.");
+            return $"Laid out a stockpile for everything ({size}), {where}.";
         }
     }
 }

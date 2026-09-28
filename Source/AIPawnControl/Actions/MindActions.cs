@@ -10,6 +10,20 @@ namespace AIPawnControl
     /// <summary>The only code that changes the game on the AI's behalf. Validates everything; returns a readable result.</summary>
     public static class MindActions
     {
+        /// <summary>Runs one picked action; if it throws, logs it and returns "That went wrong: …" as its result line.</summary>
+        public static string Safely(Pawn pawn, string label, Func<string> apply)
+        {
+            try
+            {
+                return apply();
+            }
+            catch (Exception e)
+            {
+                ModLog.Error($"{pawn.LabelShort}: applying \"{label}\" threw: {e}");
+                return "That went wrong: " + e.Message;
+            }
+        }
+
         // ---------- Act ----------
 
         /// <summary>Every AI order goes through here, from the main-thread pump (never OnGUI, see the Shift-queue trap).</summary>
@@ -85,8 +99,9 @@ namespace AIPawnControl
         /// Reflect's one work change (FURNISHING.md §6): set one kind of work straight to 1-4 or off, for what the colony
         /// needs or how she feels about it. The value it already has is a no-op, not an error. Returns the result line.
         /// </summary>
-        public static string ChangePriority(Pawn pawn, WorkTypeDef work, string priority)
+        public static string ChangePriority(Pawn pawn, WorkTypeDef work, string priority, out bool changed)
         {
+            changed = false;
             if (pawn.WorkTypeIsDisabled(work) || ActionCatalog.ProtectedWorkTypes.Contains(work.defName))
                 return $"I can't change how I do {work.labelShort}.";
             int p = pawn.workSettings.GetPriority(work);
@@ -96,6 +111,7 @@ namespace AIPawnControl
             if ((to > 0) == (p > 0) && (to == p || !ActionCatalog.ManualPriorities))
                 return $"I'll keep {work.labelShort} where it is.";
             pawn.workSettings.SetPriority(work, to);
+            changed = true;
             return to == 0 ? $"I'll stop doing {work.labelShort}."
                 : p == 0 ? $"I'll take on {work.labelShort} ({to})."
                 : to < p ? $"I'll do more {work.labelShort} ({to})." : $"I'll do less {work.labelShort} ({to}).";

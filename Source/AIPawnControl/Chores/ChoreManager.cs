@@ -12,7 +12,7 @@ namespace AIPawnControl
     public class Chore : IExposable
     {
         public enum Kind { Hunt, Cut, Mine, Bill, Field, Stockpile, Gather }
-        public enum State { Active, Done, Stopped, Vetoed, Orphaned }
+        public enum State { Active, Done, Vetoed, Orphaned }
 
         public Pawn pawn;
         public Map map;
@@ -21,8 +21,7 @@ namespace AIPawnControl
         public int placedTick;
         public string label;   // game words: "deer", "steel", "cook simple meal", "rice plant"
         public bool byMind;
-        public List<Thing> things = new List<Thing>(); // hunt and cut targets still pending
-        public List<IntVec3> cells = new List<IntVec3>(); // mine cells still pending
+        public List<LocalTargetInfo> targets = new List<LocalTargetInfo>(); // what's marked and still pending: animals, trees, plants, rock cells
         public Bill_Production bill;
         public Zone zone;
         public int done, vetoed;
@@ -35,7 +34,15 @@ namespace AIPawnControl
         public void Remember(string text, int importance) =>
             Mind?.memory.Record(pawn, "chore", kind.ToString(), text, importance, MemoryEvent.TookPart);
 
-        private DesignationDef Designation => kind == Kind.Hunt ? DesignationDefOf.Hunt : kind == Kind.Mine ? DesignationDefOf.Mine : DesignationDefOf.HarvestPlant;
+        public DesignationDef Designation => kind == Kind.Hunt ? DesignationDefOf.Hunt : kind == Kind.Mine ? DesignationDefOf.Mine : DesignationDefOf.HarvestPlant;
+
+        /// <summary>The target is used up: the animal dead, the plant gone, the rock mined out.</summary>
+        private bool Gone(LocalTargetInfo t) => t.HasThing ? t.Thing.Destroyed || (t.Thing is Pawn p && p.Dead) : t.Cell.GetFirstMineable(map) == null;
+
+        /// <summary>Still marked: her designation (or, on a tree, vanilla's cut instead of harvest) is on it.</summary>
+        private bool Marked(LocalTargetInfo t) => t.HasThing
+            ? map.designationManager.DesignationOn(t.Thing, Designation) != null || (kind == Kind.Cut && map.designationManager.DesignationOn(t.Thing, DesignationDefOf.CutPlant) != null)
+            : map.designationManager.DesignationAt(t.Cell, Designation) != null;
 
         public void Tick()
         {
@@ -52,38 +59,23 @@ namespace AIPawnControl
                 case Kind.Hunt:
                 case Kind.Cut:
                 case Kind.Gather:
-                    for (int i = things.Count - 1; i >= 0; i--)
+                case Kind.Mine:
+                    for (int i = targets.Count - 1; i >= 0; i--)
                     {
-                        Thing t = things[i];
-                        if (t == null || t.Destroyed || (t is Pawn p && p.Dead))
+                        var t = targets[i];
+                        if (Gone(t))
                             done++;
-                        else if (!t.Spawned || t.Map != map)
+                        else if (t.HasThing && (!t.Thing.Spawned || t.Thing.Map != map))
                         { } // wandered off the map: dropped quietly
-                        else if (map.designationManager.DesignationOn(t, Designation) != null
-                                 || (kind == Kind.Cut && map.designationManager.DesignationOn(t, DesignationDefOf.CutPlant) != null))
+                        else if (Marked(t))
                             continue;
-                        else if (kind == Kind.Gather && t is Plant bush && !bush.HarvestableNow)
+                        else if (kind == Kind.Gather && t.Thing is Plant bush && !bush.HarvestableNow)
                             done++; // a harvested bush stays and regrows
                         else
                             vetoed++;
-                        things.RemoveAt(i);
+                        targets.RemoveAt(i);
                     }
-                    if (things.Count == 0)
-                        Close();
-                    break;
-                case Kind.Mine:
-                    for (int i = cells.Count - 1; i >= 0; i--)
-                    {
-                        IntVec3 c = cells[i];
-                        if (c.GetFirstMineable(map) == null)
-                            done++;
-                        else if (map.designationManager.DesignationAt(c, DesignationDefOf.Mine) != null)
-                            continue;
-                        else
-                            vetoed++;
-                        cells.RemoveAt(i);
-                    }
-                    if (cells.Count == 0)
+                    if (targets.Count == 0)
                         Close();
                     break;
                 case Kind.Bill:
@@ -94,11 +86,6 @@ namespace AIPawnControl
                         else
                             Veto($"Someone cancelled my order: {label}.");
                         return;
-                    }
-                    if (bill.repeatMode == BillRepeatModeDefOf.RepeatCount && bill.repeatCount <= 0)
-                    {
-                        state = State.Done;
-                        Remember($"My order is done: {label}.", 3);
                     }
                     break;
                 case Kind.Field:
@@ -158,48 +145,12 @@ namespace AIPawnControl
             ModLog.Message($"{pawn.LabelShort}'s {kind} chore ({label}) was removed by the player.");
         }
 
-        /// <summary>Her own "stop …": removes what's still pending. Returns the result line.</summary>
-        public string Stop()
-        {
-            switch (kind)
-            {
-                case Kind.Hunt:
-                case Kind.Cut:
-                case Kind.Gather:
-                    foreach (var t in things.Where(t => t != null && t.Spawned))
-                    {
-                        map.designationManager.TryRemoveDesignationOn(t, Designation);
-                        if (kind == Kind.Cut)
-                            map.designationManager.TryRemoveDesignationOn(t, DesignationDefOf.CutPlant);
-                    }
-                    things.Clear();
-                    break;
-                case Kind.Mine:
-                    foreach (var c in cells)
-                        map.designationManager.TryRemoveDesignation(c, DesignationDefOf.Mine);
-                    cells.Clear();
-                    break;
-                case Kind.Bill:
-                    if (bill != null && !bill.DeletedOrDereferenced)
-                        bill.billStack.Delete(bill);
-                    break;
-                case Kind.Field:
-                case Kind.Stockpile:
-                    if (zone != null && zone.cells.Count > 0)
-                        zone.Delete();
-                    break;
-            }
-            state = State.Stopped;
-            Remember($"I changed my mind and called it off ({ChoreOptions.StopLabel(this)}).", 3);
-            return "Called it off.";
-        }
-
         public void ExposeData()
         {
             if (Scribe.mode == LoadSaveMode.Saving)
             {
                 // Only live things can be saved as references.
-                things.RemoveAll(t => t == null || t.Destroyed);
+                targets.RemoveAll(t => t.HasThing && t.Thing.Destroyed);
                 if (bill != null && bill.DeletedOrDereferenced && !Active)
                     bill = null;
                 if (zone != null && zone.cells.Count == 0 && !Active)
@@ -212,8 +163,7 @@ namespace AIPawnControl
             Scribe_Values.Look(ref placedTick, "placedTick");
             Scribe_Values.Look(ref label, "label");
             Scribe_Values.Look(ref byMind, "byMind");
-            Scribe_Collections.Look(ref things, "things", LookMode.Reference);
-            Scribe_Collections.Look(ref cells, "cells", LookMode.Value);
+            Scribe_Collections.Look(ref targets, "targets", LookMode.LocalTargetInfo);
             Scribe_References.Look(ref bill, "bill");
             Scribe_References.Look(ref zone, "zone");
             Scribe_Values.Look(ref done, "done");
@@ -222,9 +172,8 @@ namespace AIPawnControl
             Scribe_Values.Look(ref ripeSeen, "ripeSeen");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
-                things = things ?? new List<Thing>();
-                things.RemoveAll(t => t == null);
-                cells = cells ?? new List<IntVec3>();
+                targets = targets ?? new List<LocalTargetInfo>();
+                targets.RemoveAll(t => !t.IsValid);
             }
         }
     }
@@ -308,6 +257,18 @@ namespace AIPawnControl
             return active >= cap ? "the last one isn't finished yet" : null;
         }
 
+        /// <summary>Marks the targets with the kind's designation (hunt, harvest, mine), as one chore of hers.</summary>
+        public Chore Mark(Pawn pawn, Chore.Kind kind, string label, IEnumerable<LocalTargetInfo> targets)
+        {
+            var chore = Add(pawn, kind, label);
+            foreach (var t in targets)
+            {
+                pawn.Map.designationManager.AddDesignation(new Designation(t, chore.Designation));
+                chore.targets.Add(t);
+            }
+            return chore;
+        }
+
         public Chore Add(Pawn pawn, Chore.Kind kind, string label)
         {
             var chore = new Chore
@@ -326,8 +287,7 @@ namespace AIPawnControl
         /// <summary>Who set this up, if a mind did and it's still tracked.</summary>
         public Pawn OwnerOf(Bill bill) => chores.Find(c => c.Active && c.bill == bill)?.pawn;
         public Pawn OwnerOf(Zone zone) => chores.Find(c => c.Active && c.zone == zone)?.pawn;
-        public Pawn OwnerOf(Thing thing) => chores.Find(c => c.Active && c.things.Contains(thing))?.pawn;
-        public Pawn OwnerOf(IntVec3 cell, Map map) => chores.Find(c => c.Active && c.map == map && c.kind == Chore.Kind.Mine && c.cells.Contains(cell))?.pawn;
+        public Pawn OwnerOf(LocalTargetInfo target, Map map) => chores.Find(c => c.Active && c.map == map && c.targets.Contains(target))?.pawn;
 
         public override void GameComponentTick()
         {

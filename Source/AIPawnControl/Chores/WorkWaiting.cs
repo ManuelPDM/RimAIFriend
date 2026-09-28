@@ -32,10 +32,9 @@ namespace AIPawnControl
                 amount[work] = (amount.TryGetValue(work, out int had) ? had : 0) + howMuch;
             }
 
-            foreach (var building in map.listerBuildings.allBuildingsColonist)
+            foreach (var building in WorkOrders.Tables(map))
             {
-                if (!(building is IBillGiver giver) || giver.BillStack == null)
-                    continue;
+                var giver = (IBillGiver)building;
                 WorkTypeDef work = DefDatabase<WorkGiverDef>.AllDefsListForReading.FirstOrDefault(w => w.fixedBillGiverDefs != null && w.fixedBillGiverDefs.Contains(building.def))?.workType;
                 foreach (var bill in giver.BillStack.Bills)
                 {
@@ -73,7 +72,7 @@ namespace AIPawnControl
             if (waiting.Count == 0)
                 return null;
             string Key(WorkTypeDef work) => $"{map.uniqueID}:{work.defName}";
-            var lastNight = ChoreManager.Instance?.WorkLastNight(PawnMind.NightOf(map), amount.ToDictionary(kv => Key(kv.Key), kv => kv.Value))
+            var lastNight = ChoreManager.Instance?.WorkLastNight(GameTime.Night(map), amount.ToDictionary(kv => Key(kv.Key), kv => kv.Value))
                             ?? new Dictionary<string, int>();
             int? Before(WorkTypeDef work) => lastNight.TryGetValue(Key(work), out int n) ? n : (int?)null;
             var colonists = map.mapPawns.FreeColonistsSpawned.Where(p => p.workSettings != null).ToList();
@@ -104,16 +103,8 @@ namespace AIPawnControl
         /// <summary>What the colony's blueprints and frames still need beyond storage: "518 wood". Null if nothing's short.</summary>
         private static string MaterialsMissing(Map map)
         {
-            var need = new Dictionary<ThingDef, int>();
-            foreach (var t in map.listerThings.ThingsInGroup(ThingRequestGroup.Blueprint).Concat(map.listerThings.ThingsInGroup(ThingRequestGroup.BuildingFrame)))
-            {
-                if (t.Faction != Faction.OfPlayer)
-                    continue;
-                // Only build blueprints cost materials: an install blueprint (a minified thing being placed) logs an error if asked.
-                var costs = t is Frame frame ? frame.TotalMaterialCost() : t is Blueprint_Build blueprint ? blueprint.TotalMaterialCost() : null;
-                foreach (var cost in costs ?? new List<ThingDefCountClass>())
-                    need[cost.thingDef] = (need.TryGetValue(cost.thingDef, out int had) ? had : 0) + (t is Frame f ? f.ThingCountNeeded(cost.thingDef) : cost.count);
-            }
+            var need = Supplies.StillNeeds(map.listerThings.ThingsInGroup(ThingRequestGroup.Blueprint).Concat(map.listerThings.ThingsInGroup(ThingRequestGroup.BuildingFrame))
+                .Where(t => t.Faction == Faction.OfPlayer));
             var shortBy = need.Select(kv => (def: kv.Key, n: kv.Value - map.resourceCounter.GetCount(kv.Key))).Where(x => x.n > 0).ToList();
             return shortBy.Count == 0 ? null : string.Join(", ", shortBy.OrderByDescending(x => x.n).Select(x => $"{x.n} {x.def.label}"));
         }

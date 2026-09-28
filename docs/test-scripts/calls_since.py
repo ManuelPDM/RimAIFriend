@@ -1,10 +1,10 @@
-"""Summarise act/chat/plan/reflect calls after a local time: python calls_since.py <HH:MM:SS>
+"""Summarise the LLM calls (every call type) after a local time: python calls_since.py <HH:MM:SS>
 Shows each call's memory sections ([On my mind] / [I remember]), and the reply's choice, memory and say/reply."""
 import json, sys, glob
 after = sys.argv[1]
 f = sorted(glob.glob('D:/RimDev/AIPawnControl/prompts-*.jsonl'))[-1]
 for e in (json.loads(l) for l in open(f, encoding='utf-8') if l.strip()):
-    if e['time'][11:19] <= after or e.get('callType') not in ('act', 'chat', 'plan', 'reflect'):
+    if e['time'][11:19] <= after:
         continue
     user = e['request']['messages'][-1]['content'] if 'request' in e else ''
     first = user.split('\n', 1)[0]

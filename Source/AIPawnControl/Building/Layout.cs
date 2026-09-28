@@ -8,22 +8,21 @@ namespace AIPawnControl
 {
     /// <summary>
     /// The base's ways out and what can bring doors inside (BASE_LAYOUT.md §5): a way out is a colony door between an
-    /// indoor room and the outdoors; a room people may walk through has no bed and no meal source (§3).
+    /// indoor room and the outdoors; a room people may walk through has no bed and no meal source (§3). The lines the
+    /// Base call offers: a hub the ways out open into (SiteFinder.Hubs), a door between neighbours, and closing a way out
+    /// that isn't needed any more.
     /// </summary>
     public static class Layout
     {
-        /// <summary>An indoor room of the base: proper, not a doorway, not outdoors.</summary>
-        public static bool Indoor(Room room) => room != null && !room.IsDoorway && !room.PsychologicallyOutdoors && !room.UsesOutdoorTemperature;
-
         /// <summary>An indoor room with a colony door: a room of the base, not an ancient ruin.</summary>
-        public static bool OfBase(Room room) => Indoor(room) && Doors(room).Any(d => d.Faction == Faction.OfPlayer);
+        public static bool OfBase(Room room) => Ground.Indoor(room) && Doors(room).Any(d => d.Faction == Faction.OfPlayer);
 
         /// <summary>
-        /// A room of the base that's for something: vanilla gives it a role, one of our projects built it (a common room has
-        /// no role), or it joins 2+ doors (a hall). Not a pocket of ground the walls happen to close in.
+        /// A room of the base that's for something: vanilla gives it a role, one of our projects built it (a hall has no
+        /// role), or it joins 2+ doors. Not a pocket of ground the walls happen to close in.
         /// </summary>
         public static bool RealRoom(Room room) => OfBase(room)
-            && (!SiteFinder.NoRole(room) || BuildManager.Instance?.BuilderOf(room) != null || Doors(room).Count() >= 2);
+            && (!Ground.NoRole(room) || BuildManager.Instance?.BuilderOf(room) != null || Doors(room).Count() >= 2);
 
         /// <summary>
         /// Walking through doesn't hurt it (§3): no bed (movement noise disturbs sleep) and no meal source (tracked-in
@@ -31,7 +30,7 @@ namespace AIPawnControl
         /// </summary>
         public static bool WalkThrough(Room room)
         {
-            if (!Indoor(room))
+            if (!Ground.Indoor(room))
                 return false;
             foreach (var t in room.ContainedAndAdjacentThings)
                 if (t is Building b && room.ContainsCell(b.Position) && (b is Building_Bed || b.def.building?.isMealSource == true))
@@ -41,15 +40,15 @@ namespace AIPawnControl
 
         /// <summary>A kind whose items make a walk-through room: no bed and no meal source among them.</summary>
         public static bool WalkThroughKind(RoomKindDef kind, Map map) =>
-            kind.role != null && kind.items.All(i => !(i.Resolve(map) is ThingDef d) || (!d.IsBed && d.building?.isMealSource != true));
+            kind.items.All(i => !(i.Resolve(map) is ThingDef d) || (!d.IsBed && d.building?.isMealSource != true));
 
         /// <summary>The rooms on either side of a door (its walkable neighbours), doorways left out.</summary>
         public static List<Room> Sides(Building_Door door)
         {
             var rooms = new List<Room>();
-            for (int r = 0; r < 4; r++)
+            foreach (var d in GenAdj.CardinalDirections)
             {
-                IntVec3 n = door.Position + new Rot4(r).FacingCell;
+                IntVec3 n = door.Position + d;
                 if (!n.InBounds(door.Map) || !n.Walkable(door.Map))
                     continue;
                 Room room = n.GetRoom(door.Map);
@@ -62,7 +61,7 @@ namespace AIPawnControl
         public class WayOut
         {
             public Building_Door door;
-            public Room room;      // the indoor room it serves
+            public Room room;       // the indoor room it serves
             public IntVec3 outside; // its cell on the outdoor side
         }
 
@@ -76,13 +75,13 @@ namespace AIPawnControl
                     continue;
                 Room inside = null;
                 IntVec3 outside = IntVec3.Invalid;
-                for (int r = 0; r < 4; r++)
+                foreach (var d in GenAdj.CardinalDirections)
                 {
-                    IntVec3 n = door.Position + new Rot4(r).FacingCell;
+                    IntVec3 n = door.Position + d;
                     if (!n.InBounds(map) || !n.Walkable(map))
                         continue;
                     Room room = n.GetRoom(map);
-                    if (Indoor(room))
+                    if (Ground.Indoor(room))
                         inside = room;
                     else if (room != null && !room.IsDoorway)
                         outside = n;
@@ -97,7 +96,7 @@ namespace AIPawnControl
         public static bool ReachesInside(Room room)
         {
             foreach (var door in Doors(room))
-                if (Sides(door).Any(r => r != room && Indoor(r)))
+                if (Sides(door).Any(r => r != room && Ground.Indoor(r)))
                     return true;
             return false;
         }
@@ -111,7 +110,7 @@ namespace AIPawnControl
         }
 
         /// <summary>"dining room", "workshop", or "room" when vanilla gives it no role.</summary>
-        public static string Name(Room room) => SiteFinder.NoRole(room) ? "room" : room.Role.label;
+        public static string Name(Room room) => Ground.NoRole(room) ? "room" : room.Role.label;
 
         /// <summary>For [Colony]: "6 ways out".</summary>
         public static string Line(Map map)
@@ -130,9 +129,9 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// A door in a single player wall between two indoor rooms, at least one walk-through, where one of them doesn't
-        /// reach inside yet. The door cell has walls on its other two sides and nothing built right in front of it.
-        /// Doors never join two end rooms, so nobody walks through a bedroom or the kitchen.
+        /// A door in a single player wall from a room that doesn't reach inside yet into a walk-through room. The door cell
+        /// has walls on its other two sides and nothing built right in front of it. Doors never join two end rooms, so nobody
+        /// walks through a bedroom or the kitchen.
         /// </summary>
         public static List<NeighbourDoor> NeighbourDoors(Map map)
         {
@@ -159,7 +158,7 @@ namespace AIPawnControl
                         if (!(w + side).Impassable(map) || !(w - side).Impassable(map) || !Clear(a, map, spots) || !Clear(b, map, spots))
                             continue;
                         // Away from the corners: the most wall on its shorter side.
-                        float off = -System.Math.Min(Run(w, side, map), Run(w, -side, map));
+                        float off = -Math.Min(Run(w, side, map), Run(w, -side, map));
                         var key = room.ID < other.ID ? (room, other) : (other, room);
                         if (!best.TryGetValue(key, out var had) || off < had.off)
                             best[key] = (new NeighbourDoor { cell = w, from = room, into = other }, off);
@@ -197,27 +196,24 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// What the Base call offers for the layout: the ladder's next room as a common room (when people may walk through
-        /// it and it fits), else the best plain common room, a way out that can close, and a door between neighbours.
-        /// Each is found again when she picks it: the map may have changed while she thought.
+        /// What the Base call offers for the layout: the ladder's next room as a hub the ways out open into (when people may
+        /// walk through it and it fits), a plain hall, a way out that can close, and a door between neighbours. Each is
+        /// found again when she picks it: the map may have changed while she thought.
         /// </summary>
-        public static List<Option> Options(Map map, Ladder.Rung rung)
+        public static List<Option> Options(Map map, Ladder.Rung rung, SiteFinder finder, RoomValidator validator, List<ThingDef> materials)
         {
             var options = new List<Option>();
-            var materials = SiteFinder.Materials(map);
             string Cost(IEnumerable<PlanEntry> entries)
             {
                 var plan = new RoomPlan { map = map };
                 plan.entries.AddRange(entries);
                 return SiteFinder.CostText(plan, materials);
             }
-            var finder = new CommonRoomFinder(map);
-            var hall = finder.Find().FirstOrDefault();
-            if (hall != null && rung?.kind != null && rung.waiting == null && WalkThroughKind(rung.kind, map) && finder.WithKind(hall, rung.kind) is CommonPlan asRung)
-                options.Add(new Option { group = "Next for the base", label = $"{asRung.Label}: {Cost(asRung.ToPlan(map, rung.kind).entries)}",
-                    apply = (p, m) => PlaceCommon(p, asRung.doors, rung.kind, m) });
-            if (hall != null)
-                options.Add(new Option { group = "Inside the base", label = $"{hall.Label}: {Cost(hall.ToPlan(map, null).entries)}", apply = (p, m) => PlaceCommon(p, hall.doors, null, m) });
+            if (rung?.kind != null && rung.waiting == null && WalkThroughKind(rung.kind, map)
+                && finder.Hubs(rung.kind, validator, materials[0]).FirstOrDefault() is RoomPlan asRung)
+                options.Add(HubOption("Next for the base", asRung, materials));
+            if (finder.Hubs(RoomKindDef.Hall, validator, materials[0]).FirstOrDefault() is RoomPlan hall)
+                options.Add(HubOption("Inside the base", hall, materials));
             if (Surplus(map).FirstOrDefault() is WayOut way)
                 options.Add(new Option { group = "Inside the base", label = $"{CloseLabel(way)}: {Cost(new[] { new PlanEntry(ThingDefOf.Wall, way.door.Position, Rot4.North) })}",
                     apply = (p, m) => Close(p, way.door.Position, m) });
@@ -227,24 +223,48 @@ namespace AIPawnControl
             return options;
         }
 
-        private static RoomKindDef Kind(string defName) => DefDatabase<RoomKindDef>.GetNamed(defName);
+        // ---- hubs ----
 
-        private static string PlaceCommon(Pawn pawn, List<WayOut> doors, RoomKindDef kind, ThingDef material)
+        /// <summary>"the barracks, kitchen and storeroom": the rooms whose doors the hub takes in.</summary>
+        public static string HubRooms(RoomPlan hub)
+        {
+            var names = hub.broughtIn.Select(d => d.GetEdifice(hub.map) is Building_Door door && Sides(door).FirstOrDefault(Ground.Indoor) is Room room
+                ? Name(room) : "room").ToList();
+            return names.Count <= 1 ? string.Join("", names) : string.Join(", ", names.Take(names.Count - 1)) + " and " + names.Last();
+        }
+
+        /// <summary>"a storeroom the barracks and kitchen open into (4x6: 6 shelves; 2 doors come inside, 1 fewer way out): 80 wood".</summary>
+        private static Option HubOption(string group, RoomPlan hub, List<ThingDef> materials)
+        {
+            var furniture = hub.Furniture.ToList();
+            string items = furniture.Count == 0 ? "" : ": " + string.Join(", ", furniture.GroupBy(e => e.def)
+                .Select(g => g.Count() > 1 ? $"{g.Count()} {Find.ActiveLanguageWorker.Pluralize(g.Key.label, g.Count())}" : g.Key.label));
+            string saved = hub.waysOutSaved == 1 ? "1 fewer way out" : $"{hub.waysOutSaved} fewer ways out";
+            string label = $"a {hub.kind.label} the {HubRooms(hub)} open into ({hub.SizeLabel.Replace('×', 'x')}{items}; "
+                           + $"{hub.broughtIn.Count} doors come inside, {saved}): {SiteFinder.CostText(hub, materials)}";
+            RoomKindDef kind = hub.kind;
+            CellRect offered = hub.footprint;
+            return new Option { group = group, label = label, apply = (p, m) => PlaceHub(p, kind, offered, m) };
+        }
+
+        /// <summary>The hub found again (the nearest to the one offered) and laid out like any room.</summary>
+        private static string PlaceHub(Pawn pawn, RoomKindDef kind, CellRect offered, ThingDef material)
         {
             Map map = pawn.Map;
-            var finder = new CommonRoomFinder(map);
-            var members = finder.waysOut.Where(w => doors.Any(d => d.door.Position == w.door.Position)).ToList();
-            var plan = finder.Build(members);
-            if (plan != null && kind != null)
-                plan = finder.WithKind(plan, kind);
+            var finder = new SiteFinder(map, SiteFinder.BaseCenter(map));
+            var validator = new RoomValidator(map, finder.center, finder.weights.maxWalk);
+            var plan = finder.Hubs(kind, validator, material, 3).OrderBy(h => h.footprint.CenterCell.DistanceToSquared(offered.CenterCell)).FirstOrDefault();
             if (plan == null)
-                return $"Wanted a {kind?.label ?? "common room"} the others open into, but it doesn't fit there any more.";
-            string where = "joining the " + plan.Rooms;
-            ModLog.Message($"{pawn.LabelShort}: {plan.Label}\n{finder.Draw(plan)}");
-            var project = BuildManager.Instance.PlaceLayout(pawn, plan.ToPlan(map, kind ?? Kind("AIPC_CommonRoom")), material, plan.walkway.First(), where);
+                return $"Wanted a {kind.label} the others open into, but it doesn't fit there any more.";
+            string where = "joining the " + HubRooms(plan);
+            var project = BuildManager.Instance.Place(pawn, plan, material, validator, where);
+            if (project == null)
+                return $"Wanted a {kind.label} the others open into, but it doesn't fit there any more.";
             string marked = Supplies.MarkFor(pawn, project);
-            return $"Laid out a {kind?.label ?? "common room"} {where} ({plan.WaysOutSaved} fewer ways out, {material.label})." + (marked.Length > 0 ? " " + marked : "");
+            return $"Laid out a {kind.label} {where} ({plan.waysOutSaved} fewer ways out, {material.label})." + (marked.Length > 0 ? " " + marked : "");
         }
+
+        private static RoomKindDef Kind(string defName) => DefDatabase<RoomKindDef>.GetNamed(defName);
 
         private static string Close(Pawn pawn, IntVec3 cell, ThingDef material)
         {
@@ -284,7 +304,7 @@ namespace AIPawnControl
 
         // ---- closing ways out (§5.5) ----
 
-        /// <summary>"close the kitchen's outside door (it reaches the outdoors through the dining room)".</summary>
+        /// <summary>"close the kitchen's outside door (it's reached from inside now)".</summary>
         public static string CloseLabel(WayOut way) => $"close the {Name(way.room)}'s outside door (it's reached from inside now)";
 
         /// <summary>
@@ -315,39 +335,25 @@ namespace AIPawnControl
             var passable = new Dictionary<Room, bool>();
             bool Passable(Room r)
             {
-                if (r == null || r == room || r.IsDoorway || !Indoor(r))
+                if (r == null || r == room || r.IsDoorway || !Ground.Indoor(r))
                     return true;
                 if (!passable.TryGetValue(r, out bool v))
                     passable[r] = v = WalkThrough(r);
                 return v;
             }
-            var dist = new Dictionary<IntVec3, int>();
-            var queue = new Queue<IntVec3>();
-            foreach (var d in Doors(room))
-                if (d.Position != shut)
+            IntVec3 hit = IntVec3.Invalid;
+            var flood = Flood.Run(room.ExtentsClose.ExpandedBy(limit + 2).ClipInsideMap(map),
+                Doors(room).Where(d => d.Position != shut).Select(d => d.Position),
+                n => n != shut && n.Walkable(map) && Passable(n.GetRoom(map)),
+                limit + 1,
+                stop: c =>
                 {
-                    dist[d.Position] = 0;
-                    queue.Enqueue(d.Position);
-                }
-            while (queue.Count > 0)
-            {
-                var c = queue.Dequeue();
-                int n0 = dist[c];
-                Room here = c.GetRoom(map);
-                if (here != null && !here.IsDoorway && here.UsesOutdoorTemperature)
-                    return n0;
-                if (n0 > limit)
-                    continue;
-                for (int r = 0; r < 4; r++)
-                {
-                    IntVec3 n = c + new Rot4(r).FacingCell;
-                    if (n == shut || !n.InBounds(map) || dist.ContainsKey(n) || !n.Walkable(map) || !Passable(n.GetRoom(map)))
-                        continue;
-                    dist[n] = n0 + 1;
-                    queue.Enqueue(n);
-                }
-            }
-            return limit + 1;
+                    if (!Ground.Outdoors(c.GetRoom(map)))
+                        return false;
+                    hit = c;
+                    return true;
+                });
+            return hit.IsValid ? flood[hit] : limit + 1;
         }
     }
 }

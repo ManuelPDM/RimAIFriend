@@ -60,7 +60,7 @@ namespace AIPawnControl
                          $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.{ideo}" +
                          (skills != null ? $" Skills: {skills}." : "") +
                          (BuildManager.Instance?.RoomsPhrase(pawn) is string rooms && rooms.Length > 0 ? " " + rooms : ""),
-                ["Time"] = $"{TimeString(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
+                ["Time"] = $"{GameTime.Now(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
                            $"I'm in: {RoomLabel(pawn)}.",
                 ["Condition"] = Condition(pawn),
                 ["Needs"] = needs != null && needs.Count > 0 ? string.Join(", ", needs) : null,
@@ -86,42 +86,12 @@ namespace AIPawnControl
             var groups = new List<KeyValuePair<string, List<string>>>();
             for (int i = mind.decisions.Count - count; i < mind.decisions.Count; i++)
             {
-                int tick = i < mind.decisionTicks.Count ? mind.decisionTicks[i] : -1;
-                string day = tick >= 0 ? DayLabel(tick, map) : "Earlier";
+                string day = GameTime.DayLabel(mind.decisionTicks[i], map);
                 if (groups.Count == 0 || groups[groups.Count - 1].Key != day)
                     groups.Add(new KeyValuePair<string, List<string>>(day, new List<string>()));
                 groups[groups.Count - 1].Value.Add(mind.decisions[i]);
             }
             return string.Join(" — ", groups.Select(g => $"{g.Key}: {string.Join(" · ", g.Value)}"));
-        }
-
-        /// <summary>The map's local day number of a game tick.</summary>
-        private static int LocalDayAt(int tick, Map map)
-        {
-            long abs = GenDate.TickGameToAbs(tick);
-            float longitude = Find.WorldGrid.LongLatOf(map.Tile).x;
-            return GenDate.Year(abs, longitude) * GenDate.DaysPerYear + GenDate.DayOfYear(abs, longitude);
-        }
-
-        /// <summary>"Today", "Yesterday" or "3 days ago", in the map's local time.</summary>
-        public static string DayLabel(int tick, Map map)
-        {
-            int days = LocalDayAt(Find.TickManager.TicksGame, map) - LocalDayAt(tick, map);
-            return days <= 0 ? "Today" : days == 1 ? "Yesterday" : $"{days} days ago";
-        }
-
-        /// <summary>"14:05" in the map's local time.</summary>
-        public static string Clock(int tick, Map map)
-        {
-            float hour = GenDate.HourFloat(GenDate.TickGameToAbs(tick), Find.WorldGrid.LongLatOf(map.Tile).x);
-            return $"{(int)hour:00}:{(int)(hour % 1f * 60f):00}";
-        }
-
-        public static string TimeString(Map map)
-        {
-            string date = GenDate.DateFullStringAt(Find.TickManager.TicksAbs, Find.WorldGrid.LongLatOf(map.Tile));
-            float hour = GenLocalDate.HourFloat(map);
-            return $"{date}, {(int)hour:00}:{(int)((hour % 1f) * 60f):00}";
         }
 
         private static string Backstory(Pawn pawn)
@@ -386,7 +356,6 @@ namespace AIPawnControl
             return c;
         }
 
-        /// <summary>The kinds of rooms the colony has, e.g. "bedroom ×2, kitchen", or that it has none yet.</summary>
         /// <summary>
         /// Every indoor room on the map, read fresh each call so it never goes stale (PHASE4.md §7): the room she's in in
         /// detail, then one short phrase per other room with its notable furniture. Her own and her built rooms first.
@@ -395,13 +364,13 @@ namespace AIPawnControl
         {
             Map map = pawn.Map;
             Room here = pawn.GetRoom();
-            if (here != null && (here.PsychologicallyOutdoors || here.Fogged || here.IsDoorway || here.Role == null || here.Role == RoomRoleDefOf.None))
+            if (here != null && (!Ground.Indoor(here) || here.Fogged || !Ground.AnyRole(here)))
                 here = null; // a door cell is a one-cell "room" of its own
             var built = new HashSet<Room>(BuildManager.Instance?.ProjectsOf(pawn)
                 .Where(p => p.state == BuildProject.State.Done && p.map == map)
                 .Select(p => p.Room).Where(r => r != null) ?? Enumerable.Empty<Room>());
             var rooms = map.regionGrid.AllRooms
-                .Where(r => r != here && !r.PsychologicallyOutdoors && !r.Fogged && r.Role != null && r.Role != RoomRoleDefOf.None)
+                .Where(r => r != here && Ground.Indoor(r) && !r.Fogged && Ground.AnyRole(r))
                 .OrderByDescending(r => r.Owners.Contains(pawn))
                 .ThenByDescending(r => built.Contains(r))
                 .ToList();

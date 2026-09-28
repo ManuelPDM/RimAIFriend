@@ -90,22 +90,9 @@ namespace AIPawnControl
         /// <summary>The same rock around the seed, nearest first, up to MaxCells, each passing Check.</summary>
         private static List<IntVec3> Vein(IntVec3 seed, ThingDef rock, Map map)
         {
-            var vein = new List<IntVec3>();
-            var seen = new HashSet<IntVec3> { seed };
-            var queue = new Queue<IntVec3>();
-            queue.Enqueue(seed);
-            while (queue.Count > 0 && vein.Count < MaxCells)
-            {
-                var c = queue.Dequeue();
-                vein.Add(c);
-                for (int r = 0; r < 4; r++)
-                {
-                    var n = c + new Rot4(r).FacingCell;
-                    if (n.InBounds(map) && seen.Add(n) && n.GetFirstMineable(map)?.def == rock && Check(n, map) == null)
-                        queue.Enqueue(n);
-                }
-            }
-            return vein;
+            int found = 0;
+            return Flood.Run(Flood.All(map), new[] { seed }, n => n.GetFirstMineable(map)?.def == rock && Check(n, map) == null,
+                stop: c => ++found >= MaxCells).Reached;
         }
 
         /// <summary>The validator for one cell: null if it may be marked now.</summary>
@@ -160,12 +147,7 @@ namespace AIPawnControl
                 return ChoreOptions.NoneLeft(cells.Select(c => Check(c, map)), $"The {label} can't be mined now.");
             if (!RoofSafe(map, marked))
                 return $"Mining the {label} there would bring the roof down; I left it.";
-            var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Mine, label);
-            foreach (var c in marked)
-            {
-                map.designationManager.AddDesignation(new Designation(c, DesignationDefOf.Mine));
-                chore.cells.Add(c);
-            }
+            var chore = ChoreManager.Instance.Mark(pawn, Chore.Kind.Mine, label, marked.Select(c => new LocalTargetInfo(c)));
             chore.Remember($"I marked {label} to mine: ×{marked.Count}.", 2);
             ModLog.Message($"{pawn.LabelShort} marked {label} to mine: {marked.Count} cells.");
             return $"Marked {label} to mine: ×{marked.Count}.";

@@ -136,12 +136,7 @@ namespace AIPawnControl
             var marked = trees.Where(t => Check(t, pawn.Map, foci) == null).ToList();
             if (marked.Count == 0)
                 return ChoreOptions.NoneLeft(trees.Select(t => Check(t, pawn.Map, foci)), "Those trees can't be cut now.");
-            var chore = ChoreManager.Instance.Add(pawn, Chore.Kind.Cut, "trees");
-            foreach (var t in marked)
-            {
-                pawn.Map.designationManager.AddDesignation(new Designation(t, DesignationDefOf.HarvestPlant));
-                chore.things.Add(t);
-            }
+            var chore = ChoreManager.Instance.Mark(pawn, Chore.Kind.Cut, "trees", marked.Select(t => new LocalTargetInfo(t)));
             int wood = marked.Sum(t => t.YieldNow());
             chore.Remember($"I marked trees to cut for wood: ×{marked.Count}, about {wood} wood.", 2);
             ModLog.Message($"{pawn.LabelShort} marked {marked.Count} trees to cut (about {wood} wood).");
