@@ -30,6 +30,7 @@ namespace AIPawnControl
             public CellRect field;
             public string fieldWhere;
             public CellRect pile;         // a stockpile, when the colony has none
+            public Func<Pawn, ThingDef, string> layout; // a common room, a door between rooms, a way out closed (BASE_LAYOUT.md)
         }
 
         /// <summary>Whether the Act menu offers "work on the base": a room can be planned, or there's anything to stock up or grow.</summary>
@@ -115,6 +116,10 @@ namespace AIPawnControl
                         choices.Add(other);
             }
 
+            // Fewer ways out (BASE_LAYOUT.md §5.7): the rung as a common room, a plain common room, a closed way out, a door between rooms.
+            if (canPlan)
+                choices.AddRange(Layout.Options(map, rung).Select(o => new Choice { group = o.group, label = o.label, layout = o.apply }));
+
             // Food: a field only when the outlook falls short (STREAMLINE.md §6).
             var outlook = FoodOutlook.For(map);
             if (AIPawnControlMod.Settings.allowChores && outlook.cellsWanted > 0 && FieldChoice(pawn, outlook) is Choice field)
@@ -149,7 +154,7 @@ namespace AIPawnControl
                 return "There's nothing I can do for the base right now.";
             }
             // Numbered in group order, so the list reads as groups.
-            string[] order = { "Next for the base", "Food", "Storage", "Stock up", "Other rooms" };
+            string[] order = { "Next for the base", "Inside the base", "Food", "Storage", "Stock up", "Other rooms" };
             choices = choices.OrderBy(c => Array.IndexOf(order, c.group)).ToList();
             var lines = new List<string>();
             string lastGroup = null;
@@ -161,18 +166,19 @@ namespace AIPawnControl
                 lines.Add($" {i + 1}: {choices[i].label}");
             }
             bool anyRoom = choices.Any(c => c.kind != null);
+            bool walls = anyRoom || choices.Any(c => c.layout != null);
             var letters = anyRoom ? sites.Select((s, i) => ((char)('A' + i)).ToString()).ToList() : new List<string>();
-            string rooms = anyRoom
-                ? "Sites for a room (walls and door cost at 5x5):\n" + string.Join("\n", sites.Select((s, i) => finder.Describe(s, letters[i][0], materials, finder.MaxFit(s))))
-                  + $"\nWall materials: {materialsLine}. The colony marks trees or ore for what's missing, but only what's nearby can be had."
-                : "";
+            string rooms = (anyRoom
+                ? "Sites for a room (walls and door cost at 5x5):\n" + string.Join("\n", sites.Select((s, i) => finder.Describe(s, letters[i][0], materials, finder.MaxFit(s)))) + "\n"
+                : "")
+                + (walls ? $"Wall materials: {materialsLine}. The colony marks trees or ore for what's missing, but only what's nearby can be had." : "");
             var messages = PromptBuilder.Build("base", mind, new Dictionary<string, string>
             {
                 ["rung"] = rungText,
                 ["options"] = string.Join("\n", lines),
                 ["rooms"] = rooms,
             });
-            var schema = Schema(choices.Count, letters, anyRoom ? materials.Select(m => m.label).ToList() : new List<string>());
+            var schema = Schema(choices.Count, letters, walls ? materials.Select(m => m.label).ToList() : new List<string>());
             ModLog.Message($"{pawn.LabelShort}: base call with {choices.Count} choices ({clock.ElapsedMilliseconds} ms to build).");
             mind.Send("base", messages, schema, reply => OnReply(mind, reply, choices, sites, letters, materials),
                 stillValid: () => pawn.Destroyed || pawn.Dead || !pawn.Spawned || pawn.Map != map ? "gone" : null);
@@ -315,6 +321,8 @@ namespace AIPawnControl
                     int siteIndex = letters.IndexOf(Get("site"));
                     result = PlaceRoom(pawn, choice, sites[siteIndex >= 0 ? siteIndex : 0], materials.Find(m => m.label == Get("material")) ?? materials[0]);
                 }
+                else if (choice.layout != null)
+                    result = choice.layout(pawn, materials.Find(m => m.label == Get("material")) ?? materials[0]);
                 else if (choice.crop != null)
                     result = Fields.Place(pawn, choice.field, choice.crop, choice.fieldWhere);
                 else if (choice.upgrade != null)

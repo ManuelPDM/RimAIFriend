@@ -14,3 +14,4 @@ tree           = -2     # per tree to cut
 item           = -0.5   # per item to haul
 home           = 5      # inside the home area
 bigRoom        = 4      # the 5x5 size over 4x4
+insideDoor     = 8      # per door that opens inside the base instead of outdoors (BASE_LAYOUT.md); a new wall costs 1

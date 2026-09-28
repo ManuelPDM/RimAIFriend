@@ -96,10 +96,13 @@ namespace AIPawnControl
             public HashSet<PlanEntry> boxedInBefore;             // items with no free neighbour already
         }
 
-        public static bool Place(RoomPlan plan)
+        /// <param name="keepFree">More cells to leave walkable, like the cell inside a common room's door out.</param>
+        public static bool Place(RoomPlan plan, IEnumerable<IntVec3> keepFree = null)
         {
             var s = new State { plan = plan, inner = plan.Interior };
             s.reserved.Add(plan.doorInside);
+            if (keepFree != null)
+                s.reserved.UnionWith(keepFree);
             var firstOf = new List<PlanEntry>();
 
             var kindItems = plan.kind.items;

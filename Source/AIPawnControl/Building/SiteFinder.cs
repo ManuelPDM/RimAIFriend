@@ -21,12 +21,13 @@ namespace AIPawnControl
         public readonly List<(IntVec3 pos, float radius)> foci;
         private readonly int w, h;
         private readonly int[] walk;
-        private readonly bool[] reusable, realWall, noEdifice, wallRunH, wallRunV, doorOk, spotBlocked;
+        private readonly int[] toOutdoors; // tiles from the outdoors, walking through the base (doors pass)
+        private readonly bool[] reusable, realWall, noEdifice, wallRunH, wallRunV, doorOk, doorInside, spotBlocked;
+        private readonly Dictionary<Room, bool> walkThroughCache = new Dictionary<Room, bool>();
         private readonly Dictionary<(RoomKindDef, int, int, int, int), List<PlanEntry>> templates = new Dictionary<(RoomKindDef, int, int, int, int), List<PlanEntry>>();
         public readonly Dictionary<string, long> timings = new Dictionary<string, long>();
         private readonly int[] satBlocked, satRingBad, satDoorTouch, satTrees, satItems, satFertility;
         private readonly Dictionary<Room, bool> outdoorsCache = new Dictionary<Room, bool>();
-        private readonly Dictionary<Room, int> doorCountCache = new Dictionary<Room, int>();
         private CellRect scanArea;
         private readonly HashSet<IntVec3> interactionSpots;
 
@@ -65,9 +66,11 @@ namespace AIPawnControl
             wallRunH = new bool[w * h];
             wallRunV = new bool[w * h];
             doorOk = new bool[w * h];
+            doorInside = new bool[w * h];
             spotBlocked = new bool[w * h];
             interactionSpots = InteractionSpots(map);
             timings["spots"] = clock.ElapsedMilliseconds;
+            toOutdoors = ToOutdoors(scanArea.IsEmpty ? CellRect.Empty : scanArea.ExpandedBy(12).ClipInsideMap(map));
             // Wall grids reach 12 cells past the scan area: alignment looks up to 10 beyond a footprint, slivers 2.
             CellRect wallArea = scanArea.IsEmpty ? CellRect.Empty : scanArea.ExpandedBy(12).ClipInsideMap(map);
             foreach (var c in wallArea)
@@ -95,7 +98,11 @@ namespace AIPawnControl
                 if (walk[i] >= 0 && !(c.GetEdifice(map) is Building_Door))
                 {
                     Room room = c.GetRoom(map);
-                    doorOk[i] = room != null && (!IsIndoors(room) || IsHallway(room));
+                    // Outdoors, or a room people may walk through (BASE_LAYOUT.md §5.6) with nothing built where the door opens,
+                    // close enough to the outdoors (outdoorWalk).
+                    doorOk[i] = room != null && (!IsIndoors(room) || (WalkThrough(room) && Layout.RealRoom(room) && !interactionSpots.Contains(c)
+                        && c.GetThingList(map).All(t => t.def.category != ThingCategory.Building) && toOutdoors[i] >= 0 && toOutdoors[i] + 1 <= weights.outdoorWalk));
+                    doorInside[i] = doorOk[i] && IsIndoors(room);
                 }
                 blocked[i] = IsBlocked(c, out trees[i], out items[i]);
                 foreach (var t in c.GetThingList(map))
@@ -123,6 +130,43 @@ namespace AIPawnControl
             satItems = Sat(items);
             satFertility = Sat(fertilityTenths);
             timings["grids"] = clock.ElapsedMilliseconds;
+        }
+
+        /// <summary>
+        /// Walking distance from the outdoors into the base's rooms (doors pass), -1 if not reached. It never crosses a room
+        /// that shouldn't be walked through (a bedroom, the kitchen).
+        /// </summary>
+        private int[] ToOutdoors(CellRect area)
+        {
+            var dist = new int[w * h];
+            for (int i = 0; i < dist.Length; i++)
+                dist[i] = -1;
+            var queue = new Queue<IntVec3>();
+            foreach (var c in area)
+            {
+                Room room = c.GetRoom(map);
+                if (room != null && !room.IsDoorway && room.UsesOutdoorTemperature && c.Walkable(map))
+                {
+                    dist[c.z * w + c.x] = 0;
+                    queue.Enqueue(c);
+                }
+            }
+            while (queue.Count > 0)
+            {
+                var c = queue.Dequeue();
+                for (int r = 0; r < 4; r++)
+                {
+                    var n = c + new Rot4(r).FacingCell;
+                    if (!area.Contains(n) || dist[n.z * w + n.x] >= 0 || !n.Walkable(map))
+                        continue;
+                    Room room = n.GetRoom(map);
+                    if (IsIndoors(room) && !WalkThrough(room))
+                        continue;
+                    dist[n.z * w + n.x] = dist[c.z * w + c.x] + 1;
+                    queue.Enqueue(n);
+                }
+            }
+            return dist;
         }
 
         /// <summary>Things whose meditation focus is hurt by artificial structures nearby (the anima tree), with the radius from their def.</summary>
@@ -155,7 +199,7 @@ namespace AIPawnControl
         }
 
         /// <summary>Interaction cells of every thing on the map (blueprints and frames too): a wall there fails vanilla's placement.</summary>
-        private static HashSet<IntVec3> InteractionSpots(Map map)
+        public static HashSet<IntVec3> InteractionSpots(Map map)
         {
             var spots = new HashSet<IntVec3>();
             foreach (var t in map.listerThings.AllThings)
@@ -251,27 +295,15 @@ namespace AIPawnControl
             return v;
         }
 
+        private bool WalkThrough(Room room)
+        {
+            if (!walkThroughCache.TryGetValue(room, out bool v))
+                walkThroughCache[room] = v = Layout.WalkThrough(room);
+            return v;
+        }
+
         /// <summary>No role: vanilla gives a proper room with nothing role-defining the generic "Room" role, and others None.</summary>
         public static bool NoRole(Room room) => room.Role == RoomRoleDefOf.None || room.Role.defName == "Room";
-
-        /// <summary>Vanilla has no hallway role: a hallway is an indoor room with no role and at least 2 doors.</summary>
-        public bool IsHallway(Room room)
-        {
-            if (!IsIndoors(room) || !NoRole(room))
-                return false;
-            if (!doorCountCache.TryGetValue(room, out int n))
-                doorCountCache[room] = n = DoorCount(room, map);
-            return n >= 2;
-        }
-
-        public static int DoorCount(Room room, Map map)
-        {
-            var doors = new HashSet<Building_Door>();
-            foreach (var b in room.BorderCells)
-                if (b.InBounds(map) && b.GetEdifice(map) is Building_Door d)
-                    doors.Add(d);
-            return doors.Count;
-        }
 
         // ---- summed-area tables ----
 
@@ -336,7 +368,10 @@ namespace AIPawnControl
             return new Candidate { rect = rect, door = door, side = side, score = Score(rect, door, side, null) };
         }
 
-        /// <summary>The door: best walk from the base, then centred on its wall (vanilla's TryGetBestRectExteriorCell idea).</summary>
+        /// <summary>
+        /// The door: into a room people may walk through if the walk allows (insideDoor tiles are worth it), else the best
+        /// walk from the base, then centred on its wall (vanilla's TryGetBestRectExteriorCell idea).
+        /// </summary>
         private bool ChooseDoor(CellRect rect, out IntVec3 door, out Rot4 doorSide)
         {
             door = IntVec3.Invalid;
@@ -358,7 +393,7 @@ namespace AIPawnControl
                 if (reusable[i] && !realWall[i])
                     continue; // only a real wall can be replaced by a door blueprint
                 float offCentre = side.IsHorizontal ? Mathf.Abs(c.z - centre.z) : Mathf.Abs(c.x - centre.x);
-                float key = walk[o] * 10 + offCentre;
+                float key = walk[o] * 10 + offCentre - (doorInside[o] ? weights.insideDoor * 10 : 0);
                 if (key < bestKey)
                 {
                     bestKey = key;
@@ -416,8 +451,9 @@ namespace AIPawnControl
             float shelterTerm = weights.shelter * shelter + weights.nearEdge * Mathf.Max(0, 15 - siteEdge);
             float clearing = weights.tree * trees + weights.item * items;
             float home = inHome ? weights.home : 0f;
+            float inside = doorInside[outside.z * w + outside.x] ? weights.insideDoor : 0f;
             float size = standard ? weights.bigRoom : 0f;
-            float score = walkTerm + shared + alignedTerm + sliverTerm + farmland + shelterTerm + clearing + home + size;
+            float score = walkTerm + shared + alignedTerm + sliverTerm + farmland + shelterTerm + clearing + home + size + inside;
             if (plan != null)
             {
                 plan.walk = walkTiles;
@@ -437,6 +473,7 @@ namespace AIPawnControl
                 t["clearing"] = clearing;
                 t["home"] = home;
                 t["size"] = size;
+                t["inside"] = inside;
             }
             return score;
         }
@@ -551,6 +588,8 @@ namespace AIPawnControl
                 var failures = validator.Check(plan, material);
                 if (failures.Count > 0)
                 {
+                    if (failures.All(f => f.StartsWith("V9")))
+                        continue; // walls in open ground: the grids can't see it, so the validator is the check
                     ModLog.Warning($"Site dropped by the validator (a site-finder bug): {string.Join("; ", failures)}\n{TextMap.Draw(plan)}");
                     continue;
                 }
@@ -630,6 +669,8 @@ namespace AIPawnControl
                     var failures = validator.Check(plan, material);
                     if (failures.Count > 0)
                     {
+                        if (failures.All(f => f.StartsWith("V9")))
+                            continue; // walls in open ground: the grids can't see it, so the validator is the check
                         ModLog.Warning($"Fit dropped by the validator (a site-finder bug): {string.Join("; ", failures)}\n{TextMap.Draw(plan)}");
                         if (++tries >= 5)
                             break;
@@ -674,6 +715,9 @@ namespace AIPawnControl
         public string Describe(RoomPlan plan, char letter, List<ThingDef> materials, (int w, int h) maxFit)
         {
             var parts = new List<string> { Where(plan) };
+            Room into = plan.doorOutside.GetRoom(map);
+            if (IsIndoors(into))
+                parts.Add($"its door opens into the {Layout.Name(into)}");
             if (plan.sharedSides > 0)
                 parts.Add(plan.sharedSides == 1 ? "shares 1 wall" : $"shares {plan.sharedSides} walls");
             parts.Add($"{plan.walk} tiles from the centre");

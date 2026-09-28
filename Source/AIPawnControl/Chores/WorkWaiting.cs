@@ -109,7 +109,8 @@ namespace AIPawnControl
             {
                 if (t.Faction != Faction.OfPlayer)
                     continue;
-                var costs = t is Frame frame ? frame.TotalMaterialCost() : t is Blueprint blueprint ? blueprint.TotalMaterialCost() : null;
+                // Only build blueprints cost materials: an install blueprint (a minified thing being placed) logs an error if asked.
+                var costs = t is Frame frame ? frame.TotalMaterialCost() : t is Blueprint_Build blueprint ? blueprint.TotalMaterialCost() : null;
                 foreach (var cost in costs ?? new List<ThingDefCountClass>())
                     need[cost.thingDef] = (need.TryGetValue(cost.thingDef, out int had) ? had : 0) + (t is Frame f ? f.ThingCountNeeded(cost.thingDef) : cost.count);
             }

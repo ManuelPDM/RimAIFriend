@@ -119,6 +119,83 @@ namespace AIPawnControl
         [DebugAction("AI Pawn Control", "Run building checks", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         public static void RunChecksAction() => RunChecks(Find.CurrentMap);
 
+        [DebugAction("AI Pawn Control", "Layout options", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void LayoutOptionsAction() => LayoutOptions(Find.CurrentMap);
+
+        /// <summary>BASE_LAYOUT.md: the ways out, doors between neighbours and common rooms, with text maps. Places nothing.</summary>
+        public static void LayoutOptions(Map map)
+        {
+            var clock = Stopwatch.StartNew();
+            var ways = Layout.WaysOut(map);
+            ModLog.Message($"Layout: {Layout.Line(map)}: " + string.Join(", ", ways.Select(x => $"{Layout.Name(x.room)} at {x.door.Position}")));
+            foreach (var room in map.regionGrid.AllRooms.Where(Layout.OfBase))
+                ModLog.Message($"  {Layout.Name(room)} ({room.CellCount} cells at {room.ExtentsClose}): {(Layout.WalkThrough(room) ? "walk-through" : "end room")}, "
+                               + (Layout.ReachesInside(room) ? "reaches inside" : "opens only outdoors"));
+            foreach (var d in Layout.NeighbourDoors(map))
+                ModLog.Message($"  neighbour door: {d.Label} at {d.cell}");
+            foreach (var way in Layout.Surplus(map))
+                ModLog.Message($"  surplus: {Layout.CloseLabel(way)} at {way.door.Position}");
+            foreach (var way in ways)
+                ModLog.Message($"  way out {way.door.Position} ({Layout.Name(way.room)}): reaches inside {Layout.ReachesInside(way.room)}, "
+                               + $"ours {BuildManager.Instance.OurDoor(map, way.door.Position)}");
+            var finder = new CommonRoomFinder(map) { trace = new List<string>() };
+            var plans = finder.Find();
+            ModLog.Message("  common room tries:\n    " + string.Join("\n    ", finder.trace));
+            foreach (var plan in plans)
+            {
+                ModLog.Message($"  {plan.Label}, score {plan.score:0.0}\n{finder.Draw(plan)}");
+                foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => Layout.WalkThroughKind(k, map) && k.BuildableNow(map)))
+                    if (finder.WithKind(plan, kind) is CommonPlan furnished)
+                        ModLog.Message($"  {furnished.Label}, score {furnished.score:0.0}\n{finder.Draw(furnished)}");
+            }
+            ModLog.Message("  kind tries:\n    " + string.Join("\n    ", finder.trace.Where(t => t.StartsWith("  "))));
+            ModLog.Message($"Layout options: {plans.Count} common rooms, {clock.ElapsedMilliseconds} ms.");
+        }
+
+        /// <summary>The best common room (else a doorway) placed and finished at once, then the options again.</summary>
+        [DebugAction("AI Pawn Control", "Build best layout option", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void BuildBestLayout()
+        {
+            Map map = Find.CurrentMap;
+            Pawn pawn = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            var option = Layout.Options(map, null).FirstOrDefault();
+            BuildProject project = null;
+            if (option != null)
+            {
+                ModLog.Message($"Build best layout option: {option.label}: {option.apply(pawn, SiteFinder.Materials(map)[0])}");
+                project = BuildManager.Instance.ProjectsOf(pawn).LastOrDefault(p => p.Active);
+            }
+            if (project == null)
+            {
+                Messages.Message("No layout option.", MessageTypeDefOf.RejectInput, false);
+                return;
+            }
+            FinishInstantly(project);
+            map.regionAndRoomUpdater.TryRebuildDirtyRegionsAndRooms();
+            LayoutOptions(map);
+        }
+
+        [DebugAction("AI Pawn Control", "Project status", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void ProjectStatus()
+        {
+            foreach (var pawn in Find.CurrentMap.mapPawns.FreeColonistsSpawned)
+                foreach (var p in BuildManager.Instance.ProjectsOf(pawn).Where(p => p.Active))
+                {
+                    Room room = p.Room;
+                    ModLog.Message($"{pawn.LabelShort}: {p.StatusLine()} Room: {(room == null ? "none" : $"{room.Role.label}, proper {room.ProperRoom}, open roof {room.OpenRoofCount}, outdoors {room.PsychologicallyOutdoors}")}");
+                }
+        }
+
+        /// <summary>The best layout option as blueprints (or a deconstruct order), for the colony to build the normal way.</summary>
+        [DebugAction("AI Pawn Control", "Place best layout option", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void PlaceBestLayout()
+        {
+            Map map = Find.CurrentMap;
+            Pawn pawn = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            var option = Layout.Options(map, null).FirstOrDefault();
+            ModLog.Message(option == null ? "Place best layout option: none." : $"Place best layout option: {option.label}: {option.apply(pawn, SiteFinder.Materials(map)[0])}");
+        }
+
         [DebugAction("AI Pawn Control", "Build test colony", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         public static void BuildTestColonyAction() => TestColony.Build(Find.CurrentMap);
 
@@ -328,7 +405,7 @@ namespace AIPawnControl
             Find.WindowStack.Add(new FloatMenu(options));
         }
 
-        public static void PlaceBest(Pawn pawn, RoomKindDef kind)
+        public static BuildProject PlaceBest(Pawn pawn, RoomKindDef kind)
         {
             Map map = pawn.Map;
             IntVec3 center = SiteFinder.BaseCenter(map);
@@ -336,21 +413,77 @@ namespace AIPawnControl
             var materials = SiteFinder.Materials(map);
             var validator = new RoomValidator(map, center, finder.weights.maxWalk);
             var sites = finder.Sites(validator, materials[0], out _);
-            RoomPlan plan = sites.Count > 0 ? finder.Fit(sites[0], kind, SiteFinder.StandardSize, SiteFinder.StandardSize, validator, materials[0], out _) : null;
+            // Site A, else the next site it fits at, as a mind would pick another letter.
+            RoomPlan plan = sites.Select(s => finder.Fit(s, kind, SiteFinder.StandardSize, SiteFinder.StandardSize, validator, materials[0], out _)).FirstOrDefault(p => p != null);
             if (plan == null)
             {
+                ModLog.Warning($"No site fits a {kind.label} ({sites.Count} sites).");
                 Messages.Message($"No site fits a {kind.label}.", MessageTypeDefOf.RejectInput, false);
-                return;
+                return null;
             }
             var project = BuildManager.Instance.Place(pawn, plan, materials[0], validator, finder.Where(plan));
             if (project != null)
                 ModLog.Message($"Materials for {pawn.LabelShort}'s {kind.label}: {Supplies.MarkFor(pawn, project)}");
+            return project;
+        }
+
+        /// <summary>The ladder's rooms, each at site A and finished at once: a base the way the minds grow one, in seconds.</summary>
+        [DebugAction("AI Pawn Control", "Grow test base", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void GrowTestBase() => GrowTestBase(false);
+
+        /// <summary>The same, and after each room the best layout option is built, as if a mind always picked it.</summary>
+        [DebugAction("AI Pawn Control", "Grow test base with layout", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void GrowTestBaseWithLayout() => GrowTestBase(true);
+
+        public static void GrowTestBase(bool layout)
+        {
+            Map map = Find.CurrentMap;
+            Pawn pawn = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            if (pawn == null)
+                return;
+            var names = new[] { "AIPC_Barracks", "AIPC_Kitchen", "AIPC_Storeroom", "AIPC_DiningRoom", "AIPC_Workshop", "AIPC_Hospital", "AIPC_Bedroom", "AIPC_Bedroom" };
+            for (int step = 0; step < names.Length; step++)
+            {
+                var kind = DefDatabase<RoomKindDef>.GetNamedSilentFail(names[step]);
+                BuildProject project = null;
+                // As a mind picking "as a common room" when the next room can be walked through and a common room fits.
+                if (layout && kind != null && Layout.Options(map, new Ladder.Rung { kind = kind, label = kind.label })
+                        .FirstOrDefault(o => o.group == "Next for the base") is Layout.Option asRung)
+                {
+                    ModLog.Message($"Grow: {asRung.label}: {asRung.apply(pawn, SiteFinder.Materials(map)[0])}");
+                    project = BuildManager.Instance.ProjectsOf(pawn).LastOrDefault(p => p.Active);
+                }
+                project = project ?? (kind != null ? PlaceBest(pawn, kind) : null);
+                if (project == null)
+                    continue;
+                FinishInstantly(project);
+                map.regionAndRoomUpdater.TryRebuildDirtyRegionsAndRooms();
+                // As if a mind took every layout option: common rooms, then surplus ways out, then doors between neighbours.
+                // When the next room can be the common room, a mind picks that instead of a bare one (the rung comes first).
+                var next = step + 1 < names.Length ? DefDatabase<RoomKindDef>.GetNamedSilentFail(names[step + 1]) : null;
+                if (layout && next != null && Layout.WalkThroughKind(next, map))
+                {
+                    var finder = new CommonRoomFinder(map) { trace = new List<string>() };
+                    bool fits = finder.Find().Any(h => finder.WithKind(h, next) != null);
+                    ModLog.Message($"Grow: {next.label} as a common room {(fits ? "fits" : "doesn't fit")}:\n    " + string.Join("\n    ", finder.trace));
+                    if (fits)
+                        continue;
+                }
+                for (int i = 0; layout && i < 10 && (new CommonRoomFinder(map).Find().Count > 0 || Layout.Surplus(map).Count > 0 || Layout.NeighbourDoors(map).Count > 0); i++)
+                    BuildBestLayout();
+            }
+            LayoutOptions(map);
         }
 
         /// <summary>God-mode build of every entry plus a roof, to test done and bed claiming.</summary>
         public static void FinishInstantly(BuildProject project)
         {
             Map map = project.map;
+            if (project.closeDoor.IsValid)
+            {
+                project.closeDoor.GetEdifice(map)?.Destroy(DestroyMode.Vanish);
+                project.closeDoor = IntVec3.Invalid;
+            }
             foreach (var e in project.entries)
             {
                 foreach (var c in e.Rect)
@@ -363,7 +496,11 @@ namespace AIPawnControl
                 thing.SetFactionDirect(Faction.OfPlayer);
                 GenSpawn.Spawn(thing, e.cell, map, e.rot, WipeMode.Vanish);
             }
-            foreach (var c in project.footprint.ContractedBy(1))
+            map.regionAndRoomUpdater.TryRebuildDirtyRegionsAndRooms();
+            Room room = project.Room;
+            var roofed = project.roomCell.IsValid ? (room != null && Layout.Indoor(room) || room?.UsesOutdoorTemperature == true && !room.TouchesMapEdge ? room.Cells : Enumerable.Empty<IntVec3>())
+                : project.footprint.ContractedBy(1).Cells;
+            foreach (var c in roofed.ToList())
                 map.roofGrid.SetRoof(c, RoofDefOf.RoofConstructed);
             ModLog.Message($"Finished {project.pawn.LabelShort}'s {project.Kind} instantly.");
         }

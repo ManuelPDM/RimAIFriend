@@ -1,7 +1,7 @@
 # Base layout: fewer ways out
 
-_Design for the user to approve (session 18, 2026-09-27). Nothing here is built yet. Replaces the first draft
-(halls only, now deleted) after the user's feedback._
+_Session 18 (2026-09-27): designed, approved by the user with §8's answers, built and checked in the game (§9, built
+0 errors / 0 warnings, not committed). Replaces the first draft (halls only, now deleted) after the user's feedback._
 
 ## 1. Goal
 The user: rooms get added "box after box", each with its own door to the outside. Instead:
@@ -239,7 +239,10 @@ line can come back in a later Base call if it still fits.
    lines picked, does the ways-out count go down, and does a room's temperature hold better behind an inside door (read
    `room.Temperature` of both rooms)?
 
-## 8. Decisions for the user
+## 8. Decisions (the user's answers, session 18)
+Answered: (a) the walk-through rule is right; (c) one project at a time is fine; (d) no ground kept clear in front of
+doors. Added by the user: **people must always have a way out**. (b) wasn't answered, so the recommendation was built
+(wall it in, only doors our projects placed).
 - **(a) Walk-through rule:** no beds and no meal source (from vanilla's sleep-disturbed and cleanliness effects). OK,
   or should the dining room count as an end room too (it's scored on cleanliness, but vanilla ties no sickness to it)?
 - **(b) Closing a way out:** replace the door with a wall (a deconstruct designation, then a wall blueprint: two
@@ -250,3 +253,63 @@ line can come back in a later Base call if it still fits.
   next room until it's done. OK?
 - **(d) Removed from the first draft:** keeping two rows clear of new fields (you said fields go where the soil is
   best, so the shape adapts instead), and the 1-wide halls question (the shape decides).
+
+## 9. Built and checked (session 18)
+Everything in §5 is built except `hallReady` (not needed: with inside doors preferred, rooms already cluster, see the
+runs below). Code: `Building/Layout.cs` (ways out, walk-through rule, doors between neighbours, surplus ways out, the
+Base call lines), `Building/CommonRoomFinder.cs` (the common room, its furnished variant, text maps), plus changes in
+`SiteFinder` (inside doors, the walk limit), `RoomValidator` (V3), `BuildManager` (layout projects, closing a door,
+the door record), `BaseCall`, `Ladder.Line`, `RoomPlacer.Place(keepFree)`, `RoomKinds.xml` (`AIPC_CommonRoom`,
+`AIPC_Doorway`, `AIPC_ClosedDoor`), `Tuning/building.txt` (`insideDoor` 8, `outdoorWalk` 20), both prompts.
+
+**The way-out rule (the user's "people need to get out"):** `outdoorWalk` (20 tiles) is the most any room's door may be
+from the outdoors, walking through the base but never through a room that shouldn't be walked through. It applies to:
+- **a common room:** it gets a second (up to a third) door out when a far door would be over it;
+- **closing a way out:** refused if any room would end up over it;
+- **a new room's door:** it only goes into a walk-through room within it.
+
+**Deviations from §5, found while testing:**
+- **A common room's door out may sit at a corner** (a door needs no wall on both sides; a straight stretch is preferred).
+  The street base's only plan needed it.
+- **Scoring counts ways out saved** (doors brought in minus new doors out) × `insideDoor`, minus new walls, and only
+  plans that score above 0 are offered (a 15-wall room to save one door isn't).
+- **Doors between neighbours only go into a walk-through room** (the room whose outside door will close walks through
+  the other), and the outdoor walk never passes through an end room. The first version offered "connect the dining room
+  to the barracks", which would have sent the dining room's traffic through the barracks.
+- **A durable record of our doors** (`BuildManager.ourDoors`, saved; filled from old projects on load): a project whose
+  builder died is dropped on load, and with it the knowledge that the barracks door was ours.
+- **Bug fixed (would hit real play):** a new room's door replacing an older, still-active project's wall made that
+  project read the wall as "cancelled by the player" and abandon itself. A wall another room's door has taken counts
+  as built now (`BuildProject.Built`).
+- **1-cell common rooms** happen: two outside doors a cell apart get closed in with 1 wall and a door, which is an
+  airlock. Kept: it's cheap, and airlocks are what RimWorld players build for temperature.
+
+**Dev tools** (debug actions, "AI Pawn Control"): *Layout options* (ways out, rooms, doorways, surplus, common rooms
+and their furnished variants with text maps and a try-by-try trace), *Build best layout option* / *Place best layout
+option* (instant or as blueprints), *Grow test base* (the ladder's rooms, each finished at once) and *Grow test base
+with layout* (the same, taking the rung as a common room and every layout option, as if a mind always picked them),
+*Project status*. *Place site A now* now tries sites A, B, C in turn.
+
+**Checks (all forced with the dev tools, no long runs):**
+| Check | Result |
+|---|---|
+| Street base (`aipc_layout_boxes`: 8 boxes in 2 rows, all doors outdoors) | One common room along the street: **1 wall and 1 door, 8 doors inside, 11 → 4 ways out** (the other 3 are quicktest's pre-built ruin). Built instantly: an enclosed, roofed 37-cell room; screenshot checked. Its furnished variants don't fit (every door would be over 20 tiles from a way out), which is right |
+| Fresh colony, grown with layout (`aipc_layout_fresh`, `aipc_layout_fresh2`; a third map stopped at 4 rooms because *Place site A now* only tried site A, fixed) | 9 rooms, **1 way out** each time. The storeroom is built *as* the common room the barracks and kitchen open into (walkway plus shelves), later rooms open into the dining room, workshop or storeroom, and a final airlock joins the last two outside doors. Screenshots checked: compact blocks, not boxes in a row |
+| Project tracking | Every room, the furnished common room (vanilla role: storeroom, 28 cells), the doorway and the airlock reach "done"; outfitting gives the storeroom a 13-cell stockpile off the door fronts |
+| Run-17 base (`aipc_run17_day14`) | 4 ways out; no common room fits (the minds' field and stockpile sit at the doors). Offered: "connect the barracks to the dining room; then its outside door can be closed". Built → the barracks' outside door became surplus → *Place best layout option* ordered it deconstructed; **Willis deconstructed it and the wall blueprint followed** (vanilla jobs). 3 → 2 ways out (the storeroom was still unfinished in that load) |
+| Base call with a mind (Valentin, LLM) | The prompt shows `· 4 ways out`, an "Inside the base" group and "its door opens into the dining room" on site A. Valentin (downed, bleeding) picked the hospital at site B |
+
+**After the user's first dev run (`aipc_run18_live`):** the minds offered and picked doorways into pockets, sealed
+cells no room was meant to have (a roofed cell between the barracks and water; the 2-3 cells a rec room closed in front
+of the workshop door). Fixed:
+- **V9, no pockets:** a new room may not wall in open ground reached from outside today (`RoomValidator.WalledIn`;
+  sites failing only V9 are dropped without the "site-finder bug" warning).
+- **Doors only into real rooms** (`Layout.RealRoom`: a base room with a role, one our projects built, or one joining 2+
+  doors), both for doorways and for a new room's door.
+- **Costs on the layout lines** ("…: 25 wood or 25 granite blocks").
+- The `[Work waiting]` materials sum skipped install blueprints (vanilla logged an error for each Reflect).
+Checked: the grow test still gives 9 rooms with 1 way out; the pocket doorways are no longer offered on the live run.
+
+**Not checked yet (for the next run):** a mind actually picking a layout line; a common room built by colonists in real
+time (only instant builds so far); temperature behind an inside door vs an outside one (§7 build step 5's reading).
+

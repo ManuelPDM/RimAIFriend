@@ -115,4 +115,23 @@
     <label>plain room</label>
     <description>empty, to furnish later</description>
   </AIPawnControl.RoomKindDef>
+
+  <!-- BASE_LAYOUT.md: shaped by CommonRoomFinder and Layout.NeighbourDoors, never by the site finder. -->
+  <AIPawnControl.RoomKindDef>
+    <defName>AIPC_CommonRoom</defName>
+    <label>common room</label>
+    <description>a shared room other rooms open into</description>
+  </AIPawnControl.RoomKindDef>
+
+  <AIPawnControl.RoomKindDef>
+    <defName>AIPC_Doorway</defName>
+    <label>doorway</label>
+    <description>a door between two rooms</description>
+  </AIPawnControl.RoomKindDef>
+
+  <AIPawnControl.RoomKindDef>
+    <defName>AIPC_ClosedDoor</defName>
+    <label>closed doorway</label>
+    <description>a wall where a way out was</description>
+  </AIPawnControl.RoomKindDef>
 </Defs>

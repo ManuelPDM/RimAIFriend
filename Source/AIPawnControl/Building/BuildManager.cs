@@ -32,6 +32,8 @@ namespace AIPawnControl
         public Pawn occupant;   // a bedroom she built for someone with no room of their own (STREAMLINE.md §7); null = her own
         public bool unclaimed;  // nobody's: the bed stays free and vanilla assigns it
         public bool outfitted;  // its bills and stockpile were added once it was done (STREAMLINE.md §7)
+        public IntVec3 roomCell = IntVec3.Invalid; // a cell inside its room, for shapes with no centre (BASE_LAYOUT.md)
+        public IntVec3 closeDoor = IntVec3.Invalid; // a way out being closed: the door comes down, then the wall goes up
 
         /// <summary>Whose bed it is: hers, or the colonist she built it for.</summary>
         public Pawn Owner => occupant ?? pawn;
@@ -49,6 +51,8 @@ namespace AIPawnControl
         /// <summary>What an upgrade adds: "end table", "wooden floor".</summary>
         public string ItemLabel => floor != null ? floor.label : entries.Count > 0 ? entries[0].def.label : Kind;
         public string SizeLabel => $"{footprint.Width - 2}×{footprint.Height - 2}";
+        /// <summary>"5×5, granite blocks", or just the material for a layout project, which has no box size (BASE_LAYOUT.md).</summary>
+        private string SizeAndMaterial => roomCell.IsValid ? material?.label : $"{SizeLabel}, {material?.label}";
         public PawnMind Mind => MindManager.Instance?.MindOf(pawn);
         public PlanEntry Bed => kindDef != null && kindDef.owned && !unclaimed ? entries.Find(e => e.def.IsBed) : null;
 
@@ -56,11 +60,16 @@ namespace AIPawnControl
         public void Remember(string text, int importance) =>
             Mind?.memory.Record(pawn, "build", kindDef?.defName, text, importance, MemoryEvent.TookPart);
 
+        /// <summary>Built, or a wall another room's door has taken the place of (it still closes the room in).</summary>
         public bool Built(PlanEntry e)
         {
             foreach (var t in e.cell.GetThingList(map))
+            {
                 if (t.def == e.def && t.Position == e.cell)
                     return true;
+                if (e.def == ThingDefOf.Wall && (t is Building_Door || ((t is Blueprint || t is Frame) && t.def.entityDefToBuild is ThingDef d && d.IsDoor)))
+                    return true;
+            }
             return false;
         }
 
@@ -73,7 +82,7 @@ namespace AIPawnControl
             return null;
         }
 
-        public Room Room => footprint.ContractedBy(1).CenterCell.GetRoom(map);
+        public Room Room => (roomCell.IsValid ? roomCell : footprint.ContractedBy(1).CenterCell).GetRoom(map);
 
         public void Tick()
         {
@@ -101,6 +110,8 @@ namespace AIPawnControl
                 TickFloor();
                 return;
             }
+            if (closeDoor.IsValid && !TickClose())
+                return;
             for (int i = 0; i < entries.Count; i++)
             {
                 var e = entries[i];
@@ -135,11 +146,30 @@ namespace AIPawnControl
                 if (furnishing)
                     Remember($"Added {where}: {ItemLabel}.", 4);
                 else
-                    Remember($"The {KindFor} I designed is finished ({SizeLabel}, {material?.label}) {where}.", 6);
+                    Remember($"The {KindFor} I designed is finished ({SizeAndMaterial}) {where}.", 6);
                 if (occupant != null && !OccupantGone(Bed))
                     MindManager.Instance?.MindOf(occupant)?.memory.Record(occupant, "build", kindDef?.defName,
                         $"{pawn.LabelShort} built me a bedroom {where}.", 6, MemoryEvent.TookPart, new[] { pawn.LabelShort });
             }
+        }
+
+        /// <summary>
+        /// Closing a way out: wait while the door is deconstructed (cancelling that calls it off), then place the wall.
+        /// True once the wall is placed, so the usual tracking takes over.
+        /// </summary>
+        private bool TickClose()
+        {
+            if (closeDoor.GetEdifice(map) is Building_Door door)
+            {
+                if (map.designationManager.DesignationOn(door, DesignationDefOf.Deconstruct) == null)
+                    Abandon(byPlayer: true);
+                return false;
+            }
+            var wall = entries[0];
+            if (Pending(wall) == null && !Built(wall))
+                GenConstruct.PlaceBlueprintForBuild(wall.def, wall.cell, map, wall.rot, Faction.OfPlayer, wall.stuff);
+            closeDoor = IntVec3.Invalid;
+            return true;
         }
 
         /// <summary>A floor upgrade is done when no cell waits any more (a cancelled cell just isn't floored); off if none got built.</summary>
@@ -224,7 +254,7 @@ namespace AIPawnControl
                 if (pending is Frame frame)
                     foreach (var cost in frame.TotalMaterialCost())
                         Add(need, cost.thingDef, frame.ThingCountNeeded(cost.thingDef));
-                else if (pending is Blueprint blueprint)
+                else if (pending is Blueprint_Build blueprint)
                     foreach (var cost in blueprint.TotalMaterialCost())
                         Add(need, cost.thingDef, cost.count);
             }
@@ -270,7 +300,7 @@ namespace AIPawnControl
                     ? (occupant != null ? $"the bed isn't {occupant.LabelShort}'s yet" : "the bed isn't mine yet") : "waiting for the roof");
             if (furnishing)
                 return $"Adding a {ItemLabel} ({material?.label ?? "no material"}) {where}: {string.Join(", ", parts)}.";
-            return $"{KindFor.CapitalizeFirst()} ({SizeLabel}, {material?.label}) {where}: {string.Join(", ", parts)}.";
+            return $"{KindFor.CapitalizeFirst()} ({SizeAndMaterial}) {where}: {string.Join(", ", parts)}.";
         }
 
         /// <summary>Her choice (Act) or the player's veto (a cancelled blueprint): leftover blueprints go, frames and built walls stay.</summary>
@@ -315,6 +345,8 @@ namespace AIPawnControl
             Scribe_References.Look(ref occupant, "occupant");
             Scribe_Values.Look(ref unclaimed, "unclaimed");
             Scribe_Values.Look(ref outfitted, "outfitted");
+            Scribe_Values.Look(ref roomCell, "roomCell", IntVec3.Invalid);
+            Scribe_Values.Look(ref closeDoor, "closeDoor", IntVec3.Invalid);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 kindDef = kindDef ?? RoomKindDef.Bedroom; // saves from before room kinds held only bedrooms
@@ -334,6 +366,11 @@ namespace AIPawnControl
         public const int EmptyScanRetryTicks = 2 * GenDate.TicksPerDay;
 
         private List<BuildProject> projects = new List<BuildProject>();
+        // Door cells our projects placed, per map id: kept when a project's record goes (its builder died), since only
+        // these doors are ever closed (BASE_LAYOUT.md §5.5).
+        private HashSet<(int, IntVec3)> ourDoors = new HashSet<(int, IntVec3)>();
+        private List<int> ourDoorMaps;
+        private List<IntVec3> ourDoorCells;
         private Dictionary<Pawn, int> emptyScans = new Dictionary<Pawn, int>();
         private List<Pawn> emptyScanKeys;
         private List<int> emptyScanValues;
@@ -362,6 +399,17 @@ namespace AIPawnControl
         public Pawn BuilderOf(Room room) => projects.Find(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == room.Map && p.Room == room)?.pawn;
 
         public void Add(BuildProject project) => projects.Add(project);
+
+        /// <summary>A door one of our projects placed: only those are ever closed (BASE_LAYOUT.md §5.5).</summary>
+        public bool OurDoor(Map map, IntVec3 cell) => ourDoors.Contains((map.uniqueID, cell));
+
+        private void RecordDoors(BuildProject p)
+        {
+            if (p.map != null)
+                foreach (var e in p.entries)
+                    if (e.def != null && e.def.IsDoor)
+                        ourDoors.Add((p.map.uniqueID, e.cell));
+        }
 
         private int LastPlacedTick(Pawn pawn)
         {
@@ -455,8 +503,34 @@ namespace AIPawnControl
                 byMind = MindManager.Instance?.MindOf(pawn) != null,
             };
             projects.Add(project);
+            RecordDoors(project);
             ModLog.Message($"{pawn.LabelShort} laid out a {plan.kind.label} ({plan.SizeLabel}) in {material.label}, {where}\n{TextMap.Draw(plan)}");
             project.Remember($"I laid out a {plan.kind.label} ({plan.SizeLabel}, {material.label}) {where}.", 5);
+            return project;
+        }
+
+        /// <summary>
+        /// A common room or a doorway (BASE_LAYOUT.md): its checks were the finder's, so it's placed as is. roomCell is a
+        /// cell inside the room it makes or opens.
+        /// </summary>
+        public BuildProject PlaceLayout(Pawn pawn, RoomPlan plan, ThingDef material, IntVec3 roomCell, string where, Building_Door close = null)
+        {
+            plan.ApplyMaterial(material);
+            if (close != null)
+                plan.map.designationManager.AddDesignation(new Designation(close, DesignationDefOf.Deconstruct));
+            else
+                foreach (var e in plan.entries)
+                    GenConstruct.PlaceBlueprintForBuild(e.def, e.cell, plan.map, e.rot, Faction.OfPlayer, e.stuff);
+            var project = new BuildProject
+            {
+                pawn = pawn, map = plan.map, kindDef = plan.kind, footprint = plan.footprint, entries = plan.entries, material = material,
+                placedTick = Find.TickManager.TicksGame, where = where, byMind = MindManager.Instance?.MindOf(pawn) != null, roomCell = roomCell,
+                closeDoor = close?.Position ?? IntVec3.Invalid,
+            };
+            projects.Add(project);
+            RecordDoors(project);
+            ModLog.Message($"{pawn.LabelShort} laid out a {plan.kind.label} in {material.label}, {where}: {plan.entries.Count} blueprints.");
+            project.Remember($"I laid out a {plan.kind.label} ({material.label}) {where}.", 5);
             return project;
         }
 
@@ -472,9 +546,21 @@ namespace AIPawnControl
         {
             Scribe_Collections.Look(ref projects, "projects", LookMode.Deep);
             Scribe_Collections.Look(ref emptyScans, "emptyScans", LookMode.Reference, LookMode.Value, ref emptyScanKeys, ref emptyScanValues);
+            if (Scribe.mode == LoadSaveMode.Saving)
+            {
+                ourDoorMaps = ourDoors.Select(d => d.Item1).ToList();
+                ourDoorCells = ourDoors.Select(d => d.Item2).ToList();
+            }
+            Scribe_Collections.Look(ref ourDoorMaps, "ourDoorMaps", LookMode.Value);
+            Scribe_Collections.Look(ref ourDoorCells, "ourDoorCells", LookMode.Value);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 projects = projects ?? new List<BuildProject>();
+                ourDoors = new HashSet<(int, IntVec3)>();
+                for (int i = 0; ourDoorMaps != null && ourDoorCells != null && i < ourDoorMaps.Count && i < ourDoorCells.Count; i++)
+                    ourDoors.Add((ourDoorMaps[i], ourDoorCells[i]));
+                foreach (var p in projects)
+                    RecordDoors(p); // saves from before the record, and projects about to be dropped
                 projects.RemoveAll(p => p.pawn == null || p.map == null);
                 emptyScans = emptyScans ?? new Dictionary<Pawn, int>();
                 emptyScans.RemoveAll(kv => kv.Key == null);

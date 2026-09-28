@@ -24,6 +24,8 @@ namespace AIPawnControl
         public float item = -0.5f;
         public float home = 5f;
         public float bigRoom = 4f;          // the 5×5 size
+        public float insideDoor = 8f;       // per door opening inside the base instead of outdoors (a new wall costs 1)
+        public int outdoorWalk = 20;        // most tiles from any room's door to the outdoors once doors come inside
 
         public static string FilePath => Path.Combine(AIPawnControlMod.RootDir, "Tuning", "building.txt");
 

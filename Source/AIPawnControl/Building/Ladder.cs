@@ -64,7 +64,8 @@ namespace AIPawnControl
             var beds = map.listerBuildings.allBuildingsColonist.OfType<Building_Bed>().Where(IsColonistBed).ToList();
             var rooms = beds.Select(b => b.GetRoom()).Where(r => r != null && !r.PsychologicallyOutdoors)
                 .Select(r => r.GetRoomRoleLabel()).Distinct().ToList();
-            string line = $"beds for {BedSlots(map)} of {Sleepers(map).Count}" + (rooms.Count > 0 ? $" ({string.Join(", ", rooms)})" : "");
+            string line = $"beds for {BedSlots(map)} of {Sleepers(map).Count}" + (rooms.Count > 0 ? $" ({string.Join(", ", rooms)})" : "")
+                          + " · " + Layout.Line(map);
             var rungs = Evaluate(map);
             var next = rungs.FirstOrDefault(r => !r.met && !r.underway);
             var underway = rungs.Where(r => !r.met && r.underway).Select(r => r.label).ToList();

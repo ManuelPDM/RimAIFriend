@@ -93,9 +93,11 @@ namespace AIPawnControl
             {
                 Room room = o.GetRoom(map);
                 bool outdoors = room != null && room.UsesOutdoorTemperature;
-                bool hallway = room != null && !outdoors && !room.IsDoorway && SiteFinder.NoRole(room) && SiteFinder.DoorCount(room, map) >= 2;
-                if (!outdoors && !hallway)
-                    fail.Add($"V3: the door opens into {(room == null ? "nothing" : room.Role.label)}, not outdoors or a hallway");
+                bool walkThrough = !outdoors && Layout.WalkThrough(room);
+                if (!outdoors && !walkThrough)
+                    fail.Add($"V3: the door opens into {(room == null ? "nothing" : room.Role.label)}, not outdoors or a room people may walk through");
+                else if (walkThrough && o.GetThingList(map).Any(t => t.def.category == ThingCategory.Building))
+                    fail.Add("V3: something is built where the door opens");
             }
 
             // V4 door inside: empty, and every free interior cell reachable from it.
@@ -221,6 +223,12 @@ namespace AIPawnControl
             if (cut > 0)
                 fail.Add($"V7: {cut} existing doors can't be reached (or need a long detour) with the room in place");
 
+            // V9 no pockets (BASE_LAYOUT.md): open ground reached from outside today stays reached, or the walls close in a
+            // pointless little room (the ground in front of a door, between three other rooms).
+            int walledIn = WalledIn(plan);
+            if (walledIn > 0)
+                fail.Add($"V9: walls in {walledIn} cells of open ground");
+
             // V8 vanilla: every entry passes CanPlaceBlueprintAt with its material.
             foreach (var e in plan.entries)
             {
@@ -265,6 +273,40 @@ namespace AIPawnControl
                 }
             }
             return remaining.Count;
+        }
+
+        /// <summary>Walkable cells around the room reached from beyond it now but not once it's built (its door passes).</summary>
+        private int WalledIn(RoomPlan plan)
+        {
+            CellRect area = plan.footprint.ExpandedBy(10).ClipInsideMap(map);
+            var before = Reach(area, null);
+            var after = Reach(area, plan);
+            int n = 0;
+            foreach (var c in before)
+                if (!plan.footprint.Contains(c) && !after.Contains(c))
+                    n++;
+            return n;
+        }
+
+        private HashSet<IntVec3> Reach(CellRect area, RoomPlan plan)
+        {
+            bool Open(IntVec3 c) => c.Walkable(map) && (plan == null || c == plan.door || !plan.IsRingSolid(c));
+            var seen = new HashSet<IntVec3>();
+            var queue = new Queue<IntVec3>();
+            foreach (var c in area.EdgeCells)
+                if (Open(c) && seen.Add(c))
+                    queue.Enqueue(c);
+            while (queue.Count > 0)
+            {
+                var c = queue.Dequeue();
+                for (int r = 0; r < 4; r++)
+                {
+                    var n = c + new Rot4(r).FacingCell;
+                    if (area.Contains(n) && !seen.Contains(n) && Open(n) && seen.Add(n))
+                        queue.Enqueue(n);
+                }
+            }
+            return seen;
         }
 
         private Thing BlockingThing(IntVec3 c)
