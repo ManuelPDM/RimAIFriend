@@ -37,7 +37,7 @@ namespace AIPawnControl
             var eaters = map.mapPawns.FreeColonistsSpawned;
             o.colonists = eaters.Count;
             float eat = eaters.Sum(p => p.needs?.food != null ? Need_Food.BaseHungerRate(p.ageTracker.CurLifeStage, p.def) * GenDate.TicksPerDay : 0f);
-            bool cooks = map.listerBuildings.allBuildingsColonist.Any(b => b.def.building != null && b.def.building.isMealSource);
+            bool cooks = map.listerBuildings.allBuildingsColonist.Any(b => Needs.MealSource(b.def));
             o.needPerDay = eat * (cooks ? MealStretch() : 1f);
             if (map.haulDestinationManager.AllGroupsListForReading.Count > 0)
                 o.stores = map.resourceCounter.TotalHumanEdibleNutrition;

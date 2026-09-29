@@ -33,14 +33,14 @@ namespace AIPawnControl
             if (!Ground.Indoor(room))
                 return false;
             foreach (var t in room.ContainedAndAdjacentThings)
-                if (t is Building b && room.ContainsCell(b.Position) && (b is Building_Bed || b.def.building?.isMealSource == true))
+                if (t is Building b && room.ContainsCell(b.Position) && (b is Building_Bed || Needs.MealSource(b.def)))
                     return false;
             return true;
         }
 
         /// <summary>A kind whose items make a walk-through room: no bed and no meal source among them.</summary>
         public static bool WalkThroughKind(RoomKindDef kind, Map map) =>
-            kind.items.All(i => !(i.Resolve(map) is ThingDef d) || (!d.IsBed && d.building?.isMealSource != true));
+            kind.items.All(i => !(i.Resolve(map) is ThingDef d) || (!d.IsBed && !Needs.MealSource(d)));
 
         /// <summary>The rooms on either side of a door (its walkable neighbours), doorways left out.</summary>
         public static List<Room> Sides(Building_Door door)

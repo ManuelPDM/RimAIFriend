@@ -92,5 +92,8 @@ namespace AIPawnControl
 
         /// <summary>Vanilla gives it some role, the generic "Room" included (only None and no role at all don't count).</summary>
         public static bool AnyRole(Room room) => room.Role != null && room.Role != RoomRoleDefOf.None;
+
+        /// <summary>A dining room or a rec room: the great hall is either, by whichever scores higher (BASE_GROWTH.md §11).</summary>
+        public static bool HallRole(RoomRoleDef role) => role?.defName == "DiningRoom" || role?.defName == "RecRoom";
     }
 }

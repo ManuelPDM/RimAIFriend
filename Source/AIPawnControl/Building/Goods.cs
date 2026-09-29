@@ -76,7 +76,7 @@ namespace AIPawnControl
         public static Goods OfKind(RoomKindDef kind, Map map)
         {
             var g = new Goods();
-            foreach (var item in kind.items)
+            foreach (var item in kind.items.Where(i => i.need != Needs.Heater)) // a campfire there is for heat, not cooking
                 if (item.Resolve(map) is ThingDef def)
                     g.Add(Of(def, item.medical));
             if (kind.stores != null)

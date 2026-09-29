@@ -61,13 +61,15 @@ namespace AIPawnControl
             return pawn.Map.haulDestinationManager.AllGroupsListForReading.Count == 0 || FoodOutlook.For(pawn.Map).cellsWanted > 0 || ChoreOptions.All(pawn).Count > 0;
         }
 
-        /// <summary>"work on the base (next: a dining room)", or with her project running "work on the base (stock up; my barracks comes first)".</summary>
+        /// <summary>
+        /// Fixed text of what the Base call can offer, so the Act menu scans nothing (the Base call does, once picked). With
+        /// her project running, only fields and stocking up are left: "work on the base (my barracks comes first): …".
+        /// </summary>
         public static string MenuLabel(Pawn pawn)
         {
             if (BuildManager.Instance?.ActiveProject(pawn) is BuildProject project)
-                return $"work on the base (stock up; my {ProjectName(project)} comes first)";
-            var rung = Ladder.Current(pawn.Map);
-            return rung != null ? $"work on the base (next: {rung.label})" : "work on the base (stock up, rooms, furniture)";
+                return $"work on the base (my {ProjectName(project)} comes first): plant fields, or stock up by mining, cutting wood, hunting or foraging";
+            return "work on the base: build or improve rooms, join rooms with halls and doors, warm or cool a room, plant fields, or stock up by mining, cutting wood, hunting or foraging";
         }
 
         private static string ProjectName(BuildProject project) => project.furnishing ? project.ItemLabel : project.KindFor;
@@ -161,6 +163,19 @@ namespace AIPawnControl
                 }
                 // Fewer ways out (BASE_LAYOUT.md §5.7): the rung as a hub, a hall, a closed way out, a door between rooms.
                 choices.AddRange(Layout.Options(map, rung, finder, validator, call.materials).Select(o => new Choice { group = o.group, label = o.label, layout = o.apply }));
+                // Heat or cooling is her choice, not built into rooms: the room furthest outside comfortable, at any rung.
+                if (Upgrades.Temperature(pawn) is (Room uncomfortable, Upgrades.Upgrade item, bool cold))
+                {
+                    IntVec3 cell = uncomfortable.Cells.First();
+                    string name = uncomfortable.Owners.Contains(pawn) ? "my " + uncomfortable.Role.label : "the " + uncomfortable.GetRoomRoleLabel();
+                    choices.Add(new Choice
+                    {
+                        group = "Inside the base",
+                        label = $"{(cold ? "warm" : "cool")} {name}: {item.label}",
+                        layout = (p, m) => cell.GetRoom(p.Map) is Room room && Upgrades.Temperature(p) is (Room again, Upgrades.Upgrade u, _) && again == room
+                            ? Upgrades.Place(p, room, u) : "That room doesn't need it any more.",
+                    });
+                }
             }
 
             // Food: a field only when the outlook falls short (STREAMLINE.md §6).

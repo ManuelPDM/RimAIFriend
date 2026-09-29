@@ -37,17 +37,15 @@ namespace AIPawnControl
             {
                 new Rung { label = gap == 1 ? "a bed for everyone" : "beds for everyone", kind = Kind(gap == 1 ? "AIPC_Bedroom" : "AIPC_Barracks"), met = gap <= 0,
                            counts = new List<RoomKindDef> { Kind("AIPC_Bedroom"), Kind("AIPC_Barracks") } },
-                new Rung { label = "a kitchen", kind = Kind("AIPC_Kitchen"), met = buildings.Any(b => b.def.building != null && b.def.building.isMealSource && Indoors(b)) },
+                new Rung { label = "a kitchen", kind = Kind("AIPC_Kitchen"), met = buildings.Any(b => Needs.MealSource(b.def) && Indoors(b)) },
+                // BASE_GROWTH.md §11: the great hall, placed while the base is small so it grows around it. Any table indoors meets it.
+                new Rung { label = "a great hall", kind = Kind("AIPC_GreatHall"), met = buildings.Any(b => b.def.surfaceType == SurfaceType.Eat && Indoors(b)) },
                 new Rung { label = "a storeroom", kind = Kind("AIPC_Storeroom"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Storeroom")) },
-                new Rung { label = "a dining hall", kind = Kind("AIPC_DiningRoom"), met = buildings.Any(b => b.def.surfaceType == SurfaceType.Eat && Indoors(b)) },
                 new Rung { label = "a food store", kind = Kind("AIPC_FoodStore"), met = HasFoodStore(map) },
                 new Rung { label = "a workshop", kind = Kind("AIPC_Workshop"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Workshop")) },
                 new Rung { label = "a research bench", kind = Kind("AIPC_Laboratory"),
                            met = !CanResearch(map) || buildings.Any(b => b is Building_ResearchBench && Indoors(b)) },
                 new Rung { label = "a hospital", kind = Kind("AIPC_Hospital"), met = buildings.OfType<Building_Bed>().Any(b => b.Medical && b.def.building.bed_humanlike) },
-                new Rung { label = "recreation", kind = Kind("AIPC_RecRoom"),
-                           met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("RecRoom"))
-                                 || buildings.Where(b => b.def.building?.joyKind != null && Indoors(b)).Select(b => b.def.building.joyKind).Distinct().Count() >= 2 },
                 new Rung { label = "private bedrooms", kind = Kind("AIPC_Bedroom"), met = sleepers.All(p => p.ownership?.OwnedRoom != null) },
                 new Rung { label = "better rooms", rooms = true },
             };
@@ -65,7 +63,7 @@ namespace AIPawnControl
         /// <summary>The first rung that's neither met nor underway; past the early base, better rooms.</summary>
         public static Rung Current(Map map) => Evaluate(map).FirstOrDefault(r => !r.met && !r.underway);
 
-        /// <summary>For [Colony]: "beds for 6 of 3 (barracks) · next: a dining room", or "(waiting on research: …)".</summary>
+        /// <summary>For [Colony]: "beds for 6 of 3 (barracks) · next: a great hall", or "(waiting on research: …)".</summary>
         public static string Line(Map map)
         {
             var beds = map.listerBuildings.allBuildingsColonist.OfType<Building_Bed>().Where(IsColonistBed).ToList();

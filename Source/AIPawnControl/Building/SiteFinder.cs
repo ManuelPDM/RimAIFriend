@@ -822,9 +822,12 @@ namespace AIPawnControl
         {
             For(kind);
             var shapes = new List<(int, int)>();
+            // A furnished room is at least the size code builds it at (a great hall 7×7), not squeezed to save walls; a
+            // plain hall takes whatever the gap allows.
+            int minShort = kind.layout ? 1 : Mathf.Min(kind.size.x, kind.size.z), minLong = kind.layout ? 1 : Mathf.Max(kind.size.x, kind.size.z);
             for (int a = 1; a <= HubMaxWidth; a++)
                 for (int b = a; b < weights.outdoorWalk; b++)
-                    if (kind.Fits(a, b))
+                    if (kind.Fits(a, b) && a >= minShort && b >= minLong)
                     {
                         shapes.Add((a, b));
                         if (a != b)
@@ -849,7 +852,8 @@ namespace AIPawnControl
                 return null;
             CellRect inner = rect.ContractedBy(1);
             int doors = wayOutDoors.Sum(rect); // the inside can't hold one: it's free ground
-            if (doors == 0 || blocked.Sum(inner) > 0 || ringBad.Sum(rect) != doors || wayOutFronts.Sum(inner) != doors || otherDoorTouch.Sum(rect) > 0)
+            // Each door's outside cell must be inside (checked per door below: two doors at a corner share one).
+            if (doors == 0 || blocked.Sum(inner) > 0 || ringBad.Sum(rect) != doors || wayOutFronts.Sum(inner) == 0 || otherDoorTouch.Sum(rect) > 0)
                 return null;
             if (!ChooseDoor(rect, hub: true, out IntVec3 door, out Rot4 side))
                 return null;
@@ -863,6 +867,8 @@ namespace AIPawnControl
             {
                 if (wayOutFront.TryGetValue(cell, out IntVec3 front))
                 {
+                    if (!inner.Contains(front))
+                        return null; // it opens away from the hub
                     // People still get out: across the empty hub to its own door, within outdoorWalk (the way-out rule, §9).
                     if (Math.Abs(front.x - ownInside.x) + Math.Abs(front.z - ownInside.z) + 2 > weights.outdoorWalk)
                         return null;

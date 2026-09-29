@@ -77,8 +77,8 @@ namespace AIPawnControl
         /// <summary>Vanilla's darkness: most of the room is dark to the eye (the "in darkness" mood).</summary>
         private static bool Dark(Room room) => room.Cells.Count(c => room.Map.glowGrid.PsychGlowAt(c) == PsychGlow.Dark) * 2 > room.CellCount;
 
-        private static bool TooHot(Room room, Pawn pawn) => room.Temperature > pawn.GetStatValue(StatDefOf.ComfyTemperatureMax);
-        private static bool TooCold(Room room, Pawn pawn) => room.Temperature < pawn.GetStatValue(StatDefOf.ComfyTemperatureMin);
+        internal static bool TooHot(Room room, Pawn pawn) => room.Temperature > pawn.GetStatValue(StatDefOf.ComfyTemperatureMax);
+        internal static bool TooCold(Room room, Pawn pawn) => room.Temperature < pawn.GetStatValue(StatDefOf.ComfyTemperatureMin);
 
         /// <summary>
         /// Up to 3 upgrades for the room: the most gain for its cost of each kind first, then the next best of any kind, so
@@ -104,6 +104,29 @@ namespace AIPawnControl
             }
             return picked.Take(MaxOptions).OrderBy(u => u.gain).ToList();
         }
+
+        /// <summary>
+        /// The colony room people stay in that's furthest outside comfortable (too cold or too hot for her) and the item that best brings it back:
+        /// a campfire or heater, a passive cooler. Null when every room is comfortable or nothing can be built.
+        /// </summary>
+        public static (Room room, Upgrade item, bool cold)? Temperature(Pawn pawn)
+        {
+            float min = pawn.GetStatValue(StatDefOf.ComfyTemperatureMin), max = pawn.GetStatValue(StatDefOf.ComfyTemperatureMax);
+            List<(ThingDef stuff, int stock, int nearby)> materials = null;
+            foreach (var room in Rooms(pawn).Where(r => (TooCold(r, pawn) || TooHot(r, pawn)) && StayedIn(r))
+                         .OrderByDescending(r => Math.Max(min - r.Temperature, r.Temperature - max)))
+            {
+                var ctx = new Context(room, pawn, materials ??= Supplies.WallMaterials(pawn));
+                var best = ItemUpgrades(ctx).Where(u => u.gain == Gain.Temperature).OrderByDescending(u => u.value / Math.Max(1f, u.cost)).FirstOrDefault();
+                if (best != null)
+                    return (room, best, TooCold(room, pawn));
+            }
+            return null;
+        }
+
+        /// <summary>People spend time here: a bed for people, a work table, a seat or a game. Not a store or a barn.</summary>
+        private static bool StayedIn(Room room) =>
+            SnapshotBuilder.Furniture(room).Any(t => (t.def.IsBed && t.def.building.bed_humanlike) || t is IBillGiver || t.def.building?.isSittable == true || t.def.building?.joyKind != null);
 
         private class Context
         {
@@ -151,13 +174,7 @@ namespace AIPawnControl
             }
 
             /// <summary>What it needs to work once built is there: power from a generator for what draws power, some fuel for what burns it.</summary>
-            public bool CanRun(ThingDef def)
-            {
-                if (!Needs.CanRun(def, map))
-                    return false;
-                var fuel = def.GetCompProperties<CompProperties_Refuelable>();
-                return fuel?.fuelFilter == null || fuel.fuelFilter.AllowedThingDefs.Any(f => CanHave(f, 1));
-            }
+            public bool CanRun(ThingDef def) => Needs.CanRun(def, map, f => CanHave(f, 1));
         }
 
         // ---------- Candidates ----------
@@ -184,6 +201,8 @@ namespace AIPawnControl
                     continue;
                 if (def.PlaceWorkers != null && def.PlaceWorkers.Any(w => w is PlaceWorker_Cooler || w is PlaceWorker_Vent))
                     continue; // they sit in a wall: the walls step
+                if (Needs.PlayedSitting(def))
+                    continue; // needs seats beside it, which a one-item upgrade doesn't bring (chess, poker)
                 if (typeof(Building_Throne).IsAssignableFrom(def.thingClass))
                     continue; // a throne makes its room a throne room (RoomRoleWorker_ThroneRoom reads the room's cached things, so KeepsRole can't see it); the title asks for that room itself
                 if (!ctx.CanPay(def, out ThingDef stuff) || !ctx.CanRun(def))
@@ -387,7 +406,7 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// The room's role stays the same with the item in it. Every role worker scores the room by the same code it uses
+        /// The room's role stays the same with the item in it (a dining room turning rec room, or back, is the same great hall). Every role worker scores the room by the same code it uses
         /// for real rooms, with an unspawned copy of the item counted in (listed in one of the room's regions, then taken
         /// out). Vanilla's GetScoreDeltaIfBuildingPlaced isn't used: vanilla only asks it for work tables, and several
         /// workers there test thingClass the wrong way round, scoring a lamp as a bed.
@@ -401,7 +420,8 @@ namespace AIPawnControl
             lister.Add(probe);
             try
             {
-                return Best() == before;
+                var after = Best();
+                return after == before || (Ground.HallRole(after) && Ground.HallRole(before));
             }
             catch (Exception e)
             {
@@ -509,7 +529,7 @@ namespace AIPawnControl
             {
                 pawn = pawn, map = map, footprint = room.ExtentsClose.ExpandedBy(1), placedTick = Find.TickManager.TicksGame,
                 where = where, byMind = true, furnishing = true, material = u.stuff,
-                kindDef = DefDatabase<RoomKindDef>.AllDefsListForReading.FirstOrDefault(k => k.role == room.Role) ?? RoomKindDef.Plain,
+                kindDef = (Ground.HallRole(room.Role) ? RoomKindDef.GreatHall : DefDatabase<RoomKindDef>.AllDefsListForReading.FirstOrDefault(k => k.role == room.Role)) ?? RoomKindDef.Plain,
             };
             if (u.floor != null)
             {

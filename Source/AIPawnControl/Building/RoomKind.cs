@@ -11,7 +11,7 @@ namespace AIPawnControl
     {
         /// <summary>Alternatives: the first one that's buildable is used (a fueled stove). Ignored when there's a need.</summary>
         public List<ThingDef> defs = new List<ThingDef>();
-        /// <summary>What it does instead of named defs (FURNISHING.md §4): bed, seat, shelf, accessory (of the nextTo item).</summary>
+        /// <summary>What it does instead of named defs (FURNISHING.md §4): bed, seat, shelf, accessory (of the nextTo item), joy (each copy a different joy kind).</summary>
         public string need;
         /// <summary>Against a wall (a bed: its head, Position, against the wall and rotated away). The default placement.</summary>
         public bool backToWall;
@@ -46,10 +46,11 @@ namespace AIPawnControl
         /// <summary>How many must fit: all of them for forEveryone, else min.</summary>
         public int MinCount(Map map) => forEveryone ? Count(map) : Mathf.Min(min, repeat);
 
-        public ThingDef Resolve(Map map, ThingDef anchor = null)
+        /// <param name="placed">What the room already holds (joy: a different joy kind from these).</param>
+        public ThingDef Resolve(Map map, ThingDef anchor = null, IEnumerable<ThingDef> placed = null)
         {
             if (need != null)
-                return Needs.Best(need, map, anchor, Count(map));
+                return Needs.Best(need, map, anchor, Count(map), placed);
             ThingDef first = null;
             foreach (var def in defs)
             {
@@ -123,6 +124,7 @@ namespace AIPawnControl
         public static RoomKindDef Bedroom => DefDatabase<RoomKindDef>.GetNamed("AIPC_Bedroom");
         public static RoomKindDef Plain => DefDatabase<RoomKindDef>.GetNamed("AIPC_PlainRoom");
         public static RoomKindDef Hall => DefDatabase<RoomKindDef>.GetNamed("AIPC_Hall");
+        public static RoomKindDef GreatHall => DefDatabase<RoomKindDef>.GetNamed("AIPC_GreatHall");
 
         public static bool Buildable(BuildableDef def) => BuildCopyCommandUtility.FindAllowedDesignator(def) != null;
 
@@ -182,13 +184,21 @@ namespace AIPawnControl
                 if (def != null)
                     while (count < target)
                     {
+                        if (item.need == Needs.Joy && (def = item.Resolve(map, anchorDef, s.placed.Select(p => p.def))) == null)
+                            break; // no game of another joy kind
+                        // A game played sitting (chess, poker) gets its seats instead of the cells kept clear around it.
+                        bool seated = item.need == Needs.Joy && Needs.PlayedSitting(def);
+                        var rules = seated ? new RoomItem { backToWall = item.backToWall } : item;
                         PlanEntry anchor = item.nextTo >= 0 && item.nextTo < firstOf.Length ? firstOf[item.nextTo] : null;
-                        PlanEntry entry = item.nextTo >= 0 ? (anchor != null ? NextTo(def, anchor, s, item) : null)
-                            : item.centre ? Centre(def, s, item)
-                            : AgainstWall(def, s, item);
+                        PlanEntry entry = item.nextTo >= 0 ? (anchor != null ? NextTo(def, anchor, s, rules) : null)
+                            : item.centre ? Centre(def, s, rules)
+                            : AgainstWall(def, s, rules);
                         if (entry == null)
                             break;
-                        Commit(entry, s, item);
+                        if (seated && !WithSeats(entry, s, map))
+                            break;
+                        if (!seated)
+                            Commit(entry, s, rules);
                         firstOf[index] = firstOf[index] ?? entry;
                         count++;
                         foreach (int j in deps)
@@ -265,6 +275,33 @@ namespace AIPawnControl
                 for (int j = i + 1; j < inside.Count; j++)
                     s.reserved.UnionWith(Flood.Path(s.inner, inside[i], inside[j], c => !s.taken.Contains(c)));
             return s;
+        }
+
+        /// <summary>
+        /// Commits the game and up to 2 seats beside it (vanilla won't play it without one: requireChair). False, with
+        /// nothing placed, if no seat fits.
+        /// </summary>
+        private static bool WithSeats(PlanEntry game, State s, Map map)
+        {
+            ThingDef seatDef = Needs.Best(Needs.Seat, map, null, 2);
+            if (seatDef == null)
+                return false;
+            var taken = new HashSet<IntVec3>(s.taken);
+            var reserved = new HashSet<IntVec3>(s.reserved);
+            int placed = s.placed.Count;
+            var none = new RoomItem();
+            Commit(game, s, none);
+            int seats = 0;
+            for (; seats < 2 && NextTo(seatDef, game, s, none) is PlanEntry seat; seats++)
+                Commit(seat, s, none);
+            if (seats > 0)
+                return true;
+            s.taken.Clear();
+            s.taken.UnionWith(taken);
+            s.reserved.Clear();
+            s.reserved.UnionWith(reserved);
+            s.placed.RemoveRange(placed, s.placed.Count - placed);
+            return false;
         }
 
         private static void Commit(PlanEntry entry, State s, RoomItem item)

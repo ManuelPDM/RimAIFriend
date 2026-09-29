@@ -22,8 +22,9 @@ namespace AIPawnControl
                 return;
             int colonists = Math.Max(1, project.map.mapPawns.FreeColonistsSpawnedCount);
             var results = new List<string>();
+            // A heater is there for its heat: a campfire gets no bill (nobody cooks in the barracks).
             var tables = room.ContainedAndAdjacentThings.OfType<Building>()
-                .Where(b => b is IBillGiver giver && giver.BillStack != null && room.ContainsCell(b.Position) && b.Faction == Faction.OfPlayer)
+                .Where(b => b is IBillGiver giver && giver.BillStack != null && room.ContainsCell(b.Position) && b.Faction == Faction.OfPlayer && !Needs.Meets(Needs.Heater, b.def, null))
                 .Distinct().ToList();
             foreach (var table in tables)
                 if (DefaultBill(pawn, table, colonists) is string result)

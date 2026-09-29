@@ -383,7 +383,7 @@ namespace AIPawnControl
                 if (items.Count == 0)
                     empty++;
                 else
-                    parts.Add($"{RoomName(room, pawn)} ({BuildManager.Impressiveness(room)}{BuiltBy(room, pawn)}): {ItemList(items, MaxRoomItems)}");
+                    parts.Add($"{RoomName(room, pawn)} ({BuildManager.Impressiveness(room)}{Uncomfortable(room, pawn)}{BuiltBy(room, pawn)}): {ItemList(items, MaxRoomItems)}");
             }
             if (parts.Count > MaxRooms)
                 parts = parts.Take(MaxRooms).Append($"{parts.Count - MaxRooms} more rooms").ToList();
@@ -399,6 +399,10 @@ namespace AIPawnControl
                             (hereItems.Count > 0 ? $"Has: {ItemList(hereItems, int.MaxValue)}." : "Nothing in it.");
             return others != null ? $"{detail} Other rooms: {others}" : detail;
         }
+
+        /// <summary>", 29F" when the room is too cold or too hot for her (her comfortable range, clothes included), else "".</summary>
+        private static string Uncomfortable(Room room, Pawn pawn) =>
+            Upgrades.TooCold(room, pawn) || Upgrades.TooHot(room, pawn) ? ", " + room.Temperature.ToStringTemperature("F0") : "";
 
         /// <summary>", built by Sab" or ", built by me" (STREAMLINE.md §4), or "".</summary>
         private static string BuiltBy(Room room, Pawn pawn)
@@ -441,6 +445,7 @@ namespace AIPawnControl
                 words.Add(stat.GetScoreStage(room.GetStat(stat)).label);
             if (pawn.Map.glowGrid.PsychGlowAt(pawn.Position) == PsychGlow.Dark)
                 words.Add("dark");
+            words.Add(Uncomfortable(room, pawn).TrimStart(',', ' '));
             return string.Join(", ", words.Where(w => !string.IsNullOrEmpty(w)));
         }
 

@@ -90,7 +90,8 @@ namespace AIPawnControl
             var options = new List<ActOption>();
             void Add(string label, Func<string> apply) => options.Add(new ActOption { Id = options.Count + 1, Label = label, Apply = _ => apply() });
 
-            Add("keep going", () => mind.KeepGoing(KeepGoingHours));
+            string doing = pawn.GetJobReport()?.TrimEnd('.');
+            Add(string.IsNullOrEmpty(doing) ? "keep going" : $"keep going ({doing})", () => mind.KeepGoing(KeepGoingHours));
 
             var targets = TalkTargets(pawn);
             if (!inConversation && targets.Count > 0)

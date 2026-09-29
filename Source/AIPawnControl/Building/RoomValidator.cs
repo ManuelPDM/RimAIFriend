@@ -26,13 +26,34 @@ namespace AIPawnControl
         {
             this.map = map;
             limit = maxWalk + 20;
-            var before = SiteFinder.Walk(map, center, limit);
+            var before = Flood.Run(Flood.All(map), center.InBounds(map) && Walkable(center) ? new[] { center } : new IntVec3[0],
+                c => Walkable(c) && !c.Fogged(map), limit);
             reachableDoors = map.listerBuildings.allBuildingsColonist.Where(b => b is Building_Door && before.Has(b.Position)).Select(b => b.Position).ToList();
+        }
+
+        /// <summary>
+        /// Walkable once the base is built: other projects' blueprints and frames count as what they'll be. Two rooms
+        /// under construction can each leave a gap open that the pair closes (a dining hall and a food store sealing the
+        /// ground in front of the storeroom's door).
+        /// </summary>
+        private bool Walkable(IntVec3 c) => c.Walkable(map) && !(Planned(c) is ThingDef d && d.passability == Traversability.Impassable);
+
+        /// <summary>A door already there or planned there.</summary>
+        private bool Door(IntVec3 c) => c.GetEdifice(map) is Building_Door || (Planned(c) is ThingDef d && d.IsDoor);
+
+        private ThingDef Planned(IntVec3 c)
+        {
+            foreach (var t in c.GetThingList(map))
+                if ((t is Blueprint || t is Frame) && t.def.entityDefToBuild is ThingDef d)
+                    return d;
+            return null;
         }
 
         public List<string> Check(RoomPlan plan, ThingDef material)
         {
             var fail = new List<string>();
+            if (!plan.doorOutside.InBounds(map) || !Walkable(plan.doorOutside))
+                fail.Add("V7: its door opens onto a wall or other blocked ground, built or planned");
             int cut = DoorsCutOff(plan);
             if (cut > 0)
                 fail.Add($"V7: {cut} existing doors can't be reached (or need a long detour) with the room in place");
@@ -65,11 +86,11 @@ namespace AIPawnControl
         /// </summary>
         private int DoorsCutOff(RoomPlan plan)
         {
-            if (reachableDoors.Count == 0 || !plan.doorOutside.InBounds(map) || !plan.doorOutside.Walkable(map))
+            if (reachableDoors.Count == 0 || !plan.doorOutside.InBounds(map) || !Walkable(plan.doorOutside))
                 return 0;
             var remaining = new HashSet<IntVec3>(reachableDoors);
             Flood.Run(Flood.All(map), new[] { plan.doorOutside },
-                n => n == plan.door || (n.Walkable(map) && !n.Fogged(map) && !plan.IsWall(n)),
+                n => n == plan.door || (Walkable(n) && !n.Fogged(map) && !plan.IsWall(n)),
                 limit + DetourAllowance + Math.Max(plan.walk, 0),
                 stop: c => remaining.Remove(c) && remaining.Count == 0);
             return remaining.Count;
@@ -93,8 +114,8 @@ namespace AIPawnControl
         private bool SealsOff(RoomPlan plan)
         {
             // Open ground only: not through the new room, nor through doors (a pocket reached through a room is still no way out).
-            bool Open(IntVec3 c) => !plan.footprint.Contains(c) && c.Walkable(map) && !(c.GetEdifice(map) is Building_Door);
-            var around = plan.footprint.ExpandedBy(1).EdgeCells.Where(c => c.InBounds(map) && c.Walkable(map) && Ground.OpenAir(c.GetRoom(map), openAir)).ToList();
+            bool Open(IntVec3 c) => !plan.footprint.Contains(c) && Walkable(c) && !Door(c);
+            var around = plan.footprint.ExpandedBy(1).EdgeCells.Where(c => c.InBounds(map) && Open(c) && Ground.OpenAir(c.GetRoom(map), openAir)).ToList();
             if (around.Count < 2)
                 return false;
             CellRect local = plan.footprint.ExpandedBy(25).ClipInsideMap(map);
@@ -126,7 +147,7 @@ namespace AIPawnControl
 
         private Flood Reach(CellRect area, RoomPlan plan)
         {
-            bool Open(IntVec3 c) => plan == null ? c.Walkable(map) : c == plan.door || (c.Walkable(map) && !plan.IsWall(c));
+            bool Open(IntVec3 c) => plan == null ? Walkable(c) : c == plan.door || (Walkable(c) && !plan.IsWall(c));
             // From the open air only: the area's edge can run through a room, and a pocket is reached through its doors.
             return Flood.Run(area, area.EdgeCells.Where(c => Open(c) && Ground.OpenAir(c.GetRoom(map), openAir)), Open);
         }
