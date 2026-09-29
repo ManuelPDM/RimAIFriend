@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <MainButtonDef>
+    <defName>AIPC_GroupChat</defName>
+    <label>group chat</label>
+    <description>The colony's group chat: the AI colonists take turns writing in it, and you can write too.</description>
+    <tabWindowClass>AIPawnControl.MainTabWindow_GroupChat</tabWindowClass>
+    <order>85</order>
+  </MainButtonDef>
+</Defs>

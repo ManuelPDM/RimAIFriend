@@ -74,8 +74,10 @@ namespace AIPawnControl
                 case "chat": return 0;
                 case "reply": return 1;
                 case "base": return 3;
+                case "post": return 3;
                 case "persona": return 4;
                 case "reflect": return 5;
+                case "compact": return 5;
                 default: return 2; // act, dev tests
             }
         }

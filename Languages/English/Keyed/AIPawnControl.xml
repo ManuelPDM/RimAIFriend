@@ -74,6 +74,14 @@
   <AIPawnControl_ChatWaiting>{0} is unconscious and will answer after coming to.</AIPawnControl_ChatWaiting>
   <AIPawnControl_ChatUnreachable>(Couldn't reach {0}'s mind: {1})</AIPawnControl_ChatUnreachable>
 
+  <!-- Group chat -->
+  <AIPawnControl_GroupChatTitle>Group chat</AIPawnControl_GroupChatTitle>
+  <AIPawnControl_GroupChatTurn>{0}'s turn to write. Your messages don't start anything; the next colonist sees them.</AIPawnControl_GroupChatTurn>
+  <AIPawnControl_GroupChatNoMinds>No colonist has an AI mind yet.</AIPawnControl_GroupChatNoMinds>
+  <AIPawnControl_GroupChatCompacting>(Summing up older messages...)</AIPawnControl_GroupChatCompacting>
+  <AIPawnControl_GroupChatEarlier>Earlier:</AIPawnControl_GroupChatEarlier>
+  <AIPawnControl_GroupChatEmpty>Nobody has written anything yet.</AIPawnControl_GroupChatEmpty>
+
   <!-- Memories -->
   <AIPawnControl_MemoriesButton>Memories</AIPawnControl_MemoriesButton>
   <AIPawnControl_MemoriesTitle>What {0} remembers</AIPawnControl_MemoriesTitle>

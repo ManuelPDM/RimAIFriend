@@ -1,0 +1,10 @@
+It's {time}. You've decided to write in the colony's group chat. Everyone reads it, wherever they are: {readers}.
+
+{snapshot}
+
+Write your message ("post"). Use it for whatever matters to you right now: coordinate the colony's work, ask someone to do something, warn someone, answer what someone wrote in [Group chat], or just say what's on your mind. Who you are, your mood and how you feel about the others ([People], [About ...]) decide how you say it.
+- 3-4 sentences, under 400 characters, plain speech, in character. You can name anyone. No narration, no *actions*, no quotation marks.
+- Writing this is all you do right now. Saying you'll do something doesn't do it: you'll have to choose it in a later decision. So say what you will do or can do, never that it's done. [Recent] and [Doing now] show what you've actually done; don't claim anything they don't show.
+- The same goes for the others: [Group chat] is what they wrote, not what happened. [Colony], [Colony stores] and [Colony work] show what actually happened.
+
+"reason": why you're writing this, in your own voice, briefly.

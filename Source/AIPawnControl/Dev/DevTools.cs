@@ -216,6 +216,44 @@ namespace AIPawnControl
         [DebugAction(Category, "Upgrade call now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         private static void UpgradeCallNowAction() => ForMind(UpgradeCallNow);
 
+        // ---------- Group chat (GROUP_CHAT.md) ----------
+
+        /// <summary>The selected mind writes in the group chat now, whoever's turn it is (the turn doesn't move).</summary>
+        [DebugAction(Category, "Group chat: post call now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void GroupPostNow() => ForMind(mind =>
+        {
+            if (mind.persona == null || mind.Thinking)
+            {
+                Reject($"{mind.pawn.LabelShort} {(mind.Thinking ? "is thinking already" : "has no persona yet")}.");
+                return;
+            }
+            mind.AddDecision("DEV group chat post now: " + GroupChat.StartPost(mind), importance: 0);
+        });
+
+        [DebugAction(Category, "Group chat: pass the turn", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void GroupPassTurn()
+        {
+            var chat = GroupChat.Instance;
+            var holder = chat?.Holder();
+            if (holder == null)
+            {
+                Reject("No mind holds the turn.");
+                return;
+            }
+            chat.PassTurn(holder);
+            Report($"Group chat: {holder.pawn.LabelShort} passed; now it's {chat.Holder()?.pawn.LabelShort}'s turn.");
+        }
+
+        [DebugAction(Category, "Group chat: compact call now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void GroupCompactNow()
+        {
+            var chat = GroupChat.Instance;
+            if (chat == null || chat.Messages.Count <= 5)
+                Reject("The group chat has 5 messages or fewer: nothing to fold.");
+            else
+                chat.Compact();
+        }
+
         /// <summary>A kind laid out for the selected colonist as the Base call would (site A, code's size, the best wall material), with its missing materials marked. No LLM.</summary>
         [DebugAction(Category, "Build room now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         private static List<DebugActionNode> BuildRoomNow() =>

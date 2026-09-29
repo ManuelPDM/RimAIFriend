@@ -178,8 +178,8 @@ namespace AIPawnControl
 
         /// <summary>
         /// [Since yesterday] (PHASE6.md §2.1): the most important events of the last 24 hours, oldest first, as
-        /// "Yesterday 18:10 text". Decisions are left out ([Recent] has them); chat too for the Chat call, which shows
-        /// the conversation itself, so every other call hears what the player said.
+        /// "Yesterday 18:10 text". Decisions are left out ([Recent] has them), and so is the group chat ([Group chat] has
+        /// it); chat too for the Chat call, which shows the conversation itself, so every other call hears what the player said.
         /// </summary>
         public string SinceYesterday(Pawn pawn, int max, bool withChat)
         {
@@ -188,7 +188,7 @@ namespace AIPawnControl
                 return null;
             int from = Find.TickManager.TicksGame - GenDate.TicksPerDay;
             var top = events
-                .Where(e => e.lastTick >= from && e.kind != "decision" && (withChat || e.kind != "chat"))
+                .Where(e => e.lastTick >= from && e.kind != "decision" && e.kind != "groupchat" && (withChat || e.kind != "chat"))
                 .OrderByDescending(e => e.importance).ThenByDescending(e => e.lastTick)
                 .Take(max)
                 .OrderBy(e => e.tick)

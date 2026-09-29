@@ -198,6 +198,7 @@ namespace AIPawnControl
                     var call = BaseCall.Prepare(mind, dev: true);
                     Check("base", call.messages, call.schema);
                 });
+                Try("post", () => Check("post", GroupChat.PostMessages(mind), GroupChat.PostSchema()));
                 Try("upgrade", () =>
                 {
                     var room = Upgrades.Rooms(pawn).FirstOrDefault(r => Upgrades.For(r, pawn).Count > 0);

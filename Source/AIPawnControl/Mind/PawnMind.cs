@@ -380,11 +380,12 @@ namespace AIPawnControl
             wakeAtTick = -1;
             idleSinceTick = -1;
             var menu = ActionCatalog.BuildActMenu(pawn, this);
+            bool groupTurn = GroupChat.Instance?.Holder() == this; // this Act is her turn in the group chat
             var present = Recall.Present(pawn);
             AfterRecall(Recall.ActQuery(pawn, present), (query, tag) =>
             {
                 var recall = Recall.Act(this, present, query, tag);
-                Send("act", ActMessages(trigger, menu, recall), ActionCatalog.ActSchema(menu, recall.Shown), reply => OnAct(reply, menu, recall),
+                Send("act", ActMessages(trigger, menu, recall), ActionCatalog.ActSchema(menu, recall.Shown), reply => OnAct(reply, menu, recall, groupTurn),
                     maxAgeTicks: GenDate.TicksPerHour);
             });
         }
@@ -428,7 +429,7 @@ namespace AIPawnControl
                 actsToday--;
         }
 
-        private void OnAct(Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
+        private void OnAct(Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall, bool groupTurn)
         {
             int choice = reply.Int("choice", -1);
             var option = menu.FirstOrDefault(o => o.Id == choice);
@@ -451,6 +452,8 @@ namespace AIPawnControl
             AddDecision($"{option.Label}: {result}");
             ModLog.Message($"{pawn.LabelShort} act: {option.Label} | {result} | Reason: {lastReason}");
             recall.MarkUsed(this, reply.Int("memory"), option.IsTalk ? option.Target?.LabelShort : null);
+            if (groupTurn)
+                GroupChat.Instance?.PassTurn(this); // her turn in the group chat was this Act, whatever she picked
         }
 
         // ---------- Player chat ----------

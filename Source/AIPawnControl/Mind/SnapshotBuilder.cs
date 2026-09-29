@@ -74,6 +74,7 @@ namespace AIPawnControl
                 ["Colony work"] = ColonyWork.Line(pawn),
                 ["Rooms"] = Rooms(pawn),
                 ["Recent"] = Recent(mind, map),
+                ["Group chat"] = GroupChat.Instance?.Context(map),
             };
         }
 

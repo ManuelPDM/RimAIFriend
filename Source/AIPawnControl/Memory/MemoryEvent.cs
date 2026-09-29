@@ -15,7 +15,7 @@ namespace AIPawnControl
         public int id;
         public int tick;
         public int lastTick;
-        public string kind; // thought, talk, letter, hurt, break, relation, tale, decision, chat
+        public string kind; // thought, talk, letter, hurt, break, relation, tale, decision, chat, groupchat
         public string def;  // the thought, interaction, letter or tale def: merging and the first-time bonus go by kind + def
         public string text;
         public List<string> people = new List<string>();

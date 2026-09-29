@@ -1,0 +1,9 @@
+You keep the record of a RimWorld colony's group chat, where the colonists and the player write to each other.
+
+The summary so far:
+{summary}
+
+Older messages to fold into it:
+{messages}
+
+Write a new summary ("summary") that replaces the old one: who asked, warned, offered, promised or argued about what, and what's still open. Drop what no longer matters. A promise is only what someone said, not what happened: write "Dave said he'd cut wood", never "Dave cut wood". 4-6 sentences, plain words, past tense, use names. Use only what's written above.
