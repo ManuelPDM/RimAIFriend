@@ -56,6 +56,9 @@ namespace AIPawnControl
             {
                 if (def == null || !RoomKindDef.Buildable(def) || !Needs.CanRun(def, map))
                     continue;
+                // A hospital bed only when its steel and components are in storage for every bed; else a plain bed, set medical.
+                if (medical && !(Needs.OtherCostsInStorage(def, map, Count(map)) && Needs.StuffCanBeHad(def, map, Count(map))))
+                    continue;
                 if (!preferNew || map.listerBuildings.ColonistsHaveBuilding(def) == false)
                     return def;
                 first = first ?? def;

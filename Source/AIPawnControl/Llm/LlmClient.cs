@@ -43,7 +43,7 @@ namespace AIPawnControl
     }
 
     /// <summary>
-    /// OpenAI-compatible chat client (LM Studio). "Parallel requests" run at once across the whole mod (default 1); the
+    /// OpenAI-compatible chat client (LM Studio). "Parallel requests" run at once across the whole mod (default 4); the
     /// rest wait in a priority queue (PHASE6.md §6): the player's chat first, Reflect last.
     /// Call Send on the main thread (it snapshots settings); the callback also runs on the main thread.
     /// </summary>

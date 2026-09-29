@@ -18,7 +18,7 @@ namespace AIPawnControl
         private const int MaxStockUps = 7;
         private const int MaxPerKind = 2;
         private const string None = "-";
-        private static readonly string[] GroupOrder = { "Next for the base", "Inside the base", "Food", "Storage", "Stock up", "Other rooms" };
+        private static readonly string[] GroupOrder = { "Next for the base", "Inside the base", "Food", "Medicine", "Storage", "Stock up", "Other rooms" };
 
         /// <summary>One numbered line. Exactly one of kind, layout, crop, upgrade, pile or chore is set.</summary>
         internal class Choice
@@ -59,7 +59,7 @@ namespace AIPawnControl
                 return true;
             if (!AIPawnControlMod.Settings.allowChores || ChoreManager.Instance == null)
                 return false;
-            return pawn.Map.haulDestinationManager.AllGroupsListForReading.Count == 0 || FoodOutlook.For(pawn.Map).cellsWanted > 0 || ChoreOptions.All(pawn).Count > 0;
+            return pawn.Map.haulDestinationManager.AllGroupsListForReading.Count == 0 || FoodOutlook.For(pawn.Map).cellsWanted > 0 || Fields.MedicineCrop(pawn.Map) != null || ChoreOptions.All(pawn).Count > 0;
         }
 
         /// <summary>
@@ -187,6 +187,18 @@ namespace AIPawnControl
             var outlook = FoodOutlook.For(map);
             if (AIPawnControlMod.Settings.allowChores && outlook.cellsWanted > 0 && FieldChoice(pawn, outlook) is Choice field)
                 choices.Add(field);
+
+            // Medicine: one small field, once, while there's none.
+            if (AIPawnControlMod.Settings.allowChores && Fields.MedicineCrop(map) is ThingDef medicine
+                && Fields.FindSite(pawn, 4, out CellRect herbs, out string herbsWhere, out string herbsGround))
+                choices.Add(new Choice
+                {
+                    group = "Medicine",
+                    label = $"a field of {medicine.label} (there's no medicine field yet): {herbs.Width}x{herbs.Height}, {herbsGround}, {herbsWhere}",
+                    crop = medicine,
+                    field = herbs,
+                    where = herbsWhere,
+                });
 
             // Stock up: at most two lines per kind.
             if (AIPawnControlMod.Settings.allowChores && ChoreManager.Instance != null)

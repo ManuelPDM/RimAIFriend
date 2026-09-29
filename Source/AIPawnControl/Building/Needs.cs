@@ -143,8 +143,8 @@ namespace AIPawnControl
         public static bool StuffCanBeHad(ThingDef d, Map map, int count = 1) =>
             !d.MadeFromStuff || GenStuff.AllowedStuffsFor(d).Any(s => Supplies.IsWallMaterial(s) || map.resourceCounter.GetCount(s) >= d.costStuffCount * count);
 
-        /// <summary>Costs other than a wall material (a campfire's wood gets marked with the room's) are already in storage.</summary>
-        public static bool OtherCostsInStorage(ThingDef d, Map map) =>
-            d.costList == null || d.costList.All(c => Supplies.IsWallMaterial(c.thingDef) || map.resourceCounter.GetCount(c.thingDef) >= c.count);
+        /// <summary>Costs other than a wall material (a campfire's wood gets marked with the room's) are already in storage, for <paramref name="count"/> copies.</summary>
+        public static bool OtherCostsInStorage(ThingDef d, Map map, int count = 1) =>
+            d.costList == null || d.costList.All(c => Supplies.IsWallMaterial(c.thingDef) || map.resourceCounter.GetCount(c.thingDef) >= c.count * count);
     }
 }

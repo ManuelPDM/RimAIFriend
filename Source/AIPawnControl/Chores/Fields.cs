@@ -26,6 +26,19 @@ namespace AIPawnControl
                 .ToList();
         }
 
+        /// <summary>
+        /// A medicine crop (healroot) for a field, once: only while the colony has no medicine field, and someone who does
+        /// growing work has the skill to sow it. Null otherwise.
+        /// </summary>
+        public static ThingDef MedicineCrop(Map map)
+        {
+            if (map.zoneManager.AllZones.OfType<Zone_Growing>().Any(z => z.GetPlantDefToGrow() is ThingDef p && Purpose(p) == "medicine"))
+                return null;
+            var growers = map.mapPawns.FreeColonistsSpawned.Where(p => !p.WorkTypeIsDisabled(WorkTypeDefOf.Growing)).ToList();
+            return Crops(map).FirstOrDefault(d => Purpose(d) == "medicine"
+                && growers.Any(p => (p.skills?.GetSkill(SkillDefOf.Plants)?.Level ?? 0) >= d.plant.sowMinSkill));
+        }
+
         /// <summary>What the crop is for, from what it gives: food, cloth, medicine, drug, animal feed.</summary>
         public static string Purpose(ThingDef plant)
         {

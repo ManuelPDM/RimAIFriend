@@ -22,7 +22,7 @@ namespace AIPawnControl
         public float needPerDay;    // raw nutrition the colony eats a day (cooked meals stretch it)
         public float growPerDay;    // what the food fields give a day while growing
         public float stores = -1f;  // nutrition in storage; -1 = no storage to count
-        public ThingDef crop;       // what a new field would grow (rice when it's there)
+        public ThingDef crop;       // what a new field would grow (corn when it's there)
         public bool cropInSeason;   // it can be sown now
         public bool hasWinter;
         public int daysToWinter, winterDays; // for the field crop: when growing stops, and for how long
@@ -55,9 +55,9 @@ namespace AIPawnControl
             }
 
             var crops = Fields.Crops(map).Where(c => Fields.Purpose(c) == "food").ToList();
-            o.crop = crops.FirstOrDefault(c => c.defName == "Plant_Rice") ?? crops.FirstOrDefault();
+            o.crop = crops.FirstOrDefault(c => c.defName == "Plant_Corn") ?? crops.FirstOrDefault();
             o.cropInSeason = o.crop != null;
-            o.crop = o.crop ?? DefDatabase<ThingDef>.GetNamedSilentFail("Plant_Rice");
+            o.crop = o.crop ?? DefDatabase<ThingDef>.GetNamedSilentFail("Plant_Corn");
             if (o.crop != null)
                 o.Winter(map);
             o.cellsWanted = o.CellsWanted(map);

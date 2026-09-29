@@ -22,7 +22,7 @@ namespace AIPawnControl
         public bool allowBuilding = true;  // off: no room projects offered; a running one is left as-is
         public bool allowChores = true;    // off: no colony chores offered (Phase 5); what's set up stays
         public bool mindsAnswer = true;    // off: a talk between two minds carries only the first line (PHASE6.md §4)
-        public int parallelRequests = 1;   // requests LM Studio runs at once (its own parallel setting must allow it)
+        public int parallelRequests = 4;  // requests LM Studio runs at once (its own parallel setting must allow it)
         public string embedEndpoint = ""; // empty: same as the chat endpoint
         public string embedModel = "google/embedding-gemma-300m";
         public int embedDims;              // the model's own size, as detected by "Test embeddings"
@@ -52,7 +52,7 @@ namespace AIPawnControl
             Scribe_Values.Look(ref allowBuilding, "allowBuilding", true);
             Scribe_Values.Look(ref allowChores, "allowChores", true);
             Scribe_Values.Look(ref mindsAnswer, "mindsAnswer", true);
-            Scribe_Values.Look(ref parallelRequests, "parallelRequests", 1);
+            Scribe_Values.Look(ref parallelRequests, "parallelRequests", 4);
             Scribe_Values.Look(ref embedEndpoint, "embedEndpoint", "");
             Scribe_Values.Look(ref embedModel, "embedModel", "google/embedding-gemma-300m");
             Scribe_Values.Look(ref embedDims, "embedDims");
