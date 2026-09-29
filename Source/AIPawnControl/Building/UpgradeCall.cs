@@ -54,9 +54,11 @@ namespace AIPawnControl
             if (prepared.upgrades == null)
                 return $"Looked at {name}, but there's nothing to add right now.";
             Map map = pawn.Map;
+            bool busy = BuildManager.Instance?.Underway(map) != null; // only the dev call gets here with a project running
             ModLog.Message($"{pawn.LabelShort}: upgrade call for {name} with {prepared.upgrades.Count} options.");
             mind.Send("upgrade", prepared.messages, prepared.schema, reply => OnReply(mind, reply, room, prepared.upgrades),
-                stillValid: () => pawn.Destroyed || pawn.Dead || !pawn.Spawned || pawn.Map != map ? "gone" : null);
+                stillValid: () => pawn.Destroyed || pawn.Dead || !pawn.Spawned || pawn.Map != map ? "gone"
+                    : !busy && BuildManager.Instance?.Underway(map) != null ? "someone started a project meanwhile; the base builds one thing at a time" : null);
             return $"Thinking about how to upgrade {name}.";
         }
 

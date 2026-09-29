@@ -375,6 +375,9 @@ namespace AIPawnControl
         /// <summary>Everything being built on the map, upgrades included.</summary>
         public IEnumerable<BuildProject> ActiveOnAll(Map map) => projects.Where(p => p.Active && p.map == map);
 
+        /// <summary>The project underway on the map, or null: the colony builds one at a time (the user's call).</summary>
+        public BuildProject Underway(Map map) => ActiveOnAll(map).FirstOrDefault();
+
         /// <summary>Who designed a finished room, for [Rooms]' credit, or null.</summary>
         public Pawn BuilderOf(Room room) => projects.Find(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == room.Map && p.Room == room)?.pawn;
 
@@ -408,7 +411,7 @@ namespace AIPawnControl
                 return "building is off in the settings";
             if (pawn.Map == null)
                 return "not on a map";
-            if (ActiveProject(pawn) != null)
+            if (Underway(pawn.Map) != null)
                 return "a project is already running";
             if (now - LastPlacedTick(pawn) < CooldownTicks)
                 return "a project was placed less than 2 hours ago";

@@ -45,6 +45,7 @@ namespace AIPawnControl
             internal List<string> letters = new List<string>();
             internal List<ThingDef> materials = new List<ThingDef>();
             internal bool noSites; // a room could have been planned, but no site was found
+            internal BuildProject underway; // the project running when the menu was made (only the dev call offers rooms then)
             public List<KeyValuePair<string, string>> messages;
             public Dictionary<string, object> schema;
             public int Count => choices.Count;
@@ -63,28 +64,31 @@ namespace AIPawnControl
 
         /// <summary>
         /// Fixed text of what the Base call can offer, so the Act menu scans nothing (the Base call does, once picked). With
-        /// her project running, only fields and stocking up are left: "work on the base (my barracks comes first): …".
+        /// a project running (anyone's: one at a time), only fields and stocking up are left: "work on the base (Stone's
+        /// barracks comes first): …".
         /// </summary>
         public static string MenuLabel(Pawn pawn)
         {
-            if (BuildManager.Instance?.ActiveProject(pawn) is BuildProject project)
-                return $"work on the base (my {ProjectName(project)} comes first): plant fields, or stock up by mining, cutting wood, hunting or foraging";
+            if (BuildManager.Instance?.Underway(pawn.Map) is BuildProject project)
+                return $"work on the base ({ProjectName(project, pawn)} comes first): plant fields, or stock up by mining, cutting wood, hunting or foraging";
             return "work on the base: build or improve rooms, join rooms with halls and doors, warm or cool a room, plant fields, or stock up by mining, cutting wood, hunting or foraging";
         }
 
-        private static string ProjectName(BuildProject project) => project.furnishing ? project.ItemLabel : project.KindFor;
+        /// <summary>"my barracks" or "Stone's barracks".</summary>
+        private static string ProjectName(BuildProject project, Pawn pawn) =>
+            (project.pawn == pawn ? "my " : project.pawn.LabelShort + "'s ") + (project.furnishing ? project.ItemLabel : project.KindFor);
 
         /// <summary>
-        /// Why she can't start the next rung herself: "after my barracks is finished (it's waiting on 15 wood)", or
+        /// Why she can't start the next rung herself: "after Stone's barracks is finished (it's waiting on 15 wood)", or
         /// "not yet: a project was placed less than 2 hours ago". Null when she can.
         /// </summary>
         private static string Blocker(Pawn pawn)
         {
             var manager = BuildManager.Instance;
-            if (manager?.ActiveProject(pawn) is BuildProject project)
+            if (manager?.Underway(pawn.Map) is BuildProject project)
             {
                 var missing = project.Missing();
-                return $"after my {ProjectName(project)} is finished" +
+                return $"after {ProjectName(project, pawn)} is finished" +
                        (missing.Count > 0 ? $" (it's waiting on {string.Join(", ", missing.Select(kv => $"{kv.Value} {kv.Key.label}"))})" : "");
             }
             string why = manager?.CantPlanReason(pawn);
@@ -121,6 +125,7 @@ namespace AIPawnControl
             var call = new Prepared();
             var choices = call.choices;
             var manager = BuildManager.Instance;
+            call.underway = manager?.Underway(map);
             bool canPlan = manager != null && (manager.CantPlanReason(pawn) == null
                                                || (dev && AIPawnControlMod.Settings.allowBuilding && manager.ActiveProject(pawn) == null));
 
@@ -342,6 +347,14 @@ namespace AIPawnControl
             if (choice == null)
             {
                 ModLog.Warning($"{pawn.LabelShort}: base reply chose {pick}, which isn't on the list.");
+                return;
+            }
+            // One project at a time: someone else may have started one while she was thinking.
+            if ((choice.kind != null || choice.layout != null || choice.upgrade != null) && call.underway == null
+                && BuildManager.Instance.Underway(pawn.Map) is BuildProject started)
+            {
+                RemarkAndLog(mind, say, $"{ProjectName(started, pawn).CapitalizeFirst()} was started meanwhile, so I left it at that; the base builds one thing at a time.",
+                    $"base: {choice.label} (another project started)");
                 return;
             }
             if (choice.upgrade != null)
