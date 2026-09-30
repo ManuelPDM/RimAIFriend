@@ -54,7 +54,7 @@ namespace AIPawnControl
             ThingDef first = null;
             foreach (var def in defs)
             {
-                if (def == null || !RoomKindDef.Buildable(def) || !Needs.CanRun(def, map))
+                if (def == null || !RoomKindDef.Buildable(def, map) || !Needs.CanRun(def, map))
                     continue;
                 // A hospital bed only when its steel and components are in storage for every bed; else a plain bed, set medical.
                 if (medical && !(Needs.OtherCostsInStorage(def, map, Count(map)) && Needs.StuffCanBeHad(def, map, Count(map))))
@@ -129,11 +129,17 @@ namespace AIPawnControl
         public static RoomKindDef Hall => DefDatabase<RoomKindDef>.GetNamed("AIPC_Hall");
         public static RoomKindDef GreatHall => DefDatabase<RoomKindDef>.GetNamed("AIPC_GreatHall");
 
-        public static bool Buildable(BuildableDef def) => BuildCopyCommandUtility.FindAllowedDesignator(def) != null;
+        /// <summary>Its designator is allowed (research, difficulty) and someone on the map has the skills to build it (vanilla's check in Designator_Build).</summary>
+        public static bool Buildable(BuildableDef def, Map map) =>
+            BuildCopyCommandUtility.FindAllowedDesignator(def) != null
+            && (map.mapPawns.FreeColonistsSpawned.Any(p => p.skills != null
+                    && p.skills.GetSkill(SkillDefOf.Construction).Level >= def.constructionSkillPrerequisite
+                    && p.skills.GetSkill(SkillDefOf.Artistic).Level >= def.artisticSkillPrerequisite)
+                || MechanitorUtility.AnyPlayerMechCanDoWork(WorkTypeDefOf.Construction, def.constructionSkillPrerequisite, out _));
 
         /// <summary>Walls and doors are buildable, and every required item has a buildable def.</summary>
         public bool BuildableNow(Map map) =>
-            Buildable(ThingDefOf.Wall) && Buildable(ThingDefOf.Door) && items.All(i => i.optional || i.Resolve(map) != null);
+            Buildable(ThingDefOf.Wall, map) && Buildable(ThingDefOf.Door, map) && items.All(i => i.optional || i.Resolve(map) != null);
 
         public bool Fits(int width, int height) =>
             Mathf.Min(width, height) >= minSize.x && Mathf.Max(width, height) >= minSize.z;
@@ -184,11 +190,15 @@ namespace AIPawnControl
                 var depPlaced = deps.ToDictionary(j => j, j => 0);
                 int target = deps.Count > 0 ? deps.Max(j => (kindItems[j].Count(map) + kindItems[j].perAnchor - 1) / kindItems[j].perAnchor) : item.Count(map);
                 int count = 0;
+                // Shelves tied for best (a crate, tall crate and pallet) are mixed: each copy is one of them at random.
+                var tied = item.need == Needs.Shelf && def != null ? Needs.Tied(Needs.Shelf, map, item.Count(map)) : null;
                 if (def != null)
                     while (count < target)
                     {
                         if (item.need == Needs.Joy && (def = item.Resolve(map, anchorDef, s.placed.Select(p => p.def))) == null)
                             break; // no game of another joy kind
+                        if (tied != null && tied.Count > 0)
+                            def = tied.RandomElement();
                         // A game played sitting (chess, poker) gets its seats instead of the cells kept clear around it.
                         bool seated = item.need == Needs.Joy && Needs.PlayedSitting(def);
                         var rules = seated ? new RoomItem { backToWall = item.backToWall } : item;

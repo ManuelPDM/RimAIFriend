@@ -100,7 +100,7 @@ namespace AIPawnControl
                     return $"E{i + 1} {e.When(map)} · {e.source}{people} · importance {e.importance}: {e.Text}";
                 })),
                 ["people"] = string.Join("\n", names.Select(Describe)),
-                ["worktypes"] = workTypes.Count > 0 ? string.Join(", ", workTypes.Select(w => w.labelShort)) : "(none)",
+                ["worktypes"] = workTypes.Count > 0 ? string.Join(", ", workTypes.Select(w => $"{w.labelShort} {(mind.pawn.workSettings.GetPriority(w) is int p && p == 0 ? "off" : ActionCatalog.ManualPriorities ? p.ToString() : "on")}")) : "(none)",
                 ["workwaiting"] = (map != null ? WorkWaiting.Lines(map, mind.pawn) : null) ?? "(nothing waiting)",
                 ["memories"] = shown.Count > 0
                     ? string.Join("\n", shown.Select((m, i) => $"M{i + 1} day {GenDate.DaysPassedAt(m.tick) + 1} · importance {m.importance}: {m.text}"))

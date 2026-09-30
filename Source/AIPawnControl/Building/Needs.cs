@@ -37,7 +37,7 @@ namespace AIPawnControl
         public static IEnumerable<ThingDef> Candidates(string need, Map map, ThingDef anchor = null, int count = 1) =>
             DefDatabase<ThingDef>.AllDefsListForReading
                 .Where(d => d.category == ThingCategory.Building && d.BuildableByPlayer && Meets(need, d, anchor)
-                            && RoomKindDef.Buildable(d) && OtherCostsInStorage(d, map) && StuffCanBeHad(d, map, count) && CanRun(d, map))
+                            && RoomKindDef.Buildable(d, map) && OtherCostsInStorage(d, map) && StuffCanBeHad(d, map, count) && CanRun(d, map))
                 .OrderByDescending(d => Score(need, d))
                 .ThenByDescending(d => need == Heater && d.HasComp(typeof(CompTempControl))) // on a tie, a heater holds its setting; a campfire heats on to 28°C
                 .ThenBy(d => d.GetStatValueAbstract(StatDefOf.MarketValue, GenStuff.DefaultStuffFor(d)));
@@ -58,7 +58,7 @@ namespace AIPawnControl
                 case Seat: // a plain seat; special classes (a throne) make rooms of their own
                     return b.isSittable && !d.IsBed && d.thingClass == typeof(Building);
                 case Shelf:
-                    return typeof(Building_Storage).IsAssignableFrom(d.thingClass) && d.designationCategory?.defName == "Furniture";
+                    return typeof(Building_Storage).IsAssignableFrom(d.thingClass);
                 case Accessory:
                     return anchor?.GetCompProperties<CompProperties_AffectedByFacilities>()?.linkableFacilities?.Contains(d) == true;
                 case Cooler: // one that goes in a wall and cools below freezing (a passive cooler stops at 17°C, BASE_GROWTH.md §4)
@@ -121,7 +121,7 @@ namespace AIPawnControl
                 case Seat:
                     return d.GetStatValueAbstract(StatDefOf.Comfort, stuff);
                 case Shelf:
-                    return d.building.maxItemsInCell * d.size.Area;
+                    return Kinds(d) * d.building.maxItemsInCell * d.size.Area;
                 case Accessory:
                     return FacilityBonus(d);
                 case Cooler:
@@ -133,6 +133,30 @@ namespace AIPawnControl
                 default:
                     return 0f;
             }
+        }
+
+        private static readonly Dictionary<ThingDef, int> kinds = new Dictionary<ThingDef, int>();
+
+        /// <summary>How many storable item defs a shelf's own filter lets it hold (a weapon rack: only weapons).</summary>
+        private static int Kinds(ThingDef shelf)
+        {
+            if (!kinds.TryGetValue(shelf, out int n))
+            {
+                ThingFilter filter = shelf.building.fixedStorageSettings?.filter;
+                n = kinds[shelf] = DefDatabase<ThingDef>.AllDefsListForReading.Count(t => t.EverStorable(false) && (filter == null || filter.Allows(t)));
+            }
+            return n;
+        }
+
+        /// <summary>The candidates tied with the best (the same score and value: a crate, tall crate and pallet), for a room to mix.</summary>
+        public static List<ThingDef> Tied(string need, Map map, int count = 1)
+        {
+            var all = Candidates(need, map, null, count).ToList();
+            if (all.Count == 0)
+                return all;
+            ThingDef best = all[0];
+            float MarketValue(ThingDef d) => d.GetStatValueAbstract(StatDefOf.MarketValue, GenStuff.DefaultStuffFor(d));
+            return all.Where(d => Score(need, d) == Score(need, best) && MarketValue(d) == MarketValue(best)).ToList();
         }
 
         /// <summary>What a facility adds to what it links to: the sum of its stat offsets (an end table: comfort +0.05).</summary>

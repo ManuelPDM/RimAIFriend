@@ -320,7 +320,7 @@ namespace AIPawnControl
                 var recall = Recall.Conversation(this, speaker, vector, tag, 3);
                 string menuText = mayAct ? ActionCatalog.DescribeMenu(menu) : "(you've made all your decisions for today; just answer)";
                 Send("reply", ReplyMessages(speaker, h.line, h.def.label, menuText, recall), ActionCatalog.ChatSchema(menu, recall.Shown),
-                    reply => OnReply(h, reply, menu, recall), maxAgeTicks: ReplyMaxAgeTicks, stillValid: () => PausedReason());
+                    reply => OnReply(h, reply, menu, recall), stillValid: () => PausedReason());
             });
         }
 
@@ -347,14 +347,15 @@ namespace AIPawnControl
                 3, MemoryEvent.Told, new[] { pawn.LabelShort });
 
             string result = $"Answered {speaker}: \"{text}\"";
-            var option = menu.FirstOrDefault(o => o.Id == reply.Int("act"));
+            var picked = menu.FirstOrDefault(o => o.Id == reply.Int("act"));
+            var option = picked == null ? null : ActionCatalog.StillOffered(picked, ActionCatalog.BuildActMenu(pawn, this, inConversation: true), reply);
             if (option != null)
             {
                 CountAct(); // acting on it is her decision (§4); just answering is free
                 result += $" Then: {option.Label}: {MindActions.Safely(pawn, option.Label, () => option.Apply(null))}";
             }
             AddDecision(result, importance: 0); // the talk events above are the memory
-            ModLog.Message($"{pawn.LabelShort} reply to {speaker}: \"{text}\" | act: {option?.Label ?? "none"}");
+            ModLog.Message($"{pawn.LabelShort} reply to {speaker}: \"{text}\" | act: {option?.Label ?? (picked != null ? $"{picked.Label} (no longer an option)" : "none")}");
         }
 
         private void CountAct()
@@ -385,8 +386,7 @@ namespace AIPawnControl
             AfterRecall(Recall.ActQuery(pawn, present), (query, tag) =>
             {
                 var recall = Recall.Act(this, present, query, tag);
-                Send("act", ActMessages(trigger, menu, recall), ActionCatalog.ActSchema(menu, recall.Shown), reply => OnAct(reply, menu, recall, groupTurn),
-                    maxAgeTicks: GenDate.TicksPerHour);
+                Send("act", ActMessages(trigger, menu, recall), ActionCatalog.ActSchema(menu, recall.Shown), reply => OnAct(reply, menu, recall, groupTurn));
             });
         }
 
@@ -432,10 +432,16 @@ namespace AIPawnControl
         private void OnAct(Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall, bool groupTurn)
         {
             int choice = reply.Int("choice", -1);
-            var option = menu.FirstOrDefault(o => o.Id == choice);
-            if (option == null)
+            var picked = menu.FirstOrDefault(o => o.Id == choice);
+            if (picked == null)
             {
                 Fail($"act reply chose {choice}, which isn't on the menu");
+                return;
+            }
+            var option = ActionCatalog.StillOffered(picked, ActionCatalog.BuildActMenu(pawn, this), reply);
+            if (option == null)
+            {
+                ModLog.Message($"{pawn.LabelShort}: dropped act reply ({picked.Label} is no longer an option).");
                 return;
             }
             string say = SpeechLog.Clean(reply.Str("say"));
@@ -760,11 +766,10 @@ namespace AIPawnControl
             Messages.Message("AIPawnControl_ManualPrioritiesOff".Translate(), MessageTypeDefOf.CautionInput, historical: false);
         }
 
-        /// <param name="maxAgeTicks">Drop the reply if more game time than this passed while waiting (e.g. at ultrafast speed).</param>
         /// <param name="stillValid">Replaces the usual pause check when the reply arrives; returns why to drop it, or null.</param>
         /// <param name="maxTokens">Overrides the settings' reply budget (0 = use the setting).</param>
         internal void Send(string callType, List<KeyValuePair<string, string>> messages, object schema, Action<Dictionary<string, object>> onReply,
-                          int maxAgeTicks = int.MaxValue, Func<string> stillValid = null, Action<string> onError = null, int maxTokens = 0)
+                          Func<string> stillValid = null, Action<string> onError = null, int maxTokens = 0)
         {
             Cancel();
             int sentTick = Find.TickManager.TicksGame;
@@ -780,8 +785,6 @@ namespace AIPawnControl
                     return;
                 current = null;
                 string paused = stillValid != null ? stillValid() : PausedReason(ignoreSleep: true);
-                if (paused == null && Find.TickManager.TicksGame - sentTick > maxAgeTicks)
-                    paused = "the situation changed while I was thinking";
                 if (paused != null)
                 {
                     ModLog.Message($"{pawn?.LabelShort}: dropped {callType} reply ({paused}; waited {result.WaitedSeconds:0}s in the queue, {result.Seconds:0}s to answer).");

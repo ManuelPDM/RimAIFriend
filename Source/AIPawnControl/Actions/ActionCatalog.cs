@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -74,6 +74,7 @@ namespace AIPawnControl
         public class ActOption
         {
             public int Id;
+            public string Key; // the same option in a menu built later: "keep", "talk", "base", "post", or the life-changing talk and who
             public string Label;
             public Func<string, string> Apply; // runs on the main thread when chosen, gets her cleaned "say"; returns a readable result
             public Func<Dictionary<string, object>, string, string> ApplyReply; // instead of Apply when it needs more of the reply ("with", "tone")
@@ -88,15 +89,14 @@ namespace AIPawnControl
         public static List<ActOption> BuildActMenu(Pawn pawn, PawnMind mind, bool inConversation = false)
         {
             var options = new List<ActOption>();
-            void Add(string label, Func<string> apply) => options.Add(new ActOption { Id = options.Count + 1, Label = label, Apply = _ => apply() });
-
             string doing = pawn.GetJobReport()?.TrimEnd('.');
-            Add(string.IsNullOrEmpty(doing) ? "keep going" : $"keep going ({doing})", () => mind.KeepGoing(KeepGoingHours));
+            options.Add(new ActOption { Id = options.Count + 1, Key = "keep", Label = string.IsNullOrEmpty(doing) ? "keep going" : $"keep going ({doing})",
+                Apply = _ => mind.KeepGoing(KeepGoingHours) });
 
             var targets = TalkTargets(pawn);
             if (!inConversation && targets.Count > 0)
             {
-                var talk = new ActOption { Id = options.Count + 1, Label = "talk to someone", IsTalk = true, TalkTargets = targets };
+                var talk = new ActOption { Id = options.Count + 1, Key = "talk", Label = "talk to someone", IsTalk = true, TalkTargets = targets };
                 talk.ApplyReply = (reply, say) =>
                 {
                     string name = reply.Str("with");
@@ -112,6 +112,7 @@ namespace AIPawnControl
                 options.Add(new ActOption
                 {
                     Id = options.Count + 1,
+                    Key = $"{interaction.defName} {other.ThingID}",
                     Label = LifeChangingLabel(interaction, other),
                     Target = other,
                     Apply = say => MindActions.TalkTo(mind, other, interaction, say),
@@ -119,10 +120,10 @@ namespace AIPawnControl
                 });
 
             if (BaseCall.AnythingToDo(pawn))
-                options.Add(new ActOption { Id = options.Count + 1, Label = BaseCall.MenuLabel(pawn), Apply = _ => BaseCall.Start(mind), OwnRemark = true });
+                options.Add(new ActOption { Id = options.Count + 1, Key = "base", Label = BaseCall.MenuLabel(pawn), Apply = _ => BaseCall.Start(mind), OwnRemark = true });
 
             if (!inConversation && GroupChat.Instance?.MayPost(mind) == true)
-                options.Add(new ActOption { Id = options.Count + 1, Label = "post in the group chat (everyone reads it, wherever they are)", Apply = _ => GroupChat.StartPost(mind), OwnRemark = true });
+                options.Add(new ActOption { Id = options.Count + 1, Key = "post", Label = "post in the group chat (everyone reads it, wherever they are)", Apply = _ => GroupChat.StartPost(mind), OwnRemark = true });
 
             return options;
         }
@@ -137,6 +138,19 @@ namespace AIPawnControl
                 case "Breakup": return $"break up with {other.LabelShort}";
                 default: return $"{def.label} with {other.LabelShort}";
             }
+        }
+
+        /// <summary>
+        /// The option she picked, taken from a menu built now (so it acts on the world as it is), or null if it's no longer
+        /// offered: the person she'd talk to left, the base has nothing to do, it isn't her turn in the group chat.
+        /// </summary>
+        public static ActOption StillOffered(ActOption picked, List<ActOption> now, Dictionary<string, object> reply)
+        {
+            var option = now.FirstOrDefault(o => o.Key == picked.Key);
+            string name = reply.Str("with");
+            if (option?.TalkTargets != null && picked.TalkTargets.Any(p => p.LabelShort == name) && !option.TalkTargets.Any(p => p.LabelShort == name))
+                return null;
+            return option;
         }
 
         public static string DescribeMenu(List<ActOption> menu) => string.Join("\n", menu.Select(o => $"{o.Id}: {o.Label}"));

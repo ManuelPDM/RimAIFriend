@@ -191,7 +191,7 @@ namespace AIPawnControl
             foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
             {
                 if (def.category != ThingCategory.Building || !def.BuildableByPlayer || def.IsBed || def.size.x > 3 || def.size.z > 3
-                    || def.designationCategory == null || !RoomKindDef.Buildable(def))
+                    || def.designationCategory == null || !RoomKindDef.Buildable(def, ctx.map))
                     continue;
                 float heat = Heat(def, room.Temperature);
                 bool warms = heat != 0f;
@@ -262,7 +262,7 @@ namespace AIPawnControl
         {
             foreach (var old in ctx.things.Where(t => t.Faction == Faction.OfPlayer && t.def.replaceTags != null && !(t is Blueprint) && !(t is Frame)))
                 foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading.Where(d => d.category == ThingCategory.Building && d.BuildableByPlayer
-                             && d.replaceTags != null && d.size == old.def.size && RoomKindDef.Buildable(d)))
+                             && d.replaceTags != null && d.size == old.def.size && RoomKindDef.Buildable(d, ctx.map)))
                 {
                     if (!ctx.CanPay(def, out ThingDef stuff) || !GenConstruct.CanReplace(def, old.def, stuff, old.Stuff))
                         continue;
@@ -301,7 +301,7 @@ namespace AIPawnControl
         {
             Upgrade best = null;
             // Wood or stone only, like walls (the user: steel is for other things).
-            foreach (var floor in DefDatabase<TerrainDef>.AllDefsListForReading.Where(t => t.BuildableByPlayer && t.designationCategory?.defName == "Floors" && RoomKindDef.Buildable(t)
+            foreach (var floor in DefDatabase<TerrainDef>.AllDefsListForReading.Where(t => t.BuildableByPlayer && t.designationCategory?.defName == "Floors" && RoomKindDef.Buildable(t, ctx.map)
                          && t.CostList != null && t.CostList.Count > 0 && t.CostList.All(c => Supplies.IsWallMaterial(c.thingDef))))
             {
                 float beauty = floor.GetStatValueAbstract(StatDefOf.Beauty), value = floor.GetStatValueAbstract(StatDefOf.MarketValue);

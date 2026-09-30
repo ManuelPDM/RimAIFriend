@@ -164,7 +164,7 @@ namespace AIPawnControl
             Map map = project.map;
             var cells = project.footprint.ContractedBy(1).Cells.ToList();
             TerrainDef floor = DefDatabase<TerrainDef>.AllDefsListForReading
-                .Where(f => f.tags != null && f.tags.Any(ask.floorTags.Contains) && RoomKindDef.Buildable(f)
+                .Where(f => f.tags != null && f.tags.Any(ask.floorTags.Contains) && RoomKindDef.Buildable(f, map)
                             && (f.CostList ?? new List<ThingDefCountClass>()).All(c => Supplies.IsWallMaterial(c.thingDef) || map.resourceCounter.GetCount(c.thingDef) >= c.count * cells.Count)
                             && GenConstruct.CanPlaceBlueprintAt(f, cells[0], Rot4.North, map).Accepted)
                 .OrderBy(f => f.CostList?.Sum(c => c.count * c.thingDef.BaseMarketValue) ?? 0f).FirstOrDefault();
