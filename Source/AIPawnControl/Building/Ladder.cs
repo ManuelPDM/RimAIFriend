@@ -49,6 +49,11 @@ namespace AIPawnControl
                 new Rung { label = "private bedrooms", kind = Kind("AIPC_Bedroom"), met = sleepers.All(p => p.ownership?.OwnedRoom != null) },
                 new Rung { label = "better rooms", rooms = true },
             };
+            // HYGIENE.md §7: with Dubs Bad Hygiene, a bathroom right after the great hall (it opens off the hall). Met by any
+            // room DBH calls a bathroom.
+            if (Kind("AIPC_Bathroom") is RoomKindDef bathroom)
+                rungs.Insert(rungs.FindIndex(r => r.kind?.defName == "AIPC_GreatHall") + 1, new Rung { label = "a bathroom", kind = bathroom,
+                    met = HasRole(map, bathroom.role) || HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("PrivateBathroom")) });
             var active = BuildManager.Instance?.ActiveOn(map).Select(p => p.kindDef).ToList() ?? new List<RoomKindDef>();
             foreach (var rung in rungs)
             {

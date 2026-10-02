@@ -82,7 +82,18 @@ namespace AIPawnControl
             return null;
         }
 
-        public Room Room => (roomCell.IsValid ? roomCell : footprint.ContractedBy(1).CenterCell).GetRoom(map);
+        public Room Room => (roomCell.IsValid ? roomCell : Inside).GetRoom(map);
+
+        /// <summary>The interior's centre, or the first interior cell that isn't a wall when a stall wall stands there (HYGIENE.md §5).</summary>
+        private IntVec3 Inside
+        {
+            get
+            {
+                var interior = footprint.ContractedBy(1);
+                bool Wall(IntVec3 c) => entries.Exists(e => e.cell == c && e.def == ThingDefOf.Wall);
+                return Wall(interior.CenterCell) ? interior.Cells.FirstOrDefault(c => !Wall(c)) : interior.CenterCell;
+            }
+        }
 
         public void Tick()
         {

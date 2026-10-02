@@ -160,6 +160,7 @@ namespace AIPawnControl
             public readonly HashSet<IntVec3> reserved = new HashSet<IntVec3>(); // walkable, but no furniture
             public readonly List<PlanEntry> placed = new List<PlanEntry>();
             public readonly List<IntVec3> doorsInside = new List<IntVec3>(); // the cell inside every door: nothing goes next to one
+            public readonly List<PlanEntry> stalls = new List<PlanEntry>();  // stall walls and stall doors (HYGIENE.md §5)
             // A room that already has furniture (PlaceOne): one more item mustn't make it worse. Null for a new room.
             public HashSet<IntVec3> reachableBefore;              // free cells the door reaches now
             public HashSet<PlanEntry> boxedInBefore;             // items with no free neighbour already
@@ -203,14 +204,18 @@ namespace AIPawnControl
                         bool seated = item.need == Needs.Joy && Needs.PlayedSitting(def);
                         var rules = seated ? new RoomItem { backToWall = item.backToWall } : item;
                         PlanEntry anchor = item.nextTo >= 0 && item.nextTo < firstOf.Length ? firstOf[item.nextTo] : null;
-                        PlanEntry entry = item.nextTo >= 0 ? (anchor != null ? NextTo(def, anchor, s, rules) : null)
+                        List<PlanEntry> stall = null;
+                        PlanEntry entry = Hygiene.NeedsPrivacy(def) ? Stall(def, s, out stall)
+                            : item.nextTo >= 0 ? (anchor != null ? NextTo(def, anchor, s, rules) : null)
                             : item.centre ? Centre(def, s, rules)
                             : AgainstWall(def, s, rules);
                         if (entry == null)
                             break;
                         if (seated && !WithSeats(entry, s, map))
                             break;
-                        if (!seated)
+                        if (stall != null)
+                            CommitStall(entry, stall, s);
+                        else if (!seated)
                             Commit(entry, s, rules);
                         firstOf[index] = firstOf[index] ?? entry;
                         count++;
@@ -244,6 +249,7 @@ namespace AIPawnControl
                 }
             }
             plan.entries.AddRange(s.placed);
+            plan.entries.AddRange(s.stalls);
             return true;
         }
 
@@ -280,7 +286,7 @@ namespace AIPawnControl
             var s = new State { plan = plan, inner = plan.Interior };
             foreach (var e in existing)
                 foreach (var c in e.Rect)
-                    s.taken.Add(c);
+                    (Walkable(e.def) ? s.reserved : s.taken).Add(c);
             var inside = plan.DoorsInside;
             s.doorsInside.AddRange(inside);
             s.reserved.UnionWith(inside);
@@ -320,7 +326,7 @@ namespace AIPawnControl
         private static void Commit(PlanEntry entry, State s, RoomItem item)
         {
             foreach (var c in entry.Rect)
-                s.taken.Add(c);
+                (Walkable(entry.def) ? s.reserved : s.taken).Add(c);
             foreach (var c in KeepClear(entry, s, item))
                 s.reserved.Add(c);
             if (item.medical)
@@ -328,6 +334,85 @@ namespace AIPawnControl
             if (item.prisoner)
                 entry.prisoner = true;
             s.placed.Add(entry);
+        }
+
+        /// <summary>
+        /// A stall for a toilet or shower (HYGIENE.md §5): the fixture in the row farthest from the door, facing it, a stall
+        /// door in front, and walls beside both, so nobody sees in except through the stall door (DBH's privacy check stops
+        /// at walls and stall doors). The spot sharing the most stall walls already there and needing the fewest new ones
+        /// wins, so stalls pack into a row; then the farthest from the door. Null if none fits.
+        /// </summary>
+        /// <param name="parts">The stall's new walls and its stall door.</param>
+        private static PlanEntry Stall(ThingDef def, State s, out List<PlanEntry> parts)
+        {
+            parts = null;
+            ThingDef stallDoor = Hygiene.StallDoor;
+            if (stallDoor == null || def.size.x != 1 || def.size.z != 1)
+                return null;
+            RoomPlan plan = s.plan;
+            IntVec3 inward = plan.doorInside - plan.door, along = new IntVec3(inward.z, 0, inward.x);
+            var walls = new HashSet<IntVec3>(s.stalls.Where(e => e.def == ThingDefOf.Wall).Select(e => e.cell));
+            bool Free(IntVec3 c) => s.inner.Contains(c) && !s.taken.Contains(c) && !s.reserved.Contains(c);
+            PlanEntry best = null;
+            List<IntVec3> bestWalls = null;
+            float bestScore = float.MinValue;
+            foreach (var cell in s.inner)
+            {
+                IntVec3 front = cell - inward;
+                if (s.inner.Contains(cell + inward) || !Free(cell) || !Free(front) || !s.inner.Contains(front - inward))
+                    continue; // the back row, with a stall door row and room to walk in front
+                var newWalls = new List<IntVec3>();
+                int shared = 0;
+                bool ok = true;
+                foreach (var side in new[] { along, -along })
+                    foreach (var c in new[] { cell + side, front + side })
+                    {
+                        if (!s.inner.Contains(c))
+                            continue; // the room's own wall
+                        if (walls.Contains(c))
+                            shared++;
+                        else if (Free(c))
+                            newWalls.Add(c);
+                        else
+                            ok = false;
+                    }
+                if (!ok)
+                    continue;
+                // Everything free stays reachable through the door, and every placed item keeps a free neighbour.
+                var added = newWalls.Append(cell).ToList();
+                s.taken.UnionWith(added);
+                bool fits = AllFreeReachable(s.inner, plan.doorInside, s.taken, CellRect.Empty)
+                            && s.placed.All(p => HasFreeNeighbour(p.Rect, s, CellRect.Empty));
+                s.taken.ExceptWith(added);
+                if (!fits)
+                    continue;
+                float score = (shared - newWalls.Count) * 100f + cell.DistanceToSquared(plan.doorInside);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = new PlanEntry(def, cell, Rot4.FromIntVec3(-inward));
+                    bestWalls = newWalls;
+                }
+            }
+            if (best == null)
+                return null;
+            parts = bestWalls.Select(c => new PlanEntry(ThingDefOf.Wall, c, Rot4.North)).ToList();
+            parts.Add(new PlanEntry(stallDoor, best.cell - inward, Rot4.North));
+            return best;
+        }
+
+        /// <summary>The fixture and its walls are taken; the stall door is kept free (it's walked through).</summary>
+        private static void CommitStall(PlanEntry fixture, List<PlanEntry> parts, State s)
+        {
+            Commit(fixture, s, new RoomItem());
+            foreach (var p in parts)
+            {
+                if (p.def == ThingDefOf.Wall)
+                    s.taken.Add(p.cell);
+                else
+                    s.reserved.Add(p.cell);
+                s.stalls.Add(p);
+            }
         }
 
         private static PlanEntry AgainstWall(ThingDef def, State s, RoomItem item)
@@ -339,6 +424,8 @@ namespace AIPawnControl
                 foreach (var rot in Rotations(def))
                 {
                     var entry = new PlanEntry(def, cell, rot);
+                    if (def.building?.isAttachment == true && s.inner.Contains(cell + rot.FacingCell))
+                        continue; // a wall lamp hangs on the wall it faces
                     int contacts = WallContacts(entry.Rect, s);
                     if (def.IsBed)
                     {
@@ -468,6 +555,7 @@ namespace AIPawnControl
         private static bool Fits(PlanEntry entry, State s, RoomItem item, bool awayFromDoor)
         {
             var rect = entry.Rect;
+            var blocks = Walkable(entry.def) ? CellRect.Empty : rect; // a wall lamp or a mat is walked over
             foreach (var c in rect)
             {
                 if (!s.inner.Contains(c) || s.taken.Contains(c) || s.reserved.Contains(c))
@@ -485,13 +573,16 @@ namespace AIPawnControl
             if (!HasFreeNeighbour(rect, s, rect))
                 return false;
             foreach (var p in s.placed)
-                if (s.boxedInBefore?.Contains(p) != true && !HasFreeNeighbour(p.Rect, s, rect))
+                if (s.boxedInBefore?.Contains(p) != true && !HasFreeNeighbour(p.Rect, s, blocks))
                     return false;
             if (s.reachableBefore == null)
-                return AllFreeReachable(s.inner, s.plan.doorInside, s.taken, rect);
-            var reachable = Reachable(s.inner, s.plan.doorInside, s.taken, rect);
-            return s.reachableBefore.All(c => rect.Contains(c) || reachable.Contains(c));
+                return AllFreeReachable(s.inner, s.plan.doorInside, s.taken, blocks);
+            var reachable = Reachable(s.inner, s.plan.doorInside, s.taken, blocks);
+            return s.reachableBefore.All(c => blocks.Contains(c) || reachable.Contains(c));
         }
+
+        /// <summary>People walk over it (a wall lamp, a mat, a stall door): it takes its cells from furniture, not from the walk.</summary>
+        private static bool Walkable(ThingDef def) => def.passability == Traversability.Standable;
 
         private static bool HasFreeNeighbour(CellRect of, State s, CellRect extra)
         {

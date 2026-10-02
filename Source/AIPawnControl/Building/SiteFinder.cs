@@ -22,6 +22,9 @@ namespace AIPawnControl
         /// <summary>The sizes Fit may use: up to 10 a side, for rooms that grow with the colony (a dining hall, BASE_GROWTH.md §6.1).</summary>
         public static readonly List<(int w, int h)> FitShapes = Enumerable.Range(4, 7).SelectMany(a => Enumerable.Range(4, 7).Select(b => (a, b))).ToList();
 
+        /// <summary>FitShapes plus the 3-wide ones, which only a kind whose minimum allows them takes (a bathroom, HYGIENE.md §3).</summary>
+        private static readonly List<(int w, int h)> FitShapesNarrow = Enumerable.Range(3, 8).SelectMany(a => Enumerable.Range(3, 8).Select(b => (a, b))).ToList();
+
         /// <summary>A hub is at most as wide as the widest room; its length is bounded by outdoorWalk (TryHub).</summary>
         public const int HubMaxWidth = 7;
 
@@ -791,7 +794,7 @@ namespace AIPawnControl
             note = null;
             IntVec3 cell = site.Interior.CenterCell;
             int area = width * height;
-            var order = FitShapes.Where(s => kind.Fits(s.w, s.h))
+            var order = FitShapesNarrow.Where(s => kind.Fits(s.w, s.h))
                 .OrderBy(s => Mathf.Min(s.w, s.h) == Mathf.Min(width, height) && Mathf.Max(s.w, s.h) == Mathf.Max(width, height) ? 0 : 1)
                 .ThenBy(s => Mathf.Abs(s.w * s.h - area))
                 .ThenBy(s => s.w * s.h)

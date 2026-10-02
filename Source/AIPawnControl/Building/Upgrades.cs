@@ -32,7 +32,7 @@ namespace AIPawnControl
             public List<IntVec3> cells;
         }
 
-        private static readonly HashSet<string> ItemCategories = new HashSet<string> { "Furniture", "Joy", "Temperature", "Misc" };
+        private static readonly HashSet<string> ItemCategories = new HashSet<string> { "Furniture", "Joy", "Temperature", "Misc", "Hygiene" }; // Hygiene: Dubs Bad Hygiene's tab (a basin, a bath mat)
 
         /// <summary>Colony rooms that can be upgraded: proper, roofed, indoors, with a role, nothing already being added.</summary>
         public static List<Room> Rooms(Pawn pawn)
@@ -183,8 +183,8 @@ namespace AIPawnControl
         {
             Room room = ctx.room;
             CellRect extents = room.ExtentsClose;
-            if (extents.Area != room.CellCount)
-                yield break; // items go in rectangular rooms only (every room a mind builds is one)
+            if (extents.Cells.Any(c => !room.ContainsCell(c) && !(c.GetEdifice(ctx.map) is Building b && b.def.IsWall)))
+                yield break; // items go in rectangular rooms only (every room a mind builds is one), walls inside allowed (a bathroom's stalls)
             var present = new HashSet<ThingDef>(ctx.things.Select(t => t is Blueprint || t is Frame ? t.def.entityDefToBuild as ThingDef : t.def));
             bool hot = TooHot(room, ctx.pawn), cold = TooCold(room, ctx.pawn);
             bool dark = Dark(room);
@@ -203,6 +203,10 @@ namespace AIPawnControl
                     continue; // they sit in a wall: the walls step
                 if (Needs.PlayedSitting(def))
                     continue; // needs seats beside it, which a one-item upgrade doesn't bring (chess, poker)
+                if (Hygiene.NeedsPrivacy(def))
+                    continue; // needs a stall, which a one-item upgrade doesn't bring (a toilet, a shower)
+                if (Hygiene.IsPlumbing(def))
+                    continue; // the plumbing is the player's, like power conduits
                 if (typeof(Building_Throne).IsAssignableFrom(def.thingClass))
                     continue; // a throne makes its room a throne room (RoomRoleWorker_ThroneRoom reads the room's cached things, so KeepsRole can't see it); the title asks for that room itself
                 if (!ctx.CanPay(def, out ThingDef stuff) || !ctx.CanRun(def))
@@ -470,6 +474,8 @@ namespace AIPawnControl
             plan.broughtIn.AddRange(doors.Skip(1));
             var existing = ctx.things.Where(t => interior.Contains(t.Position))
                 .Select(t => new PlanEntry(t is Blueprint || t is Frame ? (ThingDef)t.def.entityDefToBuild : t.def, t.Position, t.Rotation)).ToList();
+            // Walls inside the room (a bathroom's stalls) are taken like furniture.
+            existing.AddRange(interior.Cells.Where(c => !ctx.room.ContainsCell(c)).Select(c => new PlanEntry(ThingDefOf.Wall, c, Rot4.North)));
             PlanEntry next = anchor != null ? existing.Find(e => e.cell == anchor.Position)
                 : def.building != null && def.building.isSittable ? existing.Find(e => e.def.surfaceType == SurfaceType.Eat) : null;
             var entry = RoomPlacer.PlaceOne(plan, def, existing, next);

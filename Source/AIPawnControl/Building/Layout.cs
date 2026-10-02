@@ -25,22 +25,23 @@ namespace AIPawnControl
             && (!Ground.NoRole(room) || BuildManager.Instance?.BuilderOf(room) != null || Doors(room).Count() >= 2);
 
         /// <summary>
-        /// Walking through doesn't hurt it (§3): no bed (movement noise disturbs sleep) and no meal source (tracked-in
-        /// filth raises food poisoning). Vanilla ties no other harm to foot traffic.
+        /// Walking through doesn't hurt it (§3): no bed (movement noise disturbs sleep), no meal source (tracked-in
+        /// filth raises food poisoning) and no toilet or shower (Dubs Bad Hygiene's privacy mood, HYGIENE.md §7). Vanilla
+        /// ties no other harm to foot traffic.
         /// </summary>
         public static bool WalkThrough(Room room)
         {
             if (!Ground.Indoor(room))
                 return false;
             foreach (var t in room.ContainedAndAdjacentThings)
-                if (t is Building b && room.ContainsCell(b.Position) && (b is Building_Bed || Needs.MealSource(b.def)))
+                if (t is Building b && room.ContainsCell(b.Position) && (b is Building_Bed || Needs.MealSource(b.def) || Hygiene.NeedsPrivacy(b.def)))
                     return false;
             return true;
         }
 
-        /// <summary>A kind whose items make a walk-through room: no bed and no meal source among them.</summary>
+        /// <summary>A kind whose items make a walk-through room: no bed, meal source, toilet or shower among them.</summary>
         public static bool WalkThroughKind(RoomKindDef kind, Map map) =>
-            kind.items.All(i => !(i.Resolve(map) is ThingDef d) || (!d.IsBed && !Needs.MealSource(d)));
+            kind.items.All(i => !(i.Resolve(map) is ThingDef d) || (!d.IsBed && !Needs.MealSource(d) && !Hygiene.NeedsPrivacy(d)));
 
         /// <summary>The rooms on either side of a door (its walkable neighbours), doorways left out.</summary>
         public static List<Room> Sides(Building_Door door)

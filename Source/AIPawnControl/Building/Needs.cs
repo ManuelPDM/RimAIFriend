@@ -95,10 +95,12 @@ namespace AIPawnControl
         /// <summary>
         /// It can run here (BASE_GROWTH.md §6.3): a thing that draws power only when the base's power nets have that much to
         /// spare, and one that burns fuel only when some of its fuel can be had (by default a wall material, which rooms get,
-        /// or some in storage). Power itself is the player's: code never places generators or conduits.
+        /// or some in storage). Power itself is the player's: code never places generators or conduits. Plumbing too (Hygiene.Plumbed).
         /// </summary>
         public static bool CanRun(ThingDef d, Map map, Func<ThingDef, bool> canHave = null)
         {
+            if (!Hygiene.Plumbed(d, map))
+                return false;
             var fuel = d.GetCompProperties<CompProperties_Refuelable>();
             if (fuel?.fuelFilter != null && !fuel.fuelFilter.AllowedThingDefs.Any(canHave ?? (f => Supplies.IsWallMaterial(f) || map.resourceCounter.GetCount(f) > 0)))
                 return false;

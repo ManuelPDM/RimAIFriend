@@ -47,6 +47,7 @@ namespace AIPawnControl
             new Test { name = "Sites", run = Sites },
             new Test { name = "Chores", run = Chores },
             new Test { name = "Memory", run = Memory },
+            new Test { name = "Hygiene", run = HygieneFixtures },
             new Test { name = "Every kind builds", builds = true, run = EveryKindBuilds },
             new Test { name = "Materials get marked", builds = true, run = MaterialsGetMarked },
             new Test { name = "Upgrades", builds = true, run = UpgradesMatchVanilla },
@@ -308,6 +309,26 @@ namespace AIPawnControl
                 log.Line($"{mind.pawn.LabelShort}: {memory.memories.Count} memories, {memory.diary.Count} diary entries; without a vector: "
                          + $"[On my mind] {act.Shown.Count}, [I remember] {chat.Shown.Count}");
             }
+        }
+
+        /// <summary>
+        /// With Dubs Bad Hygiene (HYGIENE.md): each fixture on its build tab, whether it can be built and runs here (the plumbing
+        /// gate), and what the bathroom resolves to. The bathroom's toilets always resolve (a latrine needs nothing).
+        /// </summary>
+        private static void HygieneFixtures(Log log)
+        {
+            Map map = Map;
+            var bathroom = DefDatabase<RoomKindDef>.GetNamedSilentFail("AIPC_Bathroom");
+            if (bathroom == null)
+            {
+                log.Line("no Dubs Bad Hygiene: no bathroom kind");
+                return;
+            }
+            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading.Where(d => d.designationCategory?.defName == "Hygiene" && d.BuildableByPlayer))
+                log.Line($"{def.defName}: buildable {RoomKindDef.Buildable(def, map)}, runs {Needs.CanRun(def, map)}, privacy {Hygiene.NeedsPrivacy(def)}");
+            foreach (var item in bathroom.items)
+                log.Line($"bathroom item ({string.Join("/", item.defs.Select(d => d.defName))}): {item.Resolve(map)?.defName ?? "none"}");
+            log.Check(bathroom.items[0].Resolve(map) != null, "the bathroom's toilets resolve to nothing");
         }
 
         /// <summary>Builds: every buildable kind laid out for the first colonist and finished at once reaches Done, with vanilla's own role.</summary>

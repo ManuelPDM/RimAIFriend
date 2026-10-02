@@ -60,6 +60,22 @@
     </items>
   </AIPawnControl.RoomKindDef>
 
+  <!-- HYGIENE.md: with Dubs Bad Hygiene, a communal bathroom. Toilets and showers go in stalls (RoomPlacer.Stall: walls
+       between them and a stall door in front); a water tub needs no stall. DBH calls it a public bathroom with 2 toilets.
+       Plumbed fixtures only once the plumbing is built (Hygiene.Plumbed); otherwise latrines and a water tub. -->
+  <AIPawnControl.RoomKindDef MayRequire="Dubwise.DubsBadHygiene">
+    <defName>AIPC_Bathroom</defName>
+    <label>bathroom</label>
+    <description>toilet stalls and somewhere to wash</description>
+    <role>PublicBathroom</role>
+    <minSize>(3,5)</minSize>
+    <size>(5,3)</size>
+    <items>
+      <li><defs><li>ToiletAdvStuff</li><li>ToiletStuff</li><li>PitLatrine</li></defs><repeat>2</repeat></li>
+      <li><defs><li>ShowerAdvStuff</li><li>ShowerStuff</li><li>ShowerSimple</li><li>WashBucket</li></defs><optional>true</optional></li>
+    </items>
+  </AIPawnControl.RoomKindDef>
+
   <AIPawnControl.RoomKindDef>
     <defName>AIPC_Workshop</defName>
     <label>workshop</label>
