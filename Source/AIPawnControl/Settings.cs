@@ -22,6 +22,7 @@ namespace AIPawnControl
         public bool allowBuilding = true;  // off: no room projects offered; a running one is left as-is
         public bool allowChores = true;    // off: no colony chores offered (Phase 5); what's set up stays
         public bool mindsAnswer = true;    // off: a talk between two minds carries only the first line (PHASE6.md §4)
+        public bool answerChoices = true;  // off: joiners, ransoms, quest offers and beggars are the player's (WORLD.md)
         public int parallelRequests = 4;  // requests LM Studio runs at once (its own parallel setting must allow it)
         public string embedEndpoint = ""; // empty: same as the chat endpoint
         public string embedModel = "google/embedding-gemma-300m";
@@ -52,6 +53,7 @@ namespace AIPawnControl
             Scribe_Values.Look(ref allowBuilding, "allowBuilding", true);
             Scribe_Values.Look(ref allowChores, "allowChores", true);
             Scribe_Values.Look(ref mindsAnswer, "mindsAnswer", true);
+            Scribe_Values.Look(ref answerChoices, "answerChoices", true);
             Scribe_Values.Look(ref parallelRequests, "parallelRequests", 4);
             Scribe_Values.Look(ref embedEndpoint, "embedEndpoint", "");
             Scribe_Values.Look(ref embedModel, "embedModel", "google/embedding-gemma-300m");
@@ -95,6 +97,7 @@ namespace AIPawnControl
             list.CheckboxLabeled("AIPawnControl_AllowBuilding".Translate(), ref allowBuilding, "AIPawnControl_AllowBuildingTip".Translate());
             list.CheckboxLabeled("AIPawnControl_AllowChores".Translate(), ref allowChores, "AIPawnControl_AllowChoresTip".Translate());
             list.CheckboxLabeled("AIPawnControl_MindsAnswer".Translate(), ref mindsAnswer, "AIPawnControl_MindsAnswerTip".Translate());
+            list.CheckboxLabeled("AIPawnControl_AnswerChoices".Translate(), ref answerChoices, "AIPawnControl_AnswerChoicesTip".Translate());
             list.Label("AIPawnControl_ParallelRequests".Translate(parallelRequests), tooltip: "AIPawnControl_ParallelRequestsTip".Translate());
             parallelRequests = (int)System.Math.Round(list.Slider(parallelRequests, 1, 4));
             embedEndpoint = list.TextEntryLabeled("AIPawnControl_EmbedEndpoint".Translate(), embedEndpoint);

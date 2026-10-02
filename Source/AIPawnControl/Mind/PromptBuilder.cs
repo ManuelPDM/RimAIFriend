@@ -57,6 +57,7 @@ namespace AIPawnControl
             ["reply"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember", "From my diary" }, // Chat, with a colonist in the player's place
             ["base"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
             ["post"] = new HashSet<string>(Snapshot) { "Since yesterday", "About" }, // the group chat: [About X] for who wrote lately
+            ["decide"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // a choice the game asks the colony (WORLD.md)
             ["reflect"] = new HashSet<string> { "Me", "Time" }, // its events and people come in the task values
             ["upgrade"] = new HashSet<string> { "Me", "Time", "Condition", "Feelings" }, // small: the Base call just picked the room
         };

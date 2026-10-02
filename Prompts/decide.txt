@@ -1,0 +1,15 @@
+It's {time}. The colony has to decide something, and it falls to you: you speak for everyone here. Your decision goes into the group chat, so everyone will know it was you.
+
+{snapshot}
+
+The question:
+{choice}
+
+What you can do:
+{options}
+
+Decide from who you are (your traits, your beliefs, your mood), what the colony has ([Colony], [Colony stores]) and what the others would think of it.
+
+"reason": why, in your own voice, briefly.
+"choice": the option's number.
+"say": what you tell the others in the group chat about it, or "" to say nothing. 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks.

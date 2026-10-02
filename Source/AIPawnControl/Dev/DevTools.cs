@@ -254,6 +254,59 @@ namespace AIPawnControl
                 chat.Compact();
         }
 
+        // ---------- Colony choices (WORLD.md) ----------
+
+        /// <summary>Every open choice with its text and options, plus the quest offers left to the player and why. No LLM.</summary>
+        [DebugAction(Category, "Choices: show open", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void ChoicesShow()
+        {
+            Pawn by = Find.CurrentMap.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            var sb = new StringBuilder();
+            foreach (var choice in ColonyChoices.All())
+            {
+                sb.AppendLine($"== {choice.key}");
+                sb.AppendLine(choice.Describe());
+                foreach (var option in choice.Options(by))
+                    sb.AppendLine($"  [{option.id}] {option.label}");
+            }
+            foreach (var quest in Find.QuestManager.QuestsListForReading.Where(q => q.State == QuestState.NotYetAccepted && !q.hidden && ColonyChoices.LeaveReason(q) != null))
+                sb.AppendLine($"(the player's: \"{quest.name}\" ({quest.root?.defName}): {ColonyChoices.LeaveReason(quest)})");
+            string text = sb.Length > 0 ? sb.ToString() : "No open choices.";
+            WriteFile("choices.txt", text);
+            ModLog.Message("Open choices:\n" + text);
+            Report("Open choices written to choices.txt.");
+        }
+
+        /// <summary>Answers a choice from code, as the selected colonist (or the first free one). No LLM.</summary>
+        [DebugAction(Category, "Choices: answer...", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static List<DebugActionNode> ChoicesAnswer()
+        {
+            Pawn by = Find.Selector.SingleSelectedThing as Pawn ?? Find.CurrentMap.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            return ColonyChoices.All().Select(choice =>
+            {
+                var node = new DebugActionNode(choice.key, DebugActionType.Action);
+                foreach (var option in choice.Options(by))
+                    node.AddChild(new DebugActionNode(option.label, DebugActionType.Action, () =>
+                    {
+                        string result = ColonyChoices.Instance.Answer(choice, option.id, by);
+                        ModLog.Message($"DEV answered {choice.key} as {by.LabelShort}: {result ?? "not possible"}; windows open: {string.Join(", ", Find.WindowStack.Windows.Select(w => w.GetType().Name))}");
+                        Report(result ?? "Not possible any more.");
+                    }));
+                return node;
+            }).ToList();
+        }
+
+        /// <summary>The selected mind decides a choice now (the Decide call), whoever the best negotiator is.</summary>
+        [DebugAction(Category, "Choices: decide call now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static List<DebugActionNode> ChoicesDecideNow() =>
+            ColonyChoices.All().Select(choice => new DebugActionNode(choice.key, DebugActionType.Action, () => ForMind(mind =>
+            {
+                if (mind.persona == null || mind.Thinking)
+                    Reject($"{mind.pawn.LabelShort} {(mind.Thinking ? "is thinking already" : "has no persona yet")}.");
+                else if (!ColonyChoices.Instance.Decide(mind, choice))
+                    Reject("Nothing to pick: fewer than 2 options.");
+            }))).ToList();
+
         /// <summary>A kind laid out for the selected colonist as the Base call would (site A, code's size, the best wall material), with its missing materials marked. No LLM.</summary>
         [DebugAction(Category, "Build room now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         private static List<DebugActionNode> BuildRoomNow() =>
