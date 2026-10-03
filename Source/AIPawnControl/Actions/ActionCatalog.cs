@@ -93,6 +93,13 @@ namespace AIPawnControl
             options.Add(new ActOption { Id = options.Count + 1, Key = "keep", Label = string.IsNullOrEmpty(doing) ? "keep going" : $"keep going ({doing})",
                 Apply = _ => mind.KeepGoing(KeepGoingHours) });
 
+            var threats = DangerResponse.Threats(pawn.Map);
+            if (threats.Count > 0)
+            {
+                options.AddRange(DangerResponse.Options(pawn, mind, threats, options.Count + 1)); // the danger menu: nothing else while it lasts
+                return options;
+            }
+
             var targets = TalkTargets(pawn);
             if (!inConversation && targets.Count > 0)
             {
@@ -248,7 +255,6 @@ namespace AIPawnControl
         public static Dictionary<string, object> PersonaSchema() => Schema.Obj(new Dictionary<string, object>
         {
             ["persona"] = Schema.Str(),
-            ["say"] = Schema.Say(),
         });
     }
 }

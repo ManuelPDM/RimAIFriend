@@ -65,10 +65,7 @@ namespace AIPawnControl
 
         private static string Ore(Pawn pawn, ChoreScan scan, ThingDef resource, int need)
         {
-            need -= (int)scan.map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Mine)
-                .Select(d => d.target.Cell.GetFirstMineable(scan.map)?.def)
-                .Where(rock => rock?.building?.mineableThing == resource)
-                .Sum(rock => Mining.PerCell(rock));
+            need -= Mining.MarkedYield(scan.map, resource);
             if (need <= 0)
                 return null;
             var vein = Mining.Veins(scan).FirstOrDefault(v => v.rock.building.mineableThing == resource);

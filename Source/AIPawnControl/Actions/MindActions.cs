@@ -67,6 +67,41 @@ namespace AIPawnControl
             return Order(mind, job) ? $"Going over to {target.LabelShort} ({interaction.label})." : $"Couldn't go talk to {target.LabelShort}.";
         }
 
+        // ---------- Danger (DANGER_RESPONSE.md) ----------
+
+        /// <summary>"go inside": the Inside area and the Flee response; vanilla walks her in (JobGiver_SeekAllowedArea) and keeps her there.</summary>
+        public static string GoInside(PawnMind mind)
+        {
+            var area = DangerResponse.Inside(mind.pawn.Map);
+            if (area == null)
+                return "There's nowhere inside to go.";
+            mind.KeepSettings();
+            mind.pawn.playerSettings.AreaRestrictionInPawnCurrentMap = area;
+            mind.pawn.playerSettings.hostilityResponse = HostilityResponseMode.Flee;
+            return "Going inside until the danger is over.";
+        }
+
+        /// <summary>
+        /// "fight" and "help": no area and the Attack response, then an ordered job: a melee attack on the enemy, or a
+        /// walk to where she can shoot it from. Once there, vanilla's Attack response does the shooting.
+        /// </summary>
+        public static string Fight(PawnMind mind, Thing enemy)
+        {
+            Pawn pawn = mind.pawn;
+            mind.KeepSettings();
+            pawn.playerSettings.AreaRestrictionInPawnCurrentMap = null;
+            pawn.playerSettings.hostilityResponse = HostilityResponseMode.Attack;
+            Verb verb = pawn.TryGetAttackVerb(enemy);
+            Job job;
+            if (verb == null || verb.IsMeleeAttack)
+                job = JobMaker.MakeJob(JobDefOf.AttackMelee, enemy);
+            else if (DangerResponse.TryShootingPosition(pawn, enemy, verb, out IntVec3 dest))
+                job = JobMaker.MakeJob(JobDefOf.Goto, dest);
+            else
+                return "I'll fight, but I found no spot to shoot from; I'll take on whatever comes close.";
+            return Order(mind, job) ? $"Going after the {DangerResponse.Label(enemy)}." : $"Couldn't go after the {DangerResponse.Label(enemy)}; I'll take on whatever comes close.";
+        }
+
         // ---------- Work priorities (STREAMLINE.md §8) ----------
 
         /// <summary>

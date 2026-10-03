@@ -121,23 +121,6 @@
     <stores><li>Root</li></stores> <!-- vanilla's default "everything" stockpile on its free floor -->
   </AIPawnControl.RoomKindDef>
 
-  <!-- BASE_GROWTH.md §6.3: food kept apart, near the kitchen (the goods walk pulls it there). Its stockpile is above the
-       storeroom's priority, so haulers move food over. A cooler only if the base has power to spare: then it's a freezer. -->
-  <AIPawnControl.RoomKindDef>
-    <defName>AIPC_FoodStore</defName>
-    <label>food store</label>
-    <description>shelves for food, and a cooler if there's power</description>
-    <role>Storeroom</role>
-    <size>(4,4)</size>
-    <items>
-      <li><need>shelf</need><backToWall>true</backToWall><repeat>4</repeat><min>2</min></li>
-      <li><need>cooler</need><inWall>true</inWall><optional>true</optional></li>
-    </items>
-    <stores><li>Foods</li></stores>
-    <storePriority>Important</storePriority>
-    <holdTemperature>-10</holdTemperature>
-  </AIPawnControl.RoomKindDef>
-
   <AIPawnControl.RoomKindDef>
     <defName>AIPC_PlainRoom</defName>
     <label>plain room</label>

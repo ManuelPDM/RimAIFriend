@@ -50,6 +50,7 @@ namespace AIPawnControl
             if (mind == null)
                 return;
             mind.Cancel();
+            mind.EndDanger();
             minds.Remove(mind);
             ModLog.Message($"Mind disabled for {pawn.LabelShort}.");
         }

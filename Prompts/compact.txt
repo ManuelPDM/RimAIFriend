@@ -6,4 +6,7 @@ The summary so far:
 Older messages to fold into it:
 {messages}
 
-Write a new summary ("summary") that replaces the old one: who asked, warned, offered, promised or argued about what, and what's still open. Drop what no longer matters. A promise is only what someone said, not what happened: write "Dave said he'd cut wood", never "Dave cut wood". 4-6 sentences, plain words, past tense, use names. Use only what's written above.
+The colony now:
+{now}
+
+Write a new summary ("summary") that replaces the old one: who asked, warned, offered, promised or argued about what, and what's still open. Drop what no longer matters: anything the colony now shows is done (a room that's built, a body that's buried), and asks of people who are dead or gone. If someone mentioned has died since, say so. A promise is only what someone said, not what happened: write "Dave said he'd cut wood", never "Dave cut wood". 4-6 sentences, plain words, past tense, use names. Use only what's written above.

@@ -111,8 +111,8 @@ namespace AIPawnControl
                     yield return d;
         }
 
-        /// <summary>"dining room", "workshop", or "room" when vanilla gives it no role.</summary>
-        public static string Name(Room room) => Ground.NoRole(room) ? "room" : room.Role.label;
+        /// <summary>"dining room", "workshop", "great hall" (BuildManager.Label), or "room" when vanilla gives it no role.</summary>
+        public static string Name(Room room) => Ground.NoRole(room) ? "room" : BuildManager.Label(room);
 
         /// <summary>For [Colony]: "one block of 5 rooms, 2 buildings apart · 6 ways out".</summary>
         public static string Line(Map map)

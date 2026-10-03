@@ -12,6 +12,8 @@ Also write "say": what you say out loud, or "" to stay silent.
 - For anything else, only say something if you'd really say it out loud right now: a remark, a grumble, a word to someone nearby. Silence is fine.
 - 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks. Only speak to people who are nearby; you can talk about anyone.
 
+If there's [Danger], the options are about it. "go inside" keeps you in the base's rooms, away from the enemy. "fight" and "help" send you after the enemy with what you carry ([Danger] shows your weapon and who else is armed). "keep going" leaves it to habit: you run from enemies that come close. When the danger is over, you go back to how you were.
+
 If you pick "post in the group chat", you write the message next, so leave "say" "". [Group chat] is what people wrote, not what happened: if you or anyone said they'd do something, it isn't done until they choose it. [Recent], [Colony work] and [Colony stores] show what's actually done.
 
 Also write "memory": the M-number from [On my mind] if that memory shaped your choice or your words, otherwise 0.

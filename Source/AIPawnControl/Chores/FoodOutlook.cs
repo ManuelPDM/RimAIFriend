@@ -144,7 +144,7 @@ namespace AIPawnControl
         public int FieldSide => Math.Max(4, Math.Min(12, (int)Math.Ceiling(Math.Sqrt(cellsWanted))));
 
         /// <summary>
-        /// For [Colony]: "fields feed ~2.4 of 3 · winter in 12 days, 20 days without growing; stores and the coming harvest
+        /// For [Colony]: "fields feed ~2.4 of 3 · crops stop growing in 12 days, then 20 days without growing; stores and the coming harvest
         /// cover about 11".
         /// </summary>
         public string Line()
@@ -160,8 +160,8 @@ namespace AIPawnControl
                 float cover = needPerDay > 0f ? WinterCover / needPerDay : 0f;
                 string stored = stores < 0f ? "the stores aren't counted yet (no stockpile)" : $"stores and the coming harvest cover about {cover:0} of those days";
                 parts.Add(daysToWinter == 0
-                    ? $"too cold to grow {crop.label} now, about {winterDays} more days; {stored}"
-                    : $"winter in {daysToWinter} days, {winterDays} days without growing; {stored}");
+                    ? $"{crop.label} can't grow outdoors now, it starts growing again in about {winterDays} days; {stored}"
+                    : $"crops stop growing in {daysToWinter} days, then {winterDays} days without growing; {stored}");
             }
             else if (crop != null)
                 parts.Add("crops grow all year here");

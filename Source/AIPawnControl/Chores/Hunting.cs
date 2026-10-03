@@ -7,14 +7,13 @@ using Verse.AI;
 namespace AIPawnControl
 {
     /// <summary>
-    /// Hunt options (STREAMLINE.md §5): wild animals grouped by kind (up to 8 each), with the meat and the danger in words from
-    /// vanilla's revenge chance. Dangerous kinds only for someone who can shoot. Never owned, bonded or venerated animals.
+    /// Hunt options (STREAMLINE.md §5): wild animals grouped by kind (up to 8 each), with the meat. Only kinds that won't fight
+    /// back (no predators, vanilla's revenge chance zero). Never owned, bonded or venerated animals.
     /// </summary>
     public static class Hunting
     {
         public const int MaxGroup = 8;
         private const int MinMeat = 60;
-        private const int MinShootingForDanger = 6;
 
         public static IEnumerable<ChoreOption> Options(ChoreScan scan)
         {
@@ -28,15 +27,13 @@ namespace AIPawnControl
                     yield return equip;
                 yield break;
             }
-            bool canShoot = !pawn.WorkTagIsDisabled(WorkTags.Violent) && (pawn.skills?.GetSkill(SkillDefOf.Shooting)?.Level ?? 0) >= MinShootingForDanger;
             var groups = scan.map.mapPawns.AllPawnsSpawned
                 .Where(a => Check(a, pawn) == null)
                 .GroupBy(a => a.kindDef);
             foreach (var group in groups)
             {
                 var animals = group.OrderBy(a => a.Position.DistanceToSquared(scan.center)).Take(MaxGroup).ToList();
-                string danger = Danger(animals, out bool dangerous);
-                if (dangerous && !canShoot)
+                if (FightsBack(animals))
                     continue;
                 int meat = animals.Sum(a => (int)a.GetStatValue(StatDefOf.MeatAmount));
                 if (meat < MinMeat)
@@ -48,8 +45,8 @@ namespace AIPawnControl
                 yield return new ChoreOption
                 {
                     kind = Chore.Kind.Hunt,
-                    label = $"food: hunt {n} {label} ({where}, {danger}, ~{meat} meat)",
-                    useful = 0.5f + ChoreOptions.FoodNeed(scan) + System.Math.Min(1.5f, meat / 300f) + scan.PassionFor(SkillDefOf.Shooting) - (dangerous ? 1f : 0f),
+                    label = $"food: hunt {n} {label} ({where}{Explodes(animals[0])}, ~{meat} meat)",
+                    useful = 0.5f + ChoreOptions.FoodNeed(scan) + System.Math.Min(1.5f, meat / 300f) + scan.PassionFor(SkillDefOf.Shooting),
                     check = () => animals.Select(a => Check(a, pawn)).FirstOrDefault(r => r != null),
                     apply = mind => Apply(mind.pawn, animals, label),
                 };
@@ -101,18 +98,17 @@ namespace AIPawnControl
             return null;
         }
 
-        /// <summary>"safe", "may fight back", "dangerous: …", from vanilla's revenge chance (with the difficulty factor), predators and explosions.</summary>
-        public static string Danger(List<Pawn> animals, out bool dangerous)
+        /// <summary>A predator, or any chance to turn on the hunter by vanilla's revenge chance (with the difficulty factor).</summary>
+        private static bool FightsBack(List<Pawn> animals)
         {
-            float chance = animals.Max(a => PawnUtility.GetManhunterOnDamageChance(a));
-            var race = animals[0].RaceProps;
-            bool explodes = race.deathAction?.workerClass != null && race.deathAction.workerClass != typeof(DeathActionWorker_Simple);
-            dangerous = race.predator || chance >= 0.2f;
-            string words = race.predator ? "dangerous: a predator that fights back"
-                : chance >= 0.2f ? "dangerous: it often turns on the hunters"
-                : chance > 0f ? "may fight back"
-                : "safe";
-            return explodes ? words + ", explodes when killed" : words;
+            return animals[0].RaceProps.predator || animals.Any(a => PawnUtility.GetManhunterOnDamageChance(a) > 0f);
+        }
+
+        /// <summary>", explodes when killed" for boomalopes and the like, else "".</summary>
+        private static string Explodes(Pawn a)
+        {
+            var worker = a.RaceProps.deathAction?.workerClass;
+            return worker != null && worker != typeof(DeathActionWorker_Simple) ? ", explodes when killed" : "";
         }
 
         private static string Apply(Pawn pawn, List<Pawn> animals, string label)

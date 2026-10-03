@@ -29,7 +29,7 @@ namespace AIPawnControl
             foreach (var table in tables)
                 if (DefaultBill(pawn, table, colonists) is string result)
                     results.Add(result);
-            // Stockpiles only in rooms for storage (FURNISHING.md §3; a storeroom, a food store): food piled on a kitchen floor
+            // Stockpiles only in rooms for storage (FURNISHING.md §3; a storeroom): food piled on a kitchen floor
             // doesn't work. Its shelves take the same things at the same priority (BASE_GROWTH.md §6.3).
             if (project.kindDef?.stores != null)
             {

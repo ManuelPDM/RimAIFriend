@@ -41,7 +41,6 @@ namespace AIPawnControl
                 // BASE_GROWTH.md §11: the great hall, placed while the base is small so it grows around it. Any table indoors meets it.
                 new Rung { label = "a great hall", kind = Kind("AIPC_GreatHall"), met = buildings.Any(b => b.def.surfaceType == SurfaceType.Eat && Indoors(b)) },
                 new Rung { label = "a storeroom", kind = Kind("AIPC_Storeroom"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Storeroom")) },
-                new Rung { label = "a food store", kind = Kind("AIPC_FoodStore"), met = HasFoodStore(map) },
                 new Rung { label = "a workshop", kind = Kind("AIPC_Workshop"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Workshop")) },
                 new Rung { label = "a research bench", kind = Kind("AIPC_Laboratory"),
                            met = !CanResearch(map) || buildings.Any(b => b is Building_ResearchBench && Indoors(b)) },
@@ -73,7 +72,7 @@ namespace AIPawnControl
         {
             var beds = map.listerBuildings.allBuildingsColonist.OfType<Building_Bed>().Where(IsColonistBed).ToList();
             var rooms = beds.Select(b => b.GetRoom()).Where(Ground.Indoor)
-                .Select(r => r.GetRoomRoleLabel()).Distinct().ToList();
+                .Select(BuildManager.Label).Distinct().ToList();
             string line = $"beds for {BedSlots(map)} of {Sleepers(map).Count}" + (rooms.Count > 0 ? $" ({string.Join(", ", rooms)})" : "")
                           + " · " + Layout.Line(map);
             var rungs = Evaluate(map);
@@ -110,16 +109,6 @@ namespace AIPawnControl
         /// <summary>Someone here can do research (the research bench's rung applies only then).</summary>
         private static bool CanResearch(Map map) =>
             map.mapPawns.FreeColonistsSpawned.Any(p => !p.WorkTypeIsDisabled(WorkTypeDefOf.Research));
-
-        /// <summary>A room whose stockpile or shelf takes food and not everything (BASE_GROWTH.md §6.3: not wood).</summary>
-        public static bool HasFoodStore(Map map)
-        {
-            bool FoodOnly(StorageSettings s) => s.filter.Allows(ThingDefOf.MealSimple) && !s.filter.Allows(ThingDefOf.WoodLog);
-            foreach (var group in map.haulDestinationManager.AllGroupsListForReading)
-                if (FoodOnly(group.Settings) && group.CellsList.Any(c => Ground.Indoor(c.GetRoom(map))))
-                    return true;
-            return false;
-        }
 
         private static bool HasRole(Map map, RoomRoleDef role) =>
             role != null && map.regionGrid.AllRooms.Any(r => r.Role == role && Ground.Indoor(r));

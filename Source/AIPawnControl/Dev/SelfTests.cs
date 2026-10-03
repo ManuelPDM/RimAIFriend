@@ -52,6 +52,7 @@ namespace AIPawnControl
             new Test { name = "Materials get marked", builds = true, run = MaterialsGetMarked },
             new Test { name = "Upgrades", builds = true, run = UpgradesMatchVanilla },
             new Test { name = "Layout", builds = true, run = LayoutLines },
+            new Test { name = "Danger response", builds = true, run = DangerOptions },
         };
 
         [DebugAction(DevTools.Category, "Run self-tests", allowedGameStates = AllowedGameStates.PlayingOnMap)]
@@ -445,6 +446,73 @@ namespace AIPawnControl
                 }
             }
             log.Line($"now {Layout.Line(map)}");
+        }
+
+        /// <summary>
+        /// Changes the map (spawns an enemy for a moment): with an enemy near the first colonist the menu is the danger menu,
+        /// "go inside" sets the Inside area (every indoor room of the base) and Flee, "fight" clears the area and sets Attack,
+        /// and once the enemy is gone her own area and response come back.
+        /// </summary>
+        private static void DangerOptions(Log log)
+        {
+            Map map = Map;
+            Pawn pawn = Colonists.FirstOrDefault();
+            var faction = Find.FactionManager.RandomEnemyFaction(allowNonHumanlike: false);
+            if (pawn == null || faction == null)
+            {
+                log.Line("no colonist or no enemy faction: nothing to check");
+                return;
+            }
+            log.Check(DangerResponse.Threats(map).Count == 0, "there's danger before the test: its checks would mislead");
+            if (!CellFinder.TryFindRandomCellNear(pawn.Position, map, 15, c => c.Standable(map) && !c.Fogged(map) && c.DistanceTo(pawn.Position) > 8, out IntVec3 cell))
+            {
+                log.Fail("no cell to spawn the enemy on");
+                return;
+            }
+            string insideLabel = "AIPawnControl_InsideArea".Translate();
+            bool hadInside = map.areaManager.AllAreas.Any(a => a.Label == insideLabel);
+            var areaBefore = pawn.playerSettings.AreaRestrictionInPawnCurrentMap;
+            var responseBefore = pawn.playerSettings.hostilityResponse;
+            var mind = new PawnMind(pawn, null); // not registered: no calls, just its settings
+            Pawn enemy = PawnGenerator.GeneratePawn(new PawnGenerationRequest(faction.RandomPawnKind(), faction));
+            GenSpawn.Spawn(enemy, cell, map);
+            try
+            {
+                log.Check(DangerResponse.Threats(map).Contains(enemy), $"the {enemy.KindLabel} isn't a threat");
+                log.Line("[Danger] " + DangerResponse.Line(pawn));
+                var menu = ActionCatalog.BuildActMenu(pawn, mind);
+                log.Line("menu: " + string.Join(" | ", menu.Select(o => o.Label)));
+                log.Check(menu.All(o => o.Key == "keep" || o.Key == "inside" || o.Key == "fight" || o.Key.StartsWith("help ")), "the danger menu offers more than the danger options");
+                bool canFight = !pawn.WorkTagIsDisabled(WorkTags.Violent);
+                log.Check(menu.Any(o => o.Key == "fight") == canFight, $"fight offered: {menu.Any(o => o.Key == "fight")}, can fight: {canFight}");
+                var inside = menu.FirstOrDefault(o => o.Key == "inside");
+                log.Check((inside != null) == DangerResponse.CanGoInside(map), "\"go inside\" offered when it can't be, or missing when it can");
+                if (inside != null)
+                {
+                    log.Line("go inside: " + inside.Apply(null));
+                    var area = pawn.playerSettings.AreaRestrictionInPawnCurrentMap;
+                    log.Check(area != null && area.TrueCount == DangerResponse.InsideCells(map).Count, $"her area is {area?.Label ?? "none"}, not the whole inside");
+                    log.Check(pawn.playerSettings.hostilityResponse == HostilityResponseMode.Flee, "\"go inside\" didn't set Flee");
+                }
+                var fight = menu.FirstOrDefault(o => o.Key == "fight");
+                if (fight != null)
+                {
+                    log.Line("fight: " + fight.Apply(null));
+                    log.Check(pawn.playerSettings.AreaRestrictionInPawnCurrentMap == null, "\"fight\" left an area on her");
+                    log.Check(pawn.playerSettings.hostilityResponse == HostilityResponseMode.Attack, "\"fight\" didn't set Attack");
+                }
+            }
+            finally
+            {
+                enemy.Destroy();
+                pawn.jobs.EndCurrentJob(Verse.AI.JobCondition.InterruptForced);
+            }
+            log.Check(DangerResponse.Threats(map).Count == 0, "still danger after the enemy is gone");
+            mind.EndDanger();
+            log.Check(pawn.playerSettings.AreaRestrictionInPawnCurrentMap == areaBefore && pawn.playerSettings.hostilityResponse == responseBefore,
+                "her own area and hostility response didn't come back");
+            if (!hadInside)
+                map.areaManager.AllAreas.FirstOrDefault(a => a.Label == insideLabel)?.Delete();
         }
     }
 }

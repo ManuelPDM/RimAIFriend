@@ -84,6 +84,9 @@
   <AIPawnControl_GroupChatEarlier>Earlier:</AIPawnControl_GroupChatEarlier>
   <AIPawnControl_GroupChatEmpty>Nobody has written anything yet.</AIPawnControl_GroupChatEmpty>
 
+  <!-- Danger -->
+  <AIPawnControl_InsideArea>Inside</AIPawnControl_InsideArea>
+
   <!-- Memories -->
   <AIPawnControl_MemoriesButton>Memories</AIPawnControl_MemoriesButton>
   <AIPawnControl_MemoriesTitle>What {0} remembers</AIPawnControl_MemoriesTitle>

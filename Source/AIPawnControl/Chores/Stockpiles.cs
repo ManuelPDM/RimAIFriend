@@ -44,7 +44,7 @@ namespace AIPawnControl
 
         /// <summary>
         /// Lays out the zone on cells already checked (a room's free floor, or a square), and records it as hers. With a
-        /// filter (a food store's), it takes only that, at the given priority.
+        /// filter, it takes only that, at the given priority.
         /// </summary>
         public static string PlaceCells(Pawn pawn, List<IntVec3> cells, string where, string size, ThingFilter filter = null,
                                         StoragePriority priority = StoragePriority.Normal, string what = "everything")

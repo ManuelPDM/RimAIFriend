@@ -45,6 +45,7 @@ namespace AIPawnControl
         // Saved
         private List<GroupMessage> messages = new List<GroupMessage>();
         private string summary;
+        private int summaryTick = -1; // the newest message folded into it; -1 for summaries from before it was saved
         private Pawn turn;
 
         // Not saved
@@ -92,8 +93,8 @@ namespace AIPawnControl
         /// <summary>Who holds the turn, without handing it on (for the window, which mustn't change the game).</summary>
         public PawnMind TurnHolder => Minds.FirstOrDefault(m => m.pawn == turn) ?? Minds.FirstOrDefault();
 
-        /// <summary>Her Act menu gets the line: it's her turn, and the newest message isn't her own.</summary>
-        public bool MayPost(PawnMind mind) => Holder() == mind && messages.LastOrDefault()?.author != mind.pawn.LabelShort;
+        /// <summary>Her Act menu gets the line: it's her turn.</summary>
+        public bool MayPost(PawnMind mind) => Holder() == mind;
 
         /// <summary>After her Act: the next mind in the list who can think now gets the turn. Not her turn: nothing happens.</summary>
         public void PassTurn(PawnMind from)
@@ -143,7 +144,7 @@ namespace AIPawnControl
                 return null;
             var lines = new List<string>();
             if (summary != null)
-                lines.Add("Earlier: " + summary);
+                lines.Add((summaryTick >= 0 && map != null ? $"Earlier (up to {GameTime.DayLabel(summaryTick, map).ToLower()}): " : "Earlier: ") + summary);
             lines.AddRange(messages.Skip(messages.Count - Shown).Select(m => Line(m, map)));
             return string.Join("\n", lines);
         }
@@ -214,6 +215,7 @@ namespace AIPawnControl
             {
                 ["summary"] = summary ?? "(none yet)",
                 ["messages"] = string.Join("\n", folded.Select(m => Line(m, map))),
+                ["now"] = Now(map),
             });
             var schema = Schema.Obj(new Dictionary<string, object> { ["summary"] = Schema.Str(900) });
             LlmRequest request = null;
@@ -239,10 +241,21 @@ namespace AIPawnControl
                 if (string.IsNullOrEmpty(text))
                     return; // the messages stay; the next message or the hourly check tries again
                 summary = text;
+                summaryTick = folded[folded.Count - 1].tick;
                 messages.RemoveAll(folded.Contains);
                 ModLog.Message($"Group chat compacted {folded.Count} messages: {summary}");
             });
             compacting = request;
+        }
+
+        /// <summary>The colony as it is now, so the summary can drop what's done and who's gone.</summary>
+        private static string Now(Map map)
+        {
+            if (map == null)
+                return "(unknown)";
+            var rooms = map.regionGrid.AllRooms.Where(r => Ground.Indoor(r) && !r.Fogged && Ground.AnyRole(r)).Select(BuildManager.Label).Distinct().ToList();
+            return $"{GameTime.Now(map)}. Colonists: {string.Join(", ", map.mapPawns.FreeColonistsSpawned.Select(p => p.LabelShort))}. "
+                   + SnapshotBuilder.Colony(map) + $" Rooms: {(rooms.Count > 0 ? string.Join(", ", rooms) : "none yet")}.";
         }
 
         public override void GameComponentTick()
@@ -255,6 +268,7 @@ namespace AIPawnControl
         {
             Scribe_Collections.Look(ref messages, "messages", LookMode.Deep);
             Scribe_Values.Look(ref summary, "summary");
+            Scribe_Values.Look(ref summaryTick, "summaryTick", -1);
             Scribe_References.Look(ref turn, "turn");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
                 messages = messages ?? new List<GroupMessage>();

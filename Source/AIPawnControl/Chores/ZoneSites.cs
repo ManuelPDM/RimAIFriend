@@ -113,7 +113,7 @@ namespace AIPawnControl
                 Room room = c.GetRoom(map);
                 if (Ground.Indoor(room) && !Ground.NoRole(room))
                 {
-                    words.Add("next to the " + room.GetRoomRoleLabel());
+                    words.Add("next to the " + BuildManager.Label(room));
                     break;
                 }
             }

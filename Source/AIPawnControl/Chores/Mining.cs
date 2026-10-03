@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
@@ -26,11 +27,14 @@ namespace AIPawnControl
 
         public static IEnumerable<ChoreOption> Options(ChoreScan scan)
         {
-            foreach (var (rock, cells, steps) in Veins(scan))
+            foreach (var (rock, vein, steps) in Veins(scan))
             {
                 ThingDef resource = rock.building.mineableThing;
-                if (scan.map.resourceCounter.GetCount(resource) >= ChoreOptions.StockCap)
+                int room = ChoreOptions.StockCap - scan.map.resourceCounter.GetCount(resource) - Coming(scan.map, resource);
+                if (room <= 0)
                     continue;
+                // Only what fits under the cap. A prefix of the roof-checked vein is just as safe (Supplies.Ore).
+                var cells = vein.Take((int)Math.Ceiling(room / Math.Max(1f, PerCell(rock)))).ToList();
                 string label = ResourceLabel(rock);
                 bool core = resource == ThingDefOf.Steel || resource == ThingDefOf.ComponentIndustrial || resource == ThingDefOf.Plasteel;
                 bool short_ = (resource == ThingDefOf.Steel && scan.Stock(ThingDefOf.Steel) < 100)
@@ -48,6 +52,22 @@ namespace AIPawnControl
         }
 
         public static float PerCell(ThingDef rock) => rock.building.EffectiveMineableYield * rock.building.mineableDropChance;
+
+        /// <summary>
+        /// What's on its way to storage, counted with storage against the cap: lying outside storage (not forbidden or
+        /// fogged, so someone will haul it) plus the yield of cells marked to mine.
+        /// </summary>
+        public static int Coming(Map map, ThingDef resource) =>
+            map.listerThings.ThingsOfDef(resource).Where(t => !t.IsInAnyStorage() && !t.IsForbidden(Faction.OfPlayer) && !t.Position.Fogged(map)).Sum(t => t.stackCount)
+            + MarkedYield(map, resource);
+
+        /// <summary>The yield of every cell marked to mine (by anyone) that gives this resource.</summary>
+        public static int MarkedYield(Map map, ThingDef resource) =>
+            (int)map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.Mine)
+                .Concat(map.designationManager.SpawnedDesignationsOfDef(DesignationDefOf.MineVein))
+                .Select(d => d.target.Cell.GetFirstMineable(map)?.def)
+                .Where(rock => rock?.building?.mineableThing == resource)
+                .Sum(rock => PerCell(rock));
 
         /// <summary>Per ore, the vein nearest the base that a miner can reach (roof-checked, up to MaxCells cells, nearest first).</summary>
         public static List<(ThingDef rock, List<IntVec3> cells, int steps)> Veins(ChoreScan scan)

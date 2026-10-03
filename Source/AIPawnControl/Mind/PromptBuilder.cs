@@ -36,7 +36,7 @@ namespace AIPawnControl
         private static readonly string[] Snapshot =
         {
             "Me", "Time", "Condition", "Needs", "Feelings", "Doing now", "My project",
-            "People", "Others", "Colony", "Colony stores", "Colony work", "Rooms", "Recent", "Group chat",
+            "People", "Others", "Colony", "Colony stores", "Colony work", "Rooms", "Recent", "Group chat", "Danger",
         };
 
         // Every user-prompt section, in prompt order: the snapshot, then memory.

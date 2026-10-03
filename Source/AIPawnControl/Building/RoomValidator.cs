@@ -33,7 +33,7 @@ namespace AIPawnControl
 
         /// <summary>
         /// Walkable once the base is built: other projects' blueprints and frames count as what they'll be. Two rooms
-        /// under construction can each leave a gap open that the pair closes (a dining hall and a food store sealing the
+        /// under construction can each leave a gap open that the pair closes (a dining hall and a workshop sealing the
         /// ground in front of the storeroom's door).
         /// </summary>
         private bool Walkable(IntVec3 c) => c.Walkable(map) && !(Planned(c) is ThingDef d && d.passability == Traversability.Impassable);

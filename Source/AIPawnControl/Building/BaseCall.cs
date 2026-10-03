@@ -20,7 +20,7 @@ namespace AIPawnControl
         private const string None = "-";
         private static readonly string[] GroupOrder = { "Next for the base", "Inside the base", "Food", "Medicine", "Storage", "Stock up", "Other rooms" };
 
-        /// <summary>One numbered line. Exactly one of kind, layout, crop, upgrade, pile or chore is set.</summary>
+        /// <summary>One numbered line. Exactly one of kind, layout, temperature, crop, upgrade, pile or chore is set.</summary>
         internal class Choice
         {
             public string group;
@@ -35,6 +35,7 @@ namespace AIPawnControl
             public string where;          // a field's or stockpile's place in words
             public CellRect pile;         // a stockpile, when the colony has none
             public Func<Pawn, ThingDef, string> layout; // a hub, a door between rooms, a way out closed (BASE_LAYOUT.md)
+            public Func<Pawn, string> temperature; // warm or cool a room: survival, so it goes ahead even with a project running
         }
 
         /// <summary>The call, built but not sent: its prompt, schema and what each number means.</summary>
@@ -55,7 +56,7 @@ namespace AIPawnControl
         /// <summary>Whether the Act menu offers "work on the base": a room can be planned, or there's anything to stock up or grow.</summary>
         public static bool AnythingToDo(Pawn pawn)
         {
-            if (BuildManager.Instance?.CantPlanReason(pawn) == null)
+            if (BuildManager.Instance?.CantPlanReason(pawn) == null || TemperatureChoice(pawn) != null)
                 return true;
             if (!AIPawnControlMod.Settings.allowChores || ChoreManager.Instance == null)
                 return false;
@@ -64,13 +65,13 @@ namespace AIPawnControl
 
         /// <summary>
         /// Fixed text of what the Base call can offer, so the Act menu scans nothing (the Base call does, once picked). With
-        /// a project running (anyone's: one at a time), only fields and stocking up are left: "work on the base (Stone's
+        /// a project running (anyone's: one at a time), only heat or cooling, fields and stocking up are left: "work on the base (Stone's
         /// barracks comes first): …".
         /// </summary>
         public static string MenuLabel(Pawn pawn)
         {
             if (BuildManager.Instance?.Underway(pawn.Map) is BuildProject project)
-                return $"work on the base ({ProjectName(project, pawn)} comes first): plant fields, or stock up by mining, cutting wood, hunting or foraging";
+                return $"work on the base ({ProjectName(project, pawn)} comes first): warm or cool a room, plant fields, or stock up by mining, cutting wood, hunting or foraging";
             return "work on the base: build or improve rooms, join rooms with halls and doors, warm or cool a room, plant fields, or stock up by mining, cutting wood, hunting or foraging";
         }
 
@@ -93,6 +94,28 @@ namespace AIPawnControl
             }
             string why = manager?.CantPlanReason(pawn);
             return why != null ? $"not yet: {why}" : null;
+        }
+
+        /// <summary>
+        /// Heat or cooling is her choice, not built into rooms: the room furthest outside comfortable, at any rung. It's
+        /// survival, so it's offered even with a project running, but not while that room is already getting an item.
+        /// </summary>
+        private static Choice TemperatureChoice(Pawn pawn)
+        {
+            var manager = BuildManager.Instance;
+            if (manager == null || !AIPawnControlMod.Settings.allowBuilding
+                || !(Upgrades.Temperature(pawn) is (Room uncomfortable, Upgrades.Upgrade item, bool cold))
+                || manager.ActiveOnAll(pawn.Map).Any(p => p.furnishing && p.Room == uncomfortable))
+                return null;
+            IntVec3 cell = uncomfortable.Cells.First();
+            string name = uncomfortable.Owners.Contains(pawn) ? "my " + uncomfortable.Role.label : "the " + BuildManager.Label(uncomfortable);
+            return new Choice
+            {
+                group = "Inside the base",
+                label = $"{(cold ? "warm" : "cool")} {name}: {item.label}",
+                temperature = p => cell.GetRoom(p.Map) is Room room && Upgrades.Temperature(p) is (Room again, Upgrades.Upgrade u, _) && again == room
+                    ? Upgrades.Place(p, room, u) : "That room doesn't need it any more.",
+            };
         }
 
         /// <summary>Builds the choices and sends the call. Returns the result line for her decisions.</summary>
@@ -168,20 +191,9 @@ namespace AIPawnControl
                 }
                 // Fewer ways out (BASE_LAYOUT.md §5.7): the rung as a hub, a hall, a closed way out, a door between rooms.
                 choices.AddRange(Layout.Options(map, rung, finder, validator, call.materials).Select(o => new Choice { group = o.group, label = o.label, layout = o.apply }));
-                // Heat or cooling is her choice, not built into rooms: the room furthest outside comfortable, at any rung.
-                if (Upgrades.Temperature(pawn) is (Room uncomfortable, Upgrades.Upgrade item, bool cold))
-                {
-                    IntVec3 cell = uncomfortable.Cells.First();
-                    string name = uncomfortable.Owners.Contains(pawn) ? "my " + uncomfortable.Role.label : "the " + uncomfortable.GetRoomRoleLabel();
-                    choices.Add(new Choice
-                    {
-                        group = "Inside the base",
-                        label = $"{(cold ? "warm" : "cool")} {name}: {item.label}",
-                        layout = (p, m) => cell.GetRoom(p.Map) is Room room && Upgrades.Temperature(p) is (Room again, Upgrades.Upgrade u, _) && again == room
-                            ? Upgrades.Place(p, room, u) : "That room doesn't need it any more.",
-                    });
-                }
             }
+            if (TemperatureChoice(pawn) is Choice temperature)
+                choices.Add(temperature);
 
             // Food: a field only when the outlook falls short (STREAMLINE.md §6).
             var outlook = FoodOutlook.For(map);
@@ -334,7 +346,7 @@ namespace AIPawnControl
             if (outlook.growPerDay < outlook.needPerDay)
                 why.Add(outlook.growPerDay <= 0f ? $"there are no food fields for {outlook.colonists} people" : $"the fields grow ~{outlook.growPerDay / outlook.needPerDay:P0} of what {outlook.colonists} people eat");
             if (outlook.hasWinter && outlook.daysToWinter > 0 && outlook.WinterCover < outlook.needPerDay * outlook.winterDays)
-                why.Add($"winter is {outlook.daysToWinter} days off and the stores won't last it");
+                why.Add($"crops stop growing in {outlook.daysToWinter} days and the stores won't last until they grow again");
             return new Choice
             {
                 group = "Food",
@@ -384,6 +396,8 @@ namespace AIPawnControl
                 }
                 if (choice.layout != null)
                     return choice.layout(pawn, stuff);
+                if (choice.temperature != null)
+                    return choice.temperature(pawn);
                 if (choice.crop != null)
                     return Fields.Place(pawn, choice.field, choice.crop, choice.where);
                 if (choice.group == "Storage")

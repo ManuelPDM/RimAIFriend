@@ -101,6 +101,11 @@ namespace AIPawnControl
                 return;
             if (pawn.Dead || pawn.Destroyed || (byMind && Mind == null))
             {
+                if (state == State.Placed && Heir() is Pawn heir)
+                {
+                    HandOver(heir);
+                    return;
+                }
                 state = State.Abandoned; // orphaned: tracking stops, the blueprints stay for the colony
                 ModLog.Message($"Stopped tracking {pawn.LabelShort}'s {Kind}: {(pawn.Dead ? "dead" : "no mind")}.");
                 return;
@@ -164,6 +169,30 @@ namespace AIPawnControl
                     MindManager.Instance?.MindOf(occupant)?.memory.Record(occupant, "build", kindDef?.defName,
                         $"{pawn.LabelShort} built me a {Kind} {where}.", 6, MemoryEvent.TookPart, new[] { pawn.LabelShort });
             }
+        }
+
+        /// <summary>A colonist here with a mind and no project of their own, to take over an unfinished one; null if none.</summary>
+        private Pawn Heir() => map.mapPawns.FreeColonistsSpawned.FirstOrDefault(p => p != pawn && MindManager.Instance?.MindOf(p) != null
+                                                                                     && BuildManager.Instance?.ActiveProject(p) == null);
+
+        /// <summary>
+        /// Her builder died or lost their mind: the heir takes it on, so the ladder still sees it underway and it still gets
+        /// outfitted. Her own bedroom stays hers if she's alive, else its bed is left for vanilla to assign.
+        /// </summary>
+        private void HandOver(Pawn heir)
+        {
+            Pawn was = pawn;
+            if (kindDef != null && kindDef.owned && occupant == null)
+            {
+                if (was.Dead || was.Destroyed)
+                    unclaimed = true;
+                else
+                    occupant = was;
+            }
+            pawn = heir;
+            byMind = true;
+            ModLog.Message($"{was.LabelShort}'s {Kind} handed over to {heir.LabelShort} ({(was.Dead ? "dead" : "no mind")}).");
+            Remember($"I took over {was.LabelShort}'s unfinished {Kind} {where}.", 5);
         }
 
         /// <summary>
@@ -390,7 +419,21 @@ namespace AIPawnControl
         public BuildProject Underway(Map map) => ActiveOnAll(map).FirstOrDefault();
 
         /// <summary>Who designed a finished room, for [Rooms]' credit, or null.</summary>
-        public Pawn BuilderOf(Room room) => projects.Find(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == room.Map && p.Room == room)?.pawn;
+        public Pawn BuilderOf(Room room) => Finished(room)?.pawn;
+
+        private BuildProject Finished(Room room) => projects.Find(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == room.Map && p.Room == room);
+
+        /// <summary>
+        /// A room's name: vanilla's label, except a finished room of ours whose kind vanilla has no role for (a great hall,
+        /// which vanilla calls a rec room or a dining room by what's in it) keeps our kind's name. Only that room: any other
+        /// room, and a room built for a vanilla role, is named by vanilla.
+        /// </summary>
+        public static string Label(Room room)
+        {
+            var kind = Instance?.Finished(room)?.kindDef;
+            return kind != null && kind.role == null && !kind.layout && kind.items.Count > 0 && !room.Owners.Any()
+                ? kind.label : room.GetRoomRoleLabel();
+        }
 
         public void Add(BuildProject project) => projects.Add(project);
 
@@ -457,12 +500,12 @@ namespace AIPawnControl
             else
             {
                 Room room = bed.GetRoom();
-                parts.Add(room == null || room.PsychologicallyOutdoors ? "My bed is outdoors." : $"I sleep in the {room.GetRoomRoleLabel()}.");
+                parts.Add(room == null || room.PsychologicallyOutdoors ? "My bed is outdoors." : $"I sleep in the {Label(room)}.");
             }
             var built = projects.Where(p => p.pawn == pawn && p.state == BuildProject.State.Done && !p.furnishing && p.Bed == null && p.map == pawn.Map)
                 .Select(p => (p, room: p.Room))
                 .Where(x => x.room != null && x.room.ProperRoom)
-                .Select(x => $"{x.room.GetRoomRoleLabel()} ({Impressiveness(x.room)})")
+                .Select(x => $"{Label(x.room)} ({Impressiveness(x.room)})")
                 .ToList();
             if (built.Count > 0)
                 parts.Add($"I built: {string.Join(", ", built)}.");

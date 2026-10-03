@@ -29,9 +29,8 @@ namespace AIPawnControl
             if (story?.Adulthood != null)
                 sb.AppendLine($"Adulthood: {story.Adulthood.TitleCapFor(pawn.gender)}. {story.Adulthood.FullDescriptionFor(pawn).Resolve()}");
             if (story?.traits != null && story.traits.allTraits.Count > 0)
-                sb.AppendLine("Traits: " + string.Join(", ", story.traits.allTraits.Select(t => t.LabelCap.ToString())) + ".");
-            if (pawn.Ideo != null)
-                sb.AppendLine($"Ideoligion: {pawn.Ideo.name} ({string.Join(", ", pawn.Ideo.memes.Select(m => m.LabelCap.ToString()))}).");
+                sb.AppendLine("Traits:\n" + string.Join("\n", story.traits.allTraits.Select(t =>
+                    $"- {t.LabelCap}: {t.CurrentData.description.Formatted(pawn.Named("PAWN")).AdjustedFor(pawn).Resolve().StripTags()}")));
             string skills = Skills(pawn);
             if (skills != null)
                 sb.AppendLine("Skills: " + skills);
@@ -42,6 +41,23 @@ namespace AIPawnControl
             if (family != null && family.Count > 0)
                 sb.AppendLine("Relations: " + string.Join(", ", family) + ".");
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// What the persona is built around: one passion (a burning one if she has any) and one trait, each picked at
+        /// random; her backstory stands in for whichever half she lacks. "her Medical (burning passion) and her Greedy trait".
+        /// </summary>
+        public static string PersonaPairing(Pawn pawn)
+        {
+            var passions = pawn.skills?.skills.Where(s => !s.TotallyDisabled && s.passion != Passion.None).ToList() ?? new List<SkillRecord>();
+            var burning = passions.Where(s => s.passion == Passion.Major).ToList();
+            SkillRecord passion = (burning.Count > 0 ? burning : passions).RandomElementWithFallback();
+            Trait trait = pawn.story?.traits?.allTraits.RandomElementWithFallback();
+            string p = passion != null ? $"their {passion.def.LabelCap} ({PassionLabel(passion.passion)})" : null;
+            string t = trait != null ? $"their {trait.LabelCap} trait" : null;
+            if (p == null && t == null)
+                return "their childhood and their adulthood";
+            return $"{p ?? t} and {(p != null && t != null ? t : "their backstory")}";
         }
 
         /// <summary>The live snapshot as section name → text; null means leave it out. PromptBuilder labels and orders them.</summary>
@@ -75,6 +91,7 @@ namespace AIPawnControl
                 ["Rooms"] = Rooms(pawn),
                 ["Recent"] = Recent(mind, map),
                 ["Group chat"] = GroupChat.Instance?.Context(map),
+                ["Danger"] = DangerResponse.Line(pawn),
             };
         }
 
@@ -108,7 +125,7 @@ namespace AIPawnControl
             Room room = pawn.GetRoom();
             if (room == null || room.PsychologicallyOutdoors)
                 return "outside";
-            return room.GetRoomRoleLabel();
+            return BuildManager.Label(room);
         }
 
         private static string Condition(Pawn pawn)
@@ -277,19 +294,37 @@ namespace AIPawnControl
 
         public static bool Nearby(Pawn a, Pawn b) => a.Map == b.Map && a.Position.DistanceTo(b.Position) <= NearbyTiles;
 
-        private static string Colony(Map map)
+        internal static string Colony(Map map)
         {
             var parts = new List<string>
             {
                 $"{map.mapPawns.FreeColonistsSpawnedCount} colonists",
                 "Danger: " + map.dangerWatcher.DangerRating.ToString().ToLower(),
             };
+            string dead = Dead(map);
+            if (dead != null)
+                parts.Add("Dead: " + dead);
             string alerts = Alerts();
             if (alerts != null)
                 parts.Add("Alerts: " + alerts);
             parts.Add("Base: " + Ladder.Line(map));
             parts.Add("Food: " + FoodOutlook.For(map).Line());
             return string.Join(". ", parts) + ".";
+        }
+
+        /// <summary>
+        /// "Vicky (died 5 days ago, buried) · Stumpy (died yesterday, unburied)": the colony's dead whose bodies are on the
+        /// map, lying around or in a grave or sarcophagus. A body that's gone (cremated, eaten) is gone from here too. Null when none.
+        /// </summary>
+        private static string Dead(Map map)
+        {
+            bool Ours(Corpse c) => c?.InnerPawn != null && c.InnerPawn.Faction == Faction.OfPlayer && c.InnerPawn.RaceProps.Humanlike;
+            var dead = map.listerThings.ThingsInGroup(ThingRequestGroup.Corpse).OfType<Corpse>().Where(Ours).Select(c => (c, buried: false))
+                .Concat(map.listerBuildings.allBuildingsColonist.OfType<Building_CorpseCasket>().Select(g => g.Corpse).Where(Ours).Select(c => (c, buried: true)))
+                .OrderBy(x => x.c.timeOfDeath)
+                .Select(x => $"{x.c.InnerPawn.LabelShort} (died {GameTime.DayLabel(x.c.timeOfDeath, map).ToLower()}, {(x.buried ? "buried" : "unburied")})")
+                .ToList();
+            return dead.Count > 0 ? string.Join(" · ", dead) : null;
         }
 
         /// <summary>What's in storage, like the vanilla resource readout. Food days use vanilla's Low food math (1 nutrition per colonist per day).</summary>
@@ -414,7 +449,7 @@ namespace AIPawnControl
 
         /// <summary>"my bedroom" for hers, vanilla's label otherwise ("Mo's bedroom", "kitchen").</summary>
         public static string RoomName(Room room, Pawn pawn) =>
-            room.Owners.Contains(pawn) ? "my " + room.Role.label : room.GetRoomRoleLabel();
+            room.Owners.Contains(pawn) ? "my " + room.Role.label : BuildManager.Label(room);
 
         /// <summary>Notable furniture inside the room: no walls, doors, floors, conduits or lights.</summary>
         public static List<Thing> Furniture(Room room) =>

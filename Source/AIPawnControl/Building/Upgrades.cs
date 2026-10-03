@@ -530,7 +530,7 @@ namespace AIPawnControl
         public static string Place(Pawn pawn, Room room, Upgrade u)
         {
             Map map = pawn.Map;
-            string where = room.Owners.Contains(pawn) ? $"in my {room.Role.label}" : $"in the {room.GetRoomRoleLabel()}";
+            string where = room.Owners.Contains(pawn) ? $"in my {room.Role.label}" : $"in the {BuildManager.Label(room)}";
             var project = new BuildProject
             {
                 pawn = pawn, map = map, footprint = room.ExtentsClose.ExpandedBy(1), placedTick = Find.TickManager.TicksGame,

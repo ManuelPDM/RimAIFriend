@@ -40,6 +40,9 @@ namespace AIPawnControl
         private bool chatPending; // unanswered player messages, e.g. while unconscious or while another call was running
         private bool chatWhileOut;
         public MindMemory memory = new MindMemory(); // events, memories, diary, person files, lately
+        private bool keptSettings; // a danger choice changed her area and hostility response; they come back when it's over
+        private Area areaBefore;
+        private HostilityResponseMode responseBefore;
 
         // Not saved
         private LlmRequest current;
@@ -53,6 +56,9 @@ namespace AIPawnControl
         private int lastDanger = -1;
         private int lastMoodBand;
         private int lastInjuryCount;
+        private int dangerSinceTick = -1; // when the danger on her map began; -1 = none
+        private readonly HashSet<Pawn> hitInDanger = new HashSet<Pawn>(); // colonists hurt since then: each one makes her think once
+        private bool dangerThink; // a danger event she hasn't thought about yet
         private readonly HashSet<int> ourJobIds = new HashSet<int>(); // jobs we ordered, to tell them apart from the player's
         private int talkLineJobId = -1;
         private string talkLine;
@@ -98,6 +104,9 @@ namespace AIPawnControl
             Scribe_Values.Look(ref chatPending, "chatPending");
             Scribe_Values.Look(ref chatWhileOut, "chatWhileOut");
             Scribe_Deep.Look(ref memory, "memory");
+            Scribe_Values.Look(ref keptSettings, "keptSettings");
+            Scribe_References.Look(ref areaBefore, "areaBefore");
+            Scribe_Values.Look(ref responseBefore, "responseBefore");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 decisions = decisions ?? new List<string>();
@@ -141,6 +150,8 @@ namespace AIPawnControl
         {
             if (chat.Count > 0 && !chatPending && Find.TickManager.TicksGame - lastChatTick > ChatForgetTicks)
                 chat.Clear(); // long chat histories make small models drift; memory across conversations is Phase 3
+            if (keptSettings && pawn != null && pawn.Spawned && DangerResponse.Threats(pawn.Map).Count == 0)
+                EndDanger();
             if (chatPending)
                 return; // answered from UpdateChat, which also runs while paused
             if (Thinking || Find.TickManager.TicksGame < backoffUntilTick || pawn == null || !pawn.Spawned)
@@ -148,10 +159,14 @@ namespace AIPawnControl
             RecheckSupplies();
             if (TryReflect())
                 return;
-            // Only danger or a new injury may wake a sleeper's mind; a mood drop while asleep just confuses the model.
+            bool danger = NoticeDanger();
             Change change = DetectSignificantChange();
-            bool significant = change == Change.Urgent || (change == Change.Mood && pawn.Awake());
-            if (PausedReason(ignoreSleep: change == Change.Urgent) != null)
+            if (danger && change == Change.Urgent)
+                change = Change.None; // in danger only its own events count (NoticeDanger), not every hit
+            // Only danger or a new injury may wake a sleeper's mind; a mood drop while asleep just confuses the model.
+            bool urgent = change == Change.Urgent || dangerThink;
+            bool significant = urgent || (change == Change.Mood && pawn.Awake());
+            if (PausedReason(ignoreSleep: urgent) != null)
             {
                 idleSinceTick = -1;
                 return;
@@ -178,7 +193,7 @@ namespace AIPawnControl
             else if (idleSinceTick < 0)
                 idleSinceTick = now;
 
-            if (now - lastThinkTick < MinTicksBetweenThinks || UnityEngine.Time.realtimeSinceStartup - lastThinkRealtime < MinRealSecondsBetweenThinks)
+            if ((now - lastThinkTick < MinTicksBetweenThinks && !dangerThink) || UnityEngine.Time.realtimeSinceStartup - lastThinkRealtime < MinRealSecondsBetweenThinks)
                 return;
             string trigger = null;
             if (significant)
@@ -189,9 +204,9 @@ namespace AIPawnControl
                 trigger = "A few hours have passed.";
             else if (idleSinceTick >= 0 && now - idleSinceTick >= IdleTicksBeforeAct)
                 trigger = "I've been idle for a while.";
-            if (trigger == null || ActsLeft <= 0)
+            if (trigger == null || (ActsLeft <= 0 && !danger))
                 return;
-            RequestAct(trigger);
+            RequestAct(trigger, countBudget: !danger); // in danger a choice costs no decision
         }
 
         private enum Change { None, Mood, Urgent }
@@ -212,6 +227,30 @@ namespace AIPawnControl
             lastMoodBand = moodBand;
             lastInjuryCount = injuries;
             return change;
+        }
+
+        /// <summary>
+        /// While there's danger, she thinks again (at once, past the hourly gap) only when it starts and the first time each
+        /// colonist anywhere on the map is hurt, herself included. Returns whether there's danger.
+        /// </summary>
+        private bool NoticeDanger()
+        {
+            if (DangerResponse.Threats(pawn.Map).Count == 0)
+            {
+                dangerSinceTick = -1;
+                hitInDanger.Clear();
+                dangerThink = false;
+                return false;
+            }
+            if (dangerSinceTick < 0)
+            {
+                dangerSinceTick = Find.TickManager.TicksGame;
+                dangerThink = true;
+            }
+            foreach (var p in pawn.Map.mapPawns.FreeColonistsSpawned)
+                if (p.mindState.lastHarmTick >= dangerSinceTick && hitInDanger.Add(p))
+                    dangerThink = true;
+            return true;
         }
 
         private int MoodBand()
@@ -380,6 +419,7 @@ namespace AIPawnControl
                 CountAct();
             wakeAtTick = -1;
             idleSinceTick = -1;
+            dangerThink = false;
             var menu = ActionCatalog.BuildActMenu(pawn, this);
             bool groupTurn = GroupChat.Instance?.Holder() == this; // this Act is her turn in the group chat
             var present = Recall.Present(pawn);
@@ -460,6 +500,31 @@ namespace AIPawnControl
             recall.MarkUsed(this, reply.Int("memory"), option.IsTalk ? option.Target?.LabelShort : null);
             if (groupTurn)
                 GroupChat.Instance?.PassTurn(this); // her turn in the group chat was this Act, whatever she picked
+        }
+
+        // ---------- Danger (DANGER_RESPONSE.md) ----------
+
+        /// <summary>Before a danger choice changes them: her own area and hostility response, once, to restore afterwards.</summary>
+        public void KeepSettings()
+        {
+            if (keptSettings)
+                return;
+            keptSettings = true;
+            areaBefore = pawn.playerSettings.AreaRestrictionInPawnCurrentMap;
+            responseBefore = pawn.playerSettings.hostilityResponse;
+        }
+
+        /// <summary>The danger is over (or her mind is turned off): her own area and hostility response come back.</summary>
+        public void EndDanger()
+        {
+            if (!keptSettings || pawn?.playerSettings == null || !pawn.Spawned)
+                return;
+            keptSettings = false;
+            pawn.playerSettings.AreaRestrictionInPawnCurrentMap = areaBefore;
+            pawn.playerSettings.hostilityResponse = responseBefore;
+            areaBefore = null;
+            AddDecision("The danger is over; back to my usual area and routine.", importance: 0);
+            ModLog.Message($"{pawn.LabelShort}: danger over, area and hostility response restored.");
         }
 
         // ---------- Player chat ----------
@@ -586,6 +651,7 @@ namespace AIPawnControl
             new KeyValuePair<string, string>("user", Prompts.Fill("persona", new Dictionary<string, string>
             {
                 ["identity"] = SnapshotBuilder.Identity(pawn),
+                ["pairing"] = SnapshotBuilder.PersonaPairing(pawn),
                 ["note"] = string.IsNullOrWhiteSpace(note) ? "(none)" : note,
             })),
         };
@@ -601,12 +667,6 @@ namespace AIPawnControl
             bool first = !decisions.Any();
             persona = text.Trim();
             AddDecision(first ? "I got a mind of my own." : "Persona rewritten.");
-            string say = SpeechLog.Clean(reply.Str("say"));
-            if (first && say != null && AIPawnControlMod.Settings.speakLines)
-            {
-                SpeechLog.Say(pawn, say);
-                AddDecision($"Said: \"{say}\"");
-            }
             ModLog.Message($"{pawn.LabelShort} persona: {persona}");
         }
 

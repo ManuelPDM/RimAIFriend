@@ -104,7 +104,7 @@ namespace AIPawnControl
         /// default "everything" stockpile. Null: no stockpile.
         /// </summary>
         public List<ThingCategoryDef> stores;
-        /// <summary>Its stockpile's priority (a food store's is above the storeroom's, so food moves over).</summary>
+        /// <summary>Its stockpile's priority (above Normal, haulers move what it takes over).</summary>
         public StoragePriority storePriority = StoragePriority.Normal;
         /// <summary>The temperature its coolers or heaters are set to once it's done (a freezer: -10). NaN: vanilla's default.</summary>
         public float holdTemperature = float.NaN;
