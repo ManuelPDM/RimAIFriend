@@ -57,6 +57,7 @@
       <li><defs><li>Table2x2c</li><li>Table1x2c</li></defs><centre>true</centre></li>
       <li><need>seat</need><nextTo>0</nextTo><repeat>4</repeat><forEveryone>true</forEveryone><perAnchor>4</perAnchor></li>
       <li><need>joy</need><backToWall>true</backToWall><repeat>2</repeat><optional>true</optional><clearAround>2</clearAround></li> <!-- each a different joy kind -->
+      <li MayRequire="Ludeon.RimWorld.Ideology"><defs><li>RitualSpot</li></defs><optional>true</optional></li> <!-- where the ideoligion's rituals and role ceremonies happen (IDEOLOGY.md §13) -->
     </items>
   </AIPawnControl.RoomKindDef>
 

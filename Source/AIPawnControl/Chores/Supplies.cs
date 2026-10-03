@@ -78,8 +78,8 @@ namespace AIPawnControl
 
         /// <summary>
         /// Wall materials for the Base call (STREAMLINE.md §5): wood or stone blocks only (the user: steel is for other
-        /// things). Up to 3, by what's in storage plus what can be had near the base, most first: grown trees for wood,
-        /// reachable chunks for their blocks once a stonecutter's table exists or can be built.
+        /// things). Up to 3 that can be had: wood first, then by what's in storage, then by what's near the base. Grown trees
+        /// for wood, reachable chunks for their blocks once a stonecutter's table exists or can be built.
         /// </summary>
         public static List<(ThingDef stuff, int stock, int nearby)> WallMaterials(Pawn pawn)
         {
@@ -99,7 +99,9 @@ namespace AIPawnControl
                 .Where(IsWallMaterial)
                 .Select(s => (stuff: s, stock: map.resourceCounter.GetCount(s), nearby: Nearby(s)))
                 .Where(m => m.stock + m.nearby > 0)
-                .OrderByDescending(m => m.stock + m.nearby)
+                .OrderByDescending(m => m.stuff == ThingDefOf.WoodLog)
+                .ThenByDescending(m => m.stock)
+                .ThenByDescending(m => m.nearby)
                 .Take(3)
                 .ToList();
             if (list.Count == 0)

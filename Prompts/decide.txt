@@ -2,13 +2,12 @@ It's {time}. The colony has to decide something, and it falls to you: you speak 
 
 {snapshot}
 
-The question:
 {choice}
 
 What you can do:
 {options}
 
-Decide from who you are (your traits, your beliefs, your mood), what the colony has ([Colony], [Colony stores]) and what the others would think of it.
+Decide from who you are (your traits, your values, your mood), what the colony has ([Colony], [Colony stores]) and what the others would think of it.
 
 "reason": why, in your own voice, briefly.
 "choice": the option's number.

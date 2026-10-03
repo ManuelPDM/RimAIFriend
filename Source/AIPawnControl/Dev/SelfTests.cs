@@ -48,6 +48,7 @@ namespace AIPawnControl
             new Test { name = "Chores", run = Chores },
             new Test { name = "Memory", run = Memory },
             new Test { name = "Hygiene", run = HygieneFixtures },
+            new Test { name = "Customs", run = CustomsAndGatherings },
             new Test { name = "Every kind builds", builds = true, run = EveryKindBuilds },
             new Test { name = "Materials get marked", builds = true, run = MaterialsGetMarked },
             new Test { name = "Upgrades", builds = true, run = UpgradesMatchVanilla },
@@ -316,6 +317,37 @@ namespace AIPawnControl
         /// With Dubs Bad Hygiene (HYGIENE.md): each fixture on its build tab, whether it can be built and runs here (the plumbing
         /// gate), and what the bathroom resolves to. The bathroom's toilets always resolve (a latrine needs nothing).
         /// </summary>
+        /// <summary>
+        /// [Colony customs] is at most 4 lines and never names the ideoligion as hers; gathering lines build without throwing,
+        /// have unique keys and respect the caps; reform options swap within one issue. Read-only (IDEOLOGY.md).
+        /// </summary>
+        private static void CustomsAndGatherings(Log log)
+        {
+            log.Line($"Ideology active: {Customs.Active}" + (Customs.Active ? $", fluid: {Customs.Primary.Fluid}, can reform: {Customs.CanReform}" : ""));
+            foreach (var pawn in Colonists)
+            {
+                string section = Customs.Section(pawn);
+                log.Check((section != null) == Customs.Active, $"{pawn.LabelShort}: [Colony customs] is {(section == null ? "missing" : "there")} with Ideology {(Customs.Active ? "on" : "off")}");
+                if (section != null)
+                {
+                    int lines = section.Split('\n').Length;
+                    log.Check(lines <= 4, $"{pawn.LabelShort}: [Colony customs] has {lines} lines");
+                    log.Check(!section.Contains(Customs.Primary.name), $"{pawn.LabelShort}: [Colony customs] names the ideoligion");
+                    log.Line($"{pawn.LabelShort}: {section.Replace("\n", " | ")}");
+                }
+                var gatherings = Gatherings.Lines(pawn);
+                log.Check(gatherings.Select(l => l.key).Distinct().Count() == gatherings.Count, $"{pawn.LabelShort}: two gathering lines share a key");
+                log.Check(gatherings.Count(l => l.faith) <= 1, $"{pawn.LabelShort}: more than one ideoligion line");
+                foreach (var line in gatherings)
+                    log.Line($"{pawn.LabelShort} line: {line.label}");
+            }
+            if (Customs.Active && Find.AnyPlayerHomeMap is Map home)
+                foreach (var custom in Customs.Changeable())
+                    foreach (var to in Customs.Alternatives(custom))
+                        log.Check(to.issue == custom.def.issue && to != custom.def, $"reform value {to.defName} isn't a swap within {custom.def.issue.defName}");
+            log.Line(DevTools.CustomsText(Map).Split('\n').Length + " lines in the customs report");
+        }
+
         private static void HygieneFixtures(Log log)
         {
             Map map = Map;

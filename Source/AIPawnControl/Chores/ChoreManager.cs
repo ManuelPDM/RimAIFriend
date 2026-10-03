@@ -109,7 +109,7 @@ namespace AIPawnControl
         {
             int ripe = 0;
             foreach (var c in zone.cells)
-                if (c.GetPlant(map) is Plant p && p.def == (zone as Zone_Growing)?.GetPlantDefToGrow() && p.HarvestableNow)
+                if (c.GetPlant(map) is Plant p && p.def == (zone as Zone_Growing)?.GetPlantDefToGrow() && ChoreOptions.Ripe(p))
                     ripe++;
             if (ripe > 0)
                 ripeSeen = true;

@@ -27,6 +27,8 @@ namespace AIPawnControl
         public ChoiceLetter letter;
         public Quest quest;
         public QuestPart_BegForItems beg;
+        public bool reform;        // the colony's customs can reform (IDEOLOGY.md §5.4, §15)
+        public string reformFrom;  // step 2: the custom (its defName) being changed; null in step 1, picking which
 
         private static readonly AccessTools.FieldRef<DiaOption, string> OptionText = AccessTools.FieldRefAccess<DiaOption, string>("text");
 
@@ -37,6 +39,8 @@ namespace AIPawnControl
             {
                 if (letter != null)
                     return letter.TimeoutActive ? (letter.disappearAtTick - Find.TickManager.TicksGame) / GenDate.TicksPerHour : -1;
+                if (reform)
+                    return -1;
                 if (quest != null && beg == null)
                     return quest.TicksUntilExpiry >= 0 ? quest.TicksUntilExpiry / GenDate.TicksPerHour : -1;
                 return -1;
@@ -50,6 +54,8 @@ namespace AIPawnControl
             {
                 if (letter != null)
                     return Find.LetterStack.LettersListForReading.Contains(letter) && letter.CanShowInLetterStack;
+                if (reform)
+                    return Customs.CanReform && (reformFrom == null || From != null);
                 if (beg != null)
                     return quest.State == QuestState.Ongoing && beg.target != null && beg.target.Spawned && GiveItemsToPawnUtility.ItemCountLeftToCollect(beg.target) > 0;
                 return quest.State == QuestState.NotYetAccepted;
@@ -74,8 +80,13 @@ namespace AIPawnControl
         private string Names => Pawns().Count > 0 ? string.Join(" and ", Pawns().Select(p => p.LabelShort)) : "them";
 
         /// <summary>The choice as the player reads it, plus who the people are and the colony's charity belief.</summary>
-        public string Describe()
+        /// <summary>Step 2 of a reform: the custom being changed, while the colony still has it.</summary>
+        private Precept From => reformFrom == null ? null : Customs.Primary.PreceptsListForReading.FirstOrDefault(p => p.def.defName == reformFrom);
+
+        public string Describe(Pawn by = null)
         {
+            if (reform)
+                return From is Precept from ? Customs.ChangeText(from) : Customs.PickText;
             var lines = new List<string>();
             if (letter != null)
                 lines.Add($"{letter.Label.Resolve().StripTags()}: {letter.Text.Resolve().StripTags()}");
@@ -115,6 +126,26 @@ namespace AIPawnControl
         public List<ChoiceOption> Options(Pawn by)
         {
             var options = new List<ChoiceOption>();
+            if (reform)
+            {
+                // Keep first (the user's call), then step 1's customs or step 2's new values.
+                if (From is Precept from)
+                {
+                    options.Add(new ChoiceOption { id = "keep", label = "keep it as it is", apply = _ => "Kept the colony's customs as they are." });
+                    foreach (var to in Customs.Alternatives(from))
+                    {
+                        string fromDef = from.def.defName, toDef = to.defName;
+                        options.Add(new ChoiceOption { id = "to:" + toDef, label = to.LabelCap, apply = _ => Customs.Apply(fromDef, toDef) });
+                    }
+                }
+                else
+                {
+                    options.Add(new ChoiceOption { id = "keep", label = "keep the customs as they are", apply = _ => "Kept the colony's customs as they are." });
+                    foreach (var custom in Customs.Changeable())
+                        options.Add(new ChoiceOption { id = "pick:" + custom.def.defName, label = $"{custom.def.issue.LabelCap} (now: {custom.def.LabelCap})", apply = _ => "picked" });
+                }
+                return options.Count > 1 ? options : new List<ChoiceOption>();
+            }
             if (letter != null)
             {
                 var dia = letter.Choices.ToList();
@@ -286,6 +317,13 @@ namespace AIPawnControl
                 if (quest.State == QuestState.Ongoing && quest.PartsListForReading.OfType<QuestPart_BegForItems>().FirstOrDefault() is QuestPart_BegForItems beg)
                     choices.Add(new ColonyChoice { key = "beg:" + quest.id, quest = quest, beg = beg });
             }
+            // The customs can reform: asked again only when the customs giving moods change ("keep" marks this set handled).
+            if (AIPawnControlMod.Settings.gatherings && Customs.CanReform && Find.AnyPlayerHomeMap is Map home && Customs.Changeable().Count > 0)
+                choices.Add(new ColonyChoice
+                {
+                    key = $"reform:{Customs.Primary.id}:{Customs.Primary.development.reformCount}:{Customs.FeltKey(home)}",
+                    reform = true,
+                });
             return choices.Where(c => c.Open).ToList();
         }
 
@@ -318,7 +356,7 @@ namespace AIPawnControl
                 int hours = choice.HoursLeft;
                 if (hours >= 0 && hours < LeaveToPlayerHours)
                     continue;
-                var decider = Decider(minds);
+                var decider = Decider(minds, choice);
                 if (decider == null)
                     return; // the best negotiator is in another call, or nobody can think now: the next scan tries again
                 Decide(decider, choice);
@@ -326,13 +364,18 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// The best negotiator among the minds that can think now. Null while she's in another call (Send would cancel it):
-        /// the choice waits for her rather than going to someone else.
+        /// The best negotiator among the minds that can think now; for a reform, the moral guide first, then the leader
+        /// (IDEOLOGY.md §5.4). Null while she's in another call (Send would cancel it): the choice waits for her rather than
+        /// going to someone else.
         /// </summary>
-        private static PawnMind Decider(List<PawnMind> minds)
+        public static PawnMind Decider(List<PawnMind> minds, ColonyChoice choice)
         {
-            var best = minds.Where(m => m.persona != null && m.PausedReason() == null && !m.Unreachable)
-                .OrderByDescending(m => m.pawn.GetStatValue(StatDefOf.NegotiationAbility)).FirstOrDefault();
+            var able = minds.Where(m => m.persona != null && m.PausedReason() == null && !m.Unreachable).ToList();
+            PawnMind best = null;
+            if (choice.reform)
+                best = able.FirstOrDefault(m => Customs.RoleOf(m.pawn) is Precept_Role r && Customs.IsStatusRole(r) && !r.def.leaderRole)
+                       ?? able.FirstOrDefault(m => Customs.RoleOf(m.pawn)?.def.leaderRole == true);
+            best = best ?? able.OrderByDescending(m => m.pawn.GetStatValue(StatDefOf.NegotiationAbility)).FirstOrDefault();
             return best != null && !best.Thinking ? best : null;
         }
 
@@ -346,7 +389,7 @@ namespace AIPawnControl
             string text = string.Join("\n", options.Select((o, i) => $"{i + 1}: {o.label}"));
             var messages = PromptBuilder.Build("decide", mind, new Dictionary<string, string>
             {
-                ["choice"] = choice.Describe(),
+                ["choice"] = choice.Describe(pawn),
                 ["options"] = text,
             });
             var schema = Schema.Obj(new Dictionary<string, object>
@@ -373,11 +416,22 @@ namespace AIPawnControl
                 return;
             }
             string label = asked[pick - 1].label;
-            string result = Answer(choice, asked[pick - 1].id, pawn);
+            string id = asked[pick - 1].id;
+            if (choice.reform && choice.reformFrom == null && id.StartsWith("pick:"))
+            {
+                // Reform step 1 picked a custom: the same mind picks its new value next (step 2). Nothing is posted yet.
+                handled.Add(choice.key);
+                var change = new ColonyChoice { key = choice.key + ":" + id, reform = true, reformFrom = id.Substring("pick:".Length) };
+                ModLog.Message($"{pawn.LabelShort} picked a custom to change: {label}.");
+                Decide(mind, change);
+                return;
+            }
+            string result = Answer(choice, id, pawn);
             if (result == null)
                 return;
             string say = SpeechLog.Clean(reply.Str("say"));
-            GroupChat.Instance?.Add(pawn.LabelShort, $"(decided for the colony: {label})" + (say != null ? $" {say}" : ""));
+            string what = choice.reform ? result.TrimEnd('.').Substring(0, 1).ToLower() + result.TrimEnd('.').Substring(1) : $"decided for the colony: {label}";
+            GroupChat.Instance?.Add(pawn.LabelShort, $"({what})" + (say != null ? $" {say}" : ""));
             mind.AddDecision($"Decided for the colony: {result}" + (say != null ? $" Said: \"{say}\"" : ""), importance: 0); // the group chat recorded it
             ModLog.Message($"{pawn.LabelShort} decided \"{choice.key}\": {label} | {result} | Reason: {mind.lastReason}");
         }

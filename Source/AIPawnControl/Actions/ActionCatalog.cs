@@ -129,6 +129,12 @@ namespace AIPawnControl
             if (BaseCall.AnythingToDo(pawn))
                 options.Add(new ActOption { Id = options.Count + 1, Key = "base", Label = BaseCall.MenuLabel(pawn), Apply = _ => BaseCall.Start(mind), OwnRemark = true });
 
+            foreach (var line in Gatherings.Lines(pawn))
+            {
+                var apply = line.apply;
+                options.Add(new ActOption { Id = options.Count + 1, Key = line.key, Label = line.label, Apply = say => apply(pawn, say) });
+            }
+
             if (!inConversation && GroupChat.Instance?.MayPost(mind) == true)
                 options.Add(new ActOption { Id = options.Count + 1, Key = "post", Label = "post in the group chat (everyone reads it, wherever they are)", Apply = _ => GroupChat.StartPost(mind), OwnRemark = true });
 

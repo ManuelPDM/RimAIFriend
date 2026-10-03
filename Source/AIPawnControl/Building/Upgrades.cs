@@ -553,7 +553,7 @@ namespace AIPawnControl
                 var report = GenConstruct.CanPlaceBlueprintAt(e.def, e.cell, e.rot, map, stuffDef: e.stuff);
                 if (!report.Accepted)
                     return $"Couldn't place the {e.def.label}: {report.Reason}";
-                GenConstruct.PlaceBlueprintForBuild(e.def, e.cell, map, e.rot, Faction.OfPlayer, e.stuff);
+                BuildManager.Place(e.def, e.cell, map, e.rot, e.stuff);
                 project.entries = new List<PlanEntry> { e };
             }
             BuildManager.Instance.Add(project);

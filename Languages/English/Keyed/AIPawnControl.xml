@@ -30,6 +30,8 @@
   <AIPawnControl_AllowChoresTip>AI colonists may mark animals to hunt, trees to cut and rock to mine, and lay out fields; new rooms get their own bills, stockpiles and materials. The colony does the work. Off: no new chores; what's set up stays.</AIPawnControl_AllowChoresTip>
   <AIPawnControl_MindsAnswer>Minds answer each other</AIPawnControl_MindsAnswer>
   <AIPawnControl_AnswerChoices>Minds answer the colony's choices</AIPawnControl_AnswerChoices>
+  <AIPawnControl_Gatherings>Minds hold gatherings and take part in the ideoligion</AIPawnControl_Gatherings>
+  <AIPawnControl_GatheringsTip>AI colonists can start the ideoligion's rituals (a funeral, a festival, a dance party), take on a role through the role ceremony, throw a party or hold their wedding, each only when the game would allow it. When the ideoligion can reform, one of them picks a custom to change. Without Ideology, only parties and weddings.</AIPawnControl_GatheringsTip>
   <AIPawnControl_AnswerChoicesTip>An AI colonist (the best negotiator who's free) decides when a wanderer or lodger wants to join, a ransom is demanded, a quest is offered on the home map, or beggars ask for items. The decision is posted in the group chat. You can still answer first. Quests away from home, choosing a pawn, babies and growth moments stay yours.</AIPawnControl_AnswerChoicesTip>
   <AIPawnControl_MindsAnswerTip>When an AI colonist talks to another AI colonist, the other one answers with a line of their own, and may agree to help. Off: only the first line is said.</AIPawnControl_MindsAnswerTip>
   <AIPawnControl_ParallelRequests>Parallel requests: {0}</AIPawnControl_ParallelRequests>

@@ -64,7 +64,6 @@ namespace AIPawnControl
         public static Dictionary<string, string> Sections(Pawn pawn, PawnMind mind)
         {
             Map map = pawn.Map;
-            string ideo = pawn.Ideo != null ? $" Ideo: {pawn.Ideo.name}." : "";
             // Only needs that are low: vanilla looks after the rest (STREAMLINE.md §9).
             var needs = pawn.needs?.AllNeeds
                 .Where(n => n.ShowOnNeedList && !(n is Need_Mood) && n.CurLevelPercentage < LowNeed)
@@ -73,8 +72,9 @@ namespace AIPawnControl
             return new Dictionary<string, string>
             {
                 ["Me"] = $"{pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
-                         $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.{ideo}" +
+                         $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}." +
                          (skills != null ? $" Skills: {skills}." : "") +
+                         (Customs.RoleOf(pawn) is Precept_Role role ? $" Ideoligion role: {role.def.label}." : "") +
                          (BuildManager.Instance?.RoomsPhrase(pawn) is string rooms && rooms.Length > 0 ? " " + rooms : ""),
                 ["Time"] = $"{GameTime.Now(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
                            $"I'm in: {RoomLabel(pawn)}.",
@@ -84,7 +84,7 @@ namespace AIPawnControl
                 ["Doing now"] = (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + ".", // null between jobs, e.g. as a mental break starts
                 ["My project"] = BuildManager.Instance?.ProjectLine(pawn),
                 ["People"] = People(pawn),
-                ["Others"] = Others(pawn),
+                ["Colony customs"] = Customs.Section(pawn),
                 ["Colony"] = Colony(map),
                 ["Colony stores"] = Stores(map),
                 ["Colony work"] = ColonyWork.Line(pawn),
@@ -200,62 +200,16 @@ namespace AIPawnControl
             }
         }
 
-        private const int MaxOthers = 6;
-        private const int OthersCap = 600;
-
-        /// <summary>The nouns for [Others]' role words, by skill.</summary>
-        private static readonly Dictionary<string, string> RoleWords = new Dictionary<string, string>
+        /// <summary>"crafting, shooting": her two best skills with a passion, or her best skill if she has no passion.</summary>
+        private static string BestSkills(Pawn pawn)
         {
-            ["Shooting"] = "shooter", ["Melee"] = "fighter", ["Construction"] = "builder", ["Mining"] = "miner",
-            ["Cooking"] = "cook", ["Plants"] = "grower", ["Animals"] = "animal handler", ["Crafting"] = "crafter",
-            ["Artistic"] = "artist", ["Medicine"] = "doctor", ["Social"] = "talker", ["Intellectual"] = "researcher",
-        };
-
-        /// <summary>"miner, cook": her two best skills with a passion, or her best skill if she has no passion.</summary>
-        private static string Roles(Pawn pawn)
-        {
-            var skills = pawn.skills?.skills.Where(s => !s.TotallyDisabled && RoleWords.ContainsKey(s.def.defName)).ToList();
+            var skills = pawn.skills?.skills.Where(s => !s.TotallyDisabled).ToList();
             if (skills == null || skills.Count == 0)
                 return null;
             var picked = skills.Where(s => s.passion != Passion.None).OrderByDescending(s => s.Level).Take(2).ToList();
             if (picked.Count == 0)
                 picked = skills.OrderByDescending(s => s.Level).Take(1).ToList();
-            return string.Join(", ", picked.Select(s => RoleWords[s.def.defName]));
-        }
-
-        /// <summary>
-        /// [Others] (PHASE6.md §2.3, STREAMLINE.md §4): every other colonist, closest first. Name, role words and what they're
-        /// doing; for a mind also its project and the last chore it set up. What anyone in the colony could see or be told.
-        /// </summary>
-        private static string Others(Pawn pawn)
-        {
-            Map map = pawn.Map;
-            var others = map.mapPawns.FreeColonistsSpawned.Where(p => p != pawn)
-                .OrderBy(p => p.Position.DistanceToSquared(pawn.Position)).ToList();
-            if (others.Count == 0)
-                return null;
-            var lines = new List<string>();
-            int length = 0;
-            foreach (Pawn other in others.Take(MaxOthers))
-            {
-                string roles = Roles(other);
-                var parts = new List<string> { (other.GetJobReport() ?? "idle").TrimEnd('.') };
-                var mind = MindManager.Instance?.MindOf(other);
-                if (mind != null)
-                {
-                    if (BuildManager.Instance?.ProjectLine(other) is string project)
-                        parts.Add("project: " + project.TrimEnd('.'));
-                    if (ChoreManager.Instance?.LastOf(other) is Chore chore)
-                        parts.Add($"{Ago(chore.placedTick)} {ChoreManager.Did(chore)}");
-                }
-                string line = other.LabelShort + (roles != null ? $" ({roles})" : "") + (parts.Count > 0 ? ": " + string.Join(" · ", parts) : "");
-                if (lines.Count > 0 && length + line.Length > OthersCap)
-                    break;
-                lines.Add(line);
-                length += line.Length + 3;
-            }
-            string text = string.Join(" — ", lines) + ".";
-            return others.Count > lines.Count ? $"{text} And {others.Count - lines.Count} more." : text;
+            return string.Join(", ", picked.Select(s => s.def.label));
         }
 
         /// <summary>"just now", "3 h ago", "2 days ago".</summary>
@@ -266,7 +220,11 @@ namespace AIPawnControl
                 : ticks < 2 * GenDate.TicksPerDay ? "yesterday" : $"{ticks / GenDate.TicksPerDay} days ago";
         }
 
-        /// <summary>[People] (STREAMLINE.md §4): every colonist, nearest first: how she relates to them, their mood, where they are.</summary>
+        /// <summary>
+        /// [People] (STREAMLINE.md §4, PHASE6.md §2.3): every other colonist, nearest first. How she relates to them, their
+        /// ideoligion role, mood, where they are and their best skills; then what they're doing, and for a mind its project and
+        /// the last chore it set up. What anyone in the colony could see or be told.
+        /// </summary>
         private static string People(Pawn pawn)
         {
             var others = pawn.Map.mapPawns.FreeColonistsSpawned
@@ -276,17 +234,27 @@ namespace AIPawnControl
                 .ToList();
             if (others.Count == 0)
                 return null;
-            return string.Join("; ", others.Select(p =>
+            return string.Join(" — ", others.Select(p =>
             {
-                string relation = pawn.GetMostImportantRelation(p)?.GetGenderSpecificLabel(p) ?? "colonist";
+                string relation = pawn.GetMostImportantRelation(p) is PawnRelationDef rel ? "my " + rel.GetGenderSpecificLabel(p) : "colonist";
+                string role = Customs.RoleOf(p) is Precept_Role r ? $", ideoligion role: {r.def.label}" : "";
                 int opinion = pawn.relations?.OpinionOf(p) ?? 0;
                 string mood = p.InMentalState ? $"in a mental break: {p.MentalStateDef.label}" // MoodString would just say "mental state"
                     : p.needs?.mood != null ? p.needs.mood.MoodString : "";
                 int dist = (int)p.Position.DistanceTo(pawn.Position);
                 string asleep = p.Awake() ? "" : ", asleep";
                 string where = dist <= NearbyTiles ? "nearby" : RoomLabel(p) == "outside" ? $"outside, {dist} tiles away" : $"in the {RoomLabel(p)}";
-                return $"{p.LabelShort} ({p.gender.GetLabel()}, {relation}, opinion {opinion:+0;-0;0}, {mood}{asleep}, {where})";
-            }));
+                string skills = BestSkills(p) is string best ? $"; best skills: {best}" : "";
+                var doing = new List<string> { (p.GetJobReport() ?? "idle").TrimEnd('.') };
+                if (MindManager.Instance?.MindOf(p) != null)
+                {
+                    if (BuildManager.Instance?.ProjectLine(p) is string project)
+                        doing.Add("project: " + project.TrimEnd('.'));
+                    if (ChoreManager.Instance?.LastOf(p) is Chore chore)
+                        doing.Add($"{Ago(chore.placedTick)} {ChoreManager.Did(chore)}");
+                }
+                return $"{p.LabelShort} ({p.gender.GetLabel()}, {relation}{role}, opinion {opinion:+0;-0;0}, {mood}{asleep}, {where}{skills}): {string.Join(" · ", doing)}";
+            })) + ".";
         }
 
         /// <summary>What [People] calls "nearby"; only people this close can be talked to.</summary>

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using HarmonyLib;
 using LudeonTK;
 using RimWorld;
 using Verse;
@@ -306,6 +307,118 @@ namespace AIPawnControl
                 else if (!ColonyChoices.Instance.Decide(mind, choice))
                     Reject("Nothing to pick: fewer than 2 options.");
             }))).ToList();
+
+        // ---------- Customs and gatherings (IDEOLOGY.md) ----------
+
+        /// <summary>
+        /// For every free colonist: [Colony customs], each of her ideoligion's rituals with its plan or why not, and the gathering
+        /// and role lines her Act menu would get. Then the reform choice. Written to customs.txt. No LLM.
+        /// </summary>
+        [DebugAction(Category, "Customs: report", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void CustomsReport() => WriteFile("customs.txt", CustomsText(Find.CurrentMap));
+
+        internal static string CustomsText(Map map)
+        {
+            var sb = new StringBuilder($"Customs, {DateTime.Now:yyyy-MM-dd HH:mm:ss}. Active: {Customs.Active}.");
+            if (Customs.Active)
+            {
+                var ideo = Customs.Primary;
+                sb.Append($" Ideoligion: {ideo.name}, fluid: {ideo.Fluid}" + (ideo.development != null ? $", points {ideo.development.Points}/{ideo.development.NextReformationDevelopmentPoints}, reforms {ideo.development.reformCount}" : "") + ".");
+            }
+            sb.AppendLine($" Days since the last gathering: {(Find.TickManager.TicksGame - Traverse.Create(map.lordsStarter).Field("lastLordStartTick").GetValue<int>()) / (float)GenDate.TicksPerDay:0.0}.");
+            if (Customs.Active)
+                sb.AppendLine("Customs: " + string.Join("; ", Customs.Primary.PreceptsListForReading.Where(p => p.GetType() == typeof(Precept)).Select(Customs.Label)));
+            if (Burials.Instance != null)
+                sb.AppendLine(Burials.Instance.Describe(map));
+            Pawn first = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            foreach (var def in DefDatabase<GatheringDef>.AllDefsListForReading.Where(d => d.IsRandomSelectable))
+                sb.AppendLine($"Gathering {def.defName}: conditions {GatheringsUtility.AcceptableGameConditionsToStartGathering(map, def)}, " +
+                              $"enough guests {GatheringsUtility.EnoughPotentialGuestsToStartGathering(map, def)}, organizer {(first != null && def.Worker.CanExecute(map, first))}, hour {GenLocalDate.HourInteger(map)}.");
+            foreach (var pawn in map.mapPawns.FreeColonistsSpawned.ToList())
+            {
+                sb.AppendLine($"\n== {pawn.LabelShort} (role: {pawn.Ideo?.GetRole(pawn)?.LabelCap ?? "none"})");
+                sb.AppendLine(Customs.Section(pawn) ?? "(no [Colony customs])");
+                if (Customs.Active)
+                    foreach (var (ritual, obligation, plan, why) in Gatherings.RitualCandidates(pawn))
+                        sb.AppendLine($"  ritual {Customs.ObligationLabel(ritual, obligation)}: " +
+                                      (why ?? $"ready at {plan.Place}, {plan.Roles}quality {plan.quality.ToStringPercent()}, {plan.Hours} h"));
+                foreach (var line in Gatherings.Lines(pawn))
+                    sb.AppendLine($"  LINE [{line.key}] {line.label}");
+            }
+            foreach (var choice in ColonyChoices.All().Where(c => c.reform))
+            {
+                Pawn by = ColonyChoices.Decider(MindManager.Instance?.Minds ?? new List<PawnMind>(), choice)?.pawn ?? map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+                sb.AppendLine($"\n== {choice.key} (decider: {by?.LabelShort})\n{choice.Describe(by)}");
+                foreach (var option in choice.Options(by))
+                    sb.AppendLine($"  [{option.id}] {option.label}");
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>Makes the colony's ideoligion fluid (as if chosen at game start), so it can reform.</summary>
+        [DebugAction(Category, "Customs: make ideoligion fluid", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void CustomsFluid()
+        {
+            if (!Customs.Active)
+            {
+                Reject("No ideoligion (Ideology off or classic mode).");
+                return;
+            }
+            Customs.Primary.Fluid = true;
+            Report($"{Customs.Primary.name} is fluid now.");
+        }
+
+        /// <summary>Adds development points until the colony's ideoligion can reform.</summary>
+        [DebugAction(Category, "Customs: points to reform", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void CustomsPoints()
+        {
+            var dev = Customs.Active ? Customs.Primary.development : null;
+            if (dev == null)
+            {
+                Reject("The ideoligion isn't fluid.");
+                return;
+            }
+            dev.TryAddDevelopmentPoints(dev.NextReformationDevelopmentPoints - dev.Points);
+            Report($"Points: {dev.Points}/{dev.NextReformationDevelopmentPoints}.");
+        }
+
+        /// <summary>Answers the open reform choice with its first change, as the decider would. No LLM.</summary>
+        [DebugAction(Category, "Customs: reform (first change)", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void CustomsReformFirst()
+        {
+            var choice = ColonyChoices.All().FirstOrDefault(c => c.reform);
+            Pawn by = Find.CurrentMap.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            var option = choice?.Options(by).FirstOrDefault();
+            if (option == null)
+            {
+                Reject("No reform choice is open.");
+                return;
+            }
+            string result = ColonyChoices.Instance.Answer(choice, option.id, by);
+            Report(result ?? "Not possible any more.");
+        }
+
+        /// <summary>Kills the selected colonist, for a burial and funeral test. Their body stays where they fell.</summary>
+        [DebugAction(Category, "Burials: kill selected colonist", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void BurialsKill()
+        {
+            if (SelectedColonist() is Pawn pawn)
+                pawn.Kill(null);
+        }
+
+        /// <summary>Starts one of the selected colonist's gathering or role lines, as if her Act picked it. No LLM.</summary>
+        [DebugAction(Category, "Gatherings: start...", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static List<DebugActionNode> GatheringsStart()
+        {
+            if (!(Find.Selector.SingleSelectedThing is Pawn pawn) || !pawn.IsColonist)
+                return new List<DebugActionNode> { new DebugActionNode("(select a colonist first)", DebugActionType.Action, () => { }) };
+            return Gatherings.Lines(pawn).Select(line => new DebugActionNode(line.label, DebugActionType.Action, () =>
+            {
+                string result = MindActions.Safely(pawn, line.label, () => line.apply(pawn, "DEV: everyone, come along."));
+                ModLog.Message($"DEV gathering for {pawn.LabelShort}: {line.key} | {result}; windows open: {string.Join(", ", Find.WindowStack.Windows.Select(w => w.GetType().Name))}");
+                Report(result);
+            })).ToList();
+        }
 
         /// <summary>A kind laid out for the selected colonist as the Base call would (site A, code's size, the best wall material), with its missing materials marked. No LLM.</summary>
         [DebugAction(Category, "Build room now", allowedGameStates = AllowedGameStates.PlayingOnMap)]

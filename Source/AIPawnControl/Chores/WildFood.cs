@@ -46,7 +46,7 @@ namespace AIPawnControl
             ThingDef product = p.def.plant.harvestedThingDef;
             if (product == null || !product.IsNutritionGivingIngestible || !product.ingestible.HumanEdible || product.ingestible.preferability <= FoodPreferability.DesperateOnly)
                 return "not food";
-            if (!p.HarvestableNow || p.YieldNow() <= 0) return "not ripe"; // food is ripe or not (the user); the yield rule is for trees
+            if (!ChoreOptions.Ripe(p) || p.YieldNow() <= 0) return "not ripe"; // fully grown or not (the user); the yield rule is for trees
             if (p.Fogged()) return "not seen";
             if (map.zoneManager.ZoneAt(p.Position) is Zone_Growing) return "in a field";
             if (map.designationManager.DesignationOn(p) != null) return "already marked";

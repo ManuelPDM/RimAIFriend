@@ -209,7 +209,7 @@ namespace AIPawnControl
             }
             var wall = entries[0];
             if (Pending(wall) == null && !Built(wall))
-                GenConstruct.PlaceBlueprintForBuild(wall.def, wall.cell, map, wall.rot, Faction.OfPlayer, wall.stuff);
+                BuildManager.Place(wall.def, wall.cell, map, wall.rot, wall.stuff);
             closeDoor = IntVec3.Invalid;
             return true;
         }
@@ -424,6 +424,23 @@ namespace AIPawnControl
         private BuildProject Finished(Room room) => projects.Find(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == room.Map && p.Room == room);
 
         /// <summary>
+        /// Places one thing as vanilla's build button does (Designator_Build.cs:474): a thing with no work to build (a ritual
+        /// spot, a party spot) is spawned at once, since a frame for it can only fail (the success roll divides by its work);
+        /// everything else gets a blueprint.
+        /// </summary>
+        public static void Place(ThingDef def, IntVec3 cell, Map map, Rot4 rot, ThingDef stuff, Precept_ThingStyle style = null)
+        {
+            if (def.GetStatValueAbstract(StatDefOf.WorkToBuild, stuff) == 0f)
+            {
+                Thing thing = ThingMaker.MakeThing(def, stuff);
+                thing.SetFactionDirect(Faction.OfPlayer);
+                GenSpawn.Spawn(thing, cell, map, rot);
+                return;
+            }
+            GenConstruct.PlaceBlueprintForBuild(def, cell, map, rot, Faction.OfPlayer, stuff, style);
+        }
+
+        /// <summary>
         /// A room's name: vanilla's label, except a finished room of ours whose kind vanilla has no role for (a great hall,
         /// which vanilla calls a rec room or a dining room by what's in it) keeps our kind's name. Only that room: any other
         /// room, and a room built for a vanilla role, is named by vanilla.
@@ -526,7 +543,7 @@ namespace AIPawnControl
             }
             plan.ApplyMaterial(material);
             foreach (var e in plan.entries)
-                GenConstruct.PlaceBlueprintForBuild(e.def, e.cell, plan.map, e.rot, Faction.OfPlayer, e.stuff, e.precept);
+                Place(e.def, e.cell, plan.map, e.rot, e.stuff, e.precept);
             var project = new BuildProject
             {
                 pawn = pawn,
@@ -558,7 +575,7 @@ namespace AIPawnControl
                 plan.map.designationManager.AddDesignation(new Designation(close, DesignationDefOf.Deconstruct));
             else
                 foreach (var e in plan.entries)
-                    GenConstruct.PlaceBlueprintForBuild(e.def, e.cell, plan.map, e.rot, Faction.OfPlayer, e.stuff);
+                    Place(e.def, e.cell, plan.map, e.rot, e.stuff);
             var project = new BuildProject
             {
                 pawn = pawn, map = plan.map, kindDef = plan.kind, footprint = plan.footprint, entries = plan.entries, material = material,

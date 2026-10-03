@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
@@ -48,28 +49,39 @@ namespace AIPawnControl
             return items.Count > max ? string.Join(" · ", items.Take(max)) + $" · {items.Count - max} more" : string.Join(" · ", items);
         }
 
-        /// <summary>"rice plant (36 cells, 30/36 sown, 60% grown)", or "(20 cells, not sown yet)".</summary>
+        /// <summary>Plants grow only between 25% and 80% of the day (Plant.Resting).</summary>
+        private const float GrowingPartOfDay = 0.8f - 0.25f;
+
+        /// <summary>"rice plant (36 cells, 30/36 sown, ready to harvest in 4.2 days)", or "(20 cells, not sown yet)".</summary>
         public static string Field(Zone_Growing zone, Map map)
         {
             ThingDef plant = zone.GetPlantDefToGrow();
             if (plant == null)
                 return $"field ({zone.cells.Count} cells, nothing chosen)";
-            zone.ContentsStatistics(out int total, out _, out _, out float growth, out _);
+            zone.ContentsStatistics(out int total, out _, out _, out _, out _);
             bool season = zone.cells.Count > 0 && PlantUtility.GrowthSeasonNow(zone.cells[0], map, plant);
-            int ripe = 0;
+            int ripe = 0, soonest = int.MaxValue;
             foreach (var c in zone.cells)
-                if (c.GetPlant(map) is Plant p && p.def == plant && p.HarvestableNow)
+            {
+                if (!(c.GetPlant(map) is Plant p) || p.def != plant)
+                    continue;
+                if (ChoreOptions.Ripe(p))
                     ripe++;
+                else if (p.LifeStage == PlantLifeStage.Growing && p.GrowthRate > 0f)
+                    soonest = Math.Min(soonest, (int)((1f - p.Growth) * plant.plant.growDays * GenDate.TicksPerDay / p.GrowthRate / GrowingPartOfDay));
+            }
             var words = new List<string> { $"{zone.cells.Count} cells" };
             if (total == 0)
                 words.Add(season ? "not sown yet" : "not sown, too cold or hot to grow now");
             else
             {
-                words.Add($"{total}/{zone.cells.Count} sown, {growth.ToStringPercent()} grown");
+                words.Add($"{total}/{zone.cells.Count} sown");
                 if (ripe > 0)
                     words.Add($"{ripe} ready to harvest");
                 if (!season)
                     words.Add("not growing now (temperature)");
+                else if (soonest != int.MaxValue)
+                    words.Add($"{(ripe > 0 ? "more" : "ready to harvest")} in {soonest.ToStringTicksToPeriod()}");
             }
             return $"{plant.label} ({string.Join(", ", words)})";
         }

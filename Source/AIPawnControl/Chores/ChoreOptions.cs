@@ -95,6 +95,9 @@ namespace AIPawnControl
         public static string NoneLeft(IEnumerable<string> reasons, string otherwise) =>
             reasons.Contains("already marked") ? "Someone already marked the rest." : otherwise;
 
+        /// <summary>Food plants are harvested only fully grown, like vanilla growers do (WorkGiver_GrowerHarvest).</summary>
+        public static bool Ripe(Plant p) => p.HarvestableNow && p.LifeStage == PlantLifeStage.Mature;
+
         /// <summary>The share of its full yield a tree must give before anyone marks it for wood.</summary>
         public const float MinYieldShare = 0.75f;
 
