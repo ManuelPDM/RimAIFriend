@@ -23,6 +23,7 @@ namespace AIPawnControl
             public int minArea;
             public List<string> floorTags; // a floor with one of these tags on every cell (a throne room "all floored")
             public Precept_Building precept; // the ideo building's precept, so it's built in the ideoligion's style
+            public ThingDef art;             // the ideo building is art (a styled sculpture): ordered at its bench once the room is built (Art)
             public List<string> alsoWants = new List<string>(); // requirements code doesn't build (impressiveness)
 
             /// <summary>Makes the kind hold this ask's items (the kinds asked for take their contents from here).</summary>
@@ -44,6 +45,7 @@ namespace AIPawnControl
             {
                 var missing = ask.items.Where(i => !i.optional && i.Resolve(map) == null).Select(i => i.need ?? string.Join("/", i.defs.Where(d => d != null).Select(d => d.defName))).ToList();
                 string why = ask.kind == null ? "no room kind (DLC off?)" : active.Contains(ask.kind) ? "one is being built"
+                    : ask.art != null && Art.Bench(map, ask.art) == null ? "nobody can make it now (its bench and someone who can do art)"
                     : missing.Count > 0 ? "can't build now (research, power, or costs not in storage): " + string.Join(", ", missing) : null;
                 if (why == null)
                     asks.Add(ask);
@@ -71,10 +73,15 @@ namespace AIPawnControl
                     {
                         var demand = precept.presenceDemand;
                         if (demand == null || !demand.AppliesTo(map) || demand.BuildingPresent(map) || precept.ThingDef == null
-                            || !colonists.Any(p => !p.IsSlave && p.Ideo == ideo))
+                            || !colonists.Any(p => !p.IsSlave && p.Ideo == ideo) || Art.Ordered(map, precept: precept))
                             continue;
-                        Add(FromRequirements(Kind("ideoBuilding"), $"{ideo.name} asks for {Find.ActiveLanguageWorker.WithIndefiniteArticle(precept.LabelCap.ToString())}",
-                            null, demand.roomRequirements, new RoomItem { defs = { precept.ThingDef }, backToWall = true }, precept));
+                        // Art (a styled sculpture) is made at its bench, not built: the room gets what it requires, then the piece is ordered for it.
+                        bool art = Art.IsArt(precept.ThingDef);
+                        var ask = FromRequirements(Kind("ideoBuilding"), $"{ideo.name} asks for {Find.ActiveLanguageWorker.WithIndefiniteArticle(precept.LabelCap.ToString())}",
+                            null, demand.roomRequirements, art ? null : new RoomItem { defs = { precept.ThingDef }, backToWall = true }, precept);
+                        if (art)
+                            ask.art = precept.ThingDef;
+                        Add(ask);
                     }
 
             // Babies with no crib (vanilla's "need baby cribs"): a nursery, cribs for every baby, 2 at least (its role needs 2).

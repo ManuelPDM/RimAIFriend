@@ -494,8 +494,7 @@ namespace AIPawnControl
         public static void FinishInstantly(BuildProject project)
         {
             Map map = project.map;
-            if (project.closeDoor.IsValid)
-                project.closeDoor.GetEdifice(map)?.Destroy(DestroyMode.Vanish);
+            project.ToRemove?.Destroy(DestroyMode.Vanish);
             if (!project.roomCell.IsValid)
                 foreach (var c in project.footprint.ContractedBy(1))
                     foreach (var t in c.GetThingList(map).ToList())
@@ -512,13 +511,23 @@ namespace AIPawnControl
                         }
             foreach (var e in project.entries)
             {
+                Thing installing = null; // a made piece with an install blueprint goes in as itself (its quality, its ideoligion's style)
                 foreach (var c in e.Rect)
                     foreach (var t in c.GetThingList(map).ToList())
                         if (t is Blueprint || t is Frame)
-                            t.Destroy(DestroyMode.Vanish);
+                        {
+                            if (t is Blueprint_Install install && install.MiniToInstallOrBuildingToReinstall is MinifiedThing piece && piece.InnerThing is Thing inner)
+                            {
+                                piece.GetDirectlyHeldThings().Remove(inner);
+                                piece.Destroy(DestroyMode.Vanish);
+                                installing = inner;
+                            }
+                            if (!t.Destroyed)
+                                t.Destroy(DestroyMode.Vanish);
+                        }
                 if (project.Built(e))
                     continue;
-                Thing thing = ThingMaker.MakeThing(e.def, e.stuff);
+                Thing thing = installing ?? ThingMaker.MakeThing(e.def, e.stuff);
                 thing.SetFactionDirect(Faction.OfPlayer);
                 if (e.precept != null)
                     thing.StyleSourcePrecept = e.precept;
@@ -649,6 +658,183 @@ namespace AIPawnControl
             return result;
         }
 
+        /// <summary>
+        /// A whole village through the Base call's own menu, as if the first colonist's mind took every line: the next rung,
+        /// then other rooms and what the game asks for, then layout lines and warmth or cooling, then upgrades, each finished at once. A
+        /// line that places nothing isn't picked again. Every pick, its result and the rooms at the end go to village.txt.
+        /// </summary>
+        [DebugAction(Category, "Grow full village", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static List<DebugActionNode> GrowVillageAction() => new List<DebugActionNode>
+        {
+            new DebugActionNode("25 picks", DebugActionType.Action, () => ModLog.Message(GrowVillage(Find.CurrentMap, 25))),
+            new DebugActionNode("until done", DebugActionType.Action, () => ModLog.Message(GrowVillage(Find.CurrentMap, 400))),
+            // One pick left for the colonists to build, a swap or art first when one is offered: checks the slow parts for real.
+            new DebugActionNode("1 pick, built by the colonists", DebugActionType.Action, () => ModLog.Message(GrowVillage(Find.CurrentMap, 1, instant: false))),
+            new DebugActionNode("forget failed picks", DebugActionType.Action, () => VillageFailed.Clear()),
+        };
+
+        private static readonly HashSet<string> VillageFailed = new HashSet<string>();
+
+        public static string GrowVillage(Map map, int picks, bool instant = true)
+        {
+            Pawn pawn = map.mapPawns.FreeColonistsSpawned.FirstOrDefault();
+            if (pawn == null)
+                return "No colonist.";
+            var mind = MindOrStandIn(pawn);
+            var sb = new StringBuilder($"Grow full village, {DateTime.Now:yyyy-MM-dd HH:mm:ss}, for {pawn.LabelShort}\n");
+            int done = 0, problems = 0, upgradeTurn = 0;
+            List<Room> Sealed() => map.regionGrid.AllRooms.Where(r => !r.TouchesMapEdge && r.OpenRoofCount > 0 && !r.IsDoorway).ToList();
+            var sealedCells = new HashSet<IntVec3>(Sealed().SelectMany(r => r.Cells));
+            string Key(BaseCall.Choice c) => c.kind != null ? "room " + c.kind.defName + "|" + c.ask?.why : c.upgrade != null ? "upgrade " + c.upgrade.ID : c.label;
+            int Rank(BaseCall.Choice c) => c.kind != null && c.group == "Next for the base" ? 0 : c.kind != null ? 1 : c.layout != null || c.temperature != null ? 2 : 3;
+            for (int step = 1; step <= picks; step++)
+            {
+                var call = BaseCall.Prepare(mind, dev: true);
+                var choice = call.choices.Where(c => (c.kind != null || c.layout != null || c.upgrade != null || c.temperature != null) && !VillageFailed.Contains(Key(c)))
+                    .OrderBy(Rank).FirstOrDefault();
+                if (choice == null)
+                {
+                    sb.AppendLine($"Nothing left to pick. Menu: {string.Join(" | ", call.Labels)}");
+                    break;
+                }
+                var before = new HashSet<BuildProject>(BuildManager.Instance.ProjectsOf(pawn));
+                string result;
+                Upgrades.Upgrade upgrade = null;
+                ThingDef stuff = call.materials.FirstOrDefault();
+                try
+                {
+                    if (choice.kind != null)
+                        result = BaseCall.PlaceRoom(pawn, choice.kind, choice.size, call.sites[0], stuff, out _, choice.ask);
+                    else if (choice.layout != null)
+                        result = choice.layout(pawn, stuff);
+                    else if (choice.temperature != null)
+                        result = choice.temperature(pawn);
+                    else
+                    {
+                        // Each kind of gain in turn, so looks, comfort and temperature all get built.
+                        var options = Upgrades.For(choice.upgrade, pawn).Where(u => !VillageFailed.Contains("upgrade " + choice.upgrade.ID + " " + u.label)).ToList();
+                        upgrade = options.Count == 0 ? null
+                            : instant ? options[upgradeTurn++ % options.Count]
+                            : options.OrderBy(o => o.gain == Upgrades.Gain.Better ? 0 : o.art ? 1 : 2).First();
+                        result = upgrade == null ? "no upgrade left to try" : Upgrades.Place(pawn, choice.upgrade, upgrade);
+                    }
+                }
+                catch (Exception e)
+                {
+                    result = "EXCEPTION " + e;
+                }
+                var project = BuildManager.Instance.ProjectsOf(pawn).LastOrDefault(p => p.Active && !before.Contains(p));
+                if (!instant)
+                {
+                    sb.AppendLine($"{step}. [{choice.group}] {choice.label}");
+                    sb.AppendLine("   " + result);
+                    sb.AppendLine("   left for the colonists: " + (project?.StatusLine() ?? "an order (art)"));
+                    continue;
+                }
+                if (project == null && upgrade?.art == true && MakeOrderedArt(map) > 0)
+                    project = BuildManager.Instance.ProjectsOf(pawn).LastOrDefault(p => p.Active && !before.Contains(p));
+                sb.AppendLine($"{step}. [{choice.group}] {choice.label}");
+                sb.AppendLine("   " + result);
+                if (project == null)
+                {
+                    VillageFailed.Add(upgrade != null ? "upgrade " + choice.upgrade.ID + " " + upgrade.label : Key(choice));
+                    if (upgrade == null && choice.upgrade != null)
+                        VillageFailed.Add(Key(choice));
+                    sb.AppendLine("   PROBLEM: placed nothing");
+                    problems++;
+                    continue;
+                }
+                FinishInstantly(project);
+                // Vanilla refuels what it built (torches, stoves, braziers) and sows its pots: done at once here.
+                foreach (var e in project.entries)
+                {
+                    Thing built = e.cell.GetFirstThing(map, e.def);
+                    built?.TryGetComp<CompRefuelable>()?.Refuel(1000f);
+                    if (built is Building_PlantGrower grower && grower.GetPlantDefToGrow() is ThingDef sown && !(e.cell.GetPlant(map) is Plant))
+                    {
+                        var plant = (Plant)ThingMaker.MakeThing(sown);
+                        plant.Growth = 1f;
+                        GenSpawn.Spawn(plant, e.cell, map);
+                    }
+                }
+                // Vanilla's once a frame or tick, and every pick here runs in one frame: power nets join and run, lights go on.
+                map.powerNetManager.UpdatePowerNetsAndConnections_First();
+                foreach (var e in project.entries)
+                    if (e.cell.GetFirstThing(map, e.def)?.TryGetComp<CompPowerTrader>() is CompPowerTrader consumer && consumer.PowerNet?.HasActivePowerSource == true)
+                        consumer.PowerOn = true;
+                map.glowGrid.GlowGridUpdate_First();
+                // Heat or cooling takes hours in vanilla: the room is set comfortable, as it would end up.
+                if ((choice.temperature != null || upgrade?.gain == Upgrades.Gain.Temperature) && project.Room is Room warmed)
+                    warmed.Temperature = (pawn.GetStatValue(StatDefOf.ComfyTemperatureMin) + pawn.GetStatValue(StatDefOf.ComfyTemperatureMax)) / 2f;
+                Room room = project.Room;
+                string state = $"{project.state}, room {(room == null ? "none" : $"{room.Role?.label ?? "no role"}, {room.GetStat(RoomStatDefOf.Impressiveness):0.0} impressive")}";
+                // Open ground walled off from the map edge (V9/V10's rule), new with this pick.
+                var newlySealed = Sealed().Where(r => r.Cells.Any(c => !sealedCells.Contains(c))).ToList();
+                if (newlySealed.Count > 0)
+                {
+                    state += $" | PROBLEM: open ground sealed off ({string.Join(", ", newlySealed.Select(r => $"{r.CellCount} cells at {r.Cells.First()}"))})";
+                    problems++;
+                }
+                sealedCells.UnionWith(newlySealed.SelectMany(r => r.Cells));
+                if (upgrade?.gain == Upgrades.Gain.Looks && room != null && Math.Abs(room.GetStat(RoomStatDefOf.Impressiveness) - upgrade.predicted) > 1f)
+                {
+                    state += $" | PROBLEM: predicted {upgrade.predicted:0.0}";
+                    problems++;
+                }
+                if (project.state != BuildProject.State.Done)
+                {
+                    state += " | PROBLEM: not done: " + project.StatusLine();
+                    problems++;
+                    Cancel(project);
+                }
+                else
+                    done++;
+                sb.AppendLine("   " + state);
+                // Art a finished room ordered (the ideoligion's sculpture), made and installed at once.
+                if (MakeOrderedArt(map) > 0)
+                    foreach (var installed in BuildManager.Instance.ActiveOnAll(map).Where(p => p.furnishing).ToList())
+                    {
+                        FinishInstantly(installed);
+                        sb.AppendLine($"   then installed the {installed.ItemLabel} {installed.where}: {installed.state}");
+                    }
+            }
+            sb.AppendLine("\n== Ladder");
+            foreach (var r in Ladder.Evaluate(map))
+                sb.AppendLine($"  {r.label}: {(r.met ? "met" : r.underway ? "underway" : "NOT MET")}{(r.waiting != null ? " | " + r.waiting : "")}");
+            sb.AppendLine("== Not asked for now");
+            AskedFor.Current(map);
+            foreach (var d in AskedFor.Dropped)
+                sb.AppendLine("  " + d);
+            sb.AppendLine("== Rooms");
+            foreach (var room in map.regionGrid.AllRooms.Where(r => Ground.Indoor(r) && r.ProperRoom))
+                sb.AppendLine($"  {BuildManager.Label(room)}: {room.Role?.label ?? "no role"}, {room.CellCount} cells, {room.GetStat(RoomStatDefOf.Impressiveness):0.0} impressive");
+            string summary = $"Grow full village: {done} built, {problems} problems ({VillageFailed.Count} lines given up).";
+            sb.AppendLine(summary);
+            Directory.CreateDirectory(Folder);
+            File.AppendAllText(Path.Combine(Folder, "village.txt"), sb + "\n");
+            BaseMap.Write(map);
+            return summary;
+        }
+
+        /// <summary>Every piece of art on order is made at once, at normal quality, as its bill would, and goes to its install. How many.</summary>
+        public static int MakeOrderedArt(Map map)
+        {
+            int made = 0;
+            foreach (var order in ChoreManager.Instance.Active(map).Where(c => c.art != null && c.bill != null && !c.bill.DeletedOrDereferenced).ToList())
+            {
+                ThingDef stuff = order.art.MadeFromStuff ? order.bill.ingredientFilter.AllowedThingDefs.FirstOrDefault(d => d.IsStuff) ?? GenStuff.DefaultStuffFor(order.art) : null;
+                Thing piece = ThingMaker.MakeThing(order.art, stuff);
+                piece.TryGetComp<CompQuality>()?.SetQuality(QualityCategory.Normal, ArtGenerationContext.Colony);
+                if (order.artPrecept != null)
+                    piece.StyleSourcePrecept = order.artPrecept;
+                GenPlace.TryPlaceThing(piece.MakeMinified(), order.pawn.Position, map, ThingPlaceMode.Near);
+                order.bill.repeatCount = 0;
+                order.Tick();
+                made++;
+            }
+            return made;
+        }
+
         // ---------- Chores ----------
 
         /// <summary>The most useful option of one kind for the selected colonist, ignoring cooldowns and caps. No LLM.</summary>
@@ -753,6 +939,11 @@ namespace AIPawnControl
             new DebugActionNode("take a prisoner", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "prisoner"))),
             new DebugActionNode("add a baby", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "baby"))),
             new DebugActionNode("add a deathrester", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "deathrest"))),
+            new DebugActionNode("add a child", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "child"))),
+            new DebugActionNode("add an animal", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "animal"))),
+            new DebugActionNode("chill the rooms", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "cold"))),
+            new DebugActionNode("heat the rooms", DebugActionType.Action, () => ModLog.Message(Fixtures.AddCondition(Find.CurrentMap, "hot"))),
+            new DebugActionNode("stock materials", DebugActionType.Action, () => ModLog.Message(Fixtures.StockMaterials(Find.CurrentMap))),
         };
 
         // ---------- Reports ----------

@@ -28,6 +28,7 @@ namespace AIPawnControl
         public int outdoorWalk = 20;
         public int apartGap = 2;            // a building apart keeps this many cells from anything built (BASE_GROWTH.md §6.4)
         public float goodsWalk = -0.5f;     // per tile to each room its goods flow to or from (BASE_GROWTH.md §6.2)
+        public float besideRoom = 30f;      // per room of a kind it's built beside (RoomKinds.xml beside) it shares a wall with; twice for one it gets a door into, where the door fits
         public float wallTemp = -0.3f;      // per shared wall cell per 10°C between the temperatures the two rooms hold        // most tiles from any room's door to the outdoors once doors come inside
 
         public static string FilePath => Path.Combine(AIPawnControlMod.RootDir, "Tuning", "building.txt");

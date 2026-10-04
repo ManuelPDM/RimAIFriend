@@ -59,6 +59,9 @@ namespace AIPawnControl
         private float kindTemp = float.NaN;
         private bool anyHeldTemp;
         private readonly Dictionary<Room, float> heldTemp = new Dictionary<Room, float>();
+        // Rooms of the kinds it's built beside (RoomKindDef.beside), and whether it gets a door into each.
+        private RoomKindDef besideKind;
+        private readonly List<(Room room, bool door)> besides = new List<(Room, bool)>();
 
         public SiteFinder(Map map, IntVec3 center)
         {
@@ -199,16 +202,23 @@ namespace AIPawnControl
 
         /// <summary>
         /// Scores sites for this kind from now on (BASE_GROWTH.md §6.2): the walk to every room its goods flow to or from (a
-        /// kitchen: the storeroom's raw food, the dining room's meals), and walls shared with rooms held at another
-        /// temperature. Null: no kind, only the general terms.
+        /// kitchen: the storeroom's raw food, the dining room's meals), walls shared with rooms held at another
+        /// temperature, and walls shared with the rooms it's built beside (RoomKindDef.beside). Null: no kind, only the general terms.
         /// </summary>
         public void For(RoomKindDef kind)
         {
             goodsLinks.Clear();
             kindTemp = float.NaN;
             anyHeldTemp = false;
+            besides.Clear();
+            besideKind = kind;
             if (kind == null)
                 return;
+            var besideKinds = DefDatabase<RoomKindDef>.AllDefsListForReading.Where(kind.Beside).ToList();
+            if (besideKinds.Count > 0)
+                foreach (var room in map.regionGrid.AllRooms.Where(Layout.OfBase))
+                    if (besideKinds.FirstOrDefault(k => k.Is(room)) is RoomKindDef other)
+                        besides.Add((room, kind.DoorTo(other)));
             var mine = Goods.OfKind(kind, map);
             if (!mine.Empty)
                 foreach (var room in map.regionGrid.AllRooms.Where(Layout.OfBase))
@@ -366,6 +376,7 @@ namespace AIPawnControl
             public int waysOutSaved;
             public bool joined; // it shares a wall with the base (BASE_GROWTH.md §6.4)
             public bool apart;  // a building of its own: nothing built within apartGap of its walls
+            public int beside;  // rooms it's built beside (For) it shares a wall with; one it gets a door into counts twice where the door fits
             public int Width => rect.Width - 2;
             public int Height => rect.Height - 2;
         }
@@ -416,8 +427,50 @@ namespace AIPawnControl
             return new Candidate
             {
                 rect = rect, door = door, side = side, score = Score(rect, door, side, null),
-                joined = reusableSums.Sum(rect) > 0, apart = built.Sum(around) == 0,
+                joined = reusableSums.Sum(rect) > 0, apart = built.Sum(around) == 0, beside = BesideCount(rect, door),
             };
+        }
+
+        /// <summary>The cell beyond a footprint's wall cell, in whatever stands against that side.</summary>
+        private static IntVec3 Beyond(CellRect rect, IntVec3 c) => c + SideOf(rect, c).FacingCell;
+
+        /// <summary>
+        /// How many rooms it's built beside (For) the footprint shares a wall with. One it gets a door into counts twice where
+        /// that door fits: a storeroom with a door into the kitchen beats one against only the great hall.
+        /// </summary>
+        private int BesideCount(CellRect rect, IntVec3 door)
+        {
+            int n = 0;
+            foreach (var (room, withDoor) in besides)
+                if (withDoor && DoorSpots(rect, door, room).Count > 0)
+                    n += 2;
+                else if (rect.EdgeCells.Any(c => !IsCorner(rect, c) && reusable[c.z * w + c.x] && room.ContainsCell(Beyond(rect, c))))
+                    n++;
+            return n;
+        }
+
+        /// <summary>Where a door through a shared wall into the room fits: a real wall cell off the room's own door with a free cell on the other side.</summary>
+        private List<IntVec3> DoorSpots(CellRect rect, IntVec3 door, Room room) =>
+            rect.EdgeCells.Where(c => !IsCorner(rect, c) && c != door && !c.AdjacentToCardinal(door) && realWall[c.z * w + c.x]
+                && room.ContainsCell(Beyond(rect, c)) && Beyond(rect, c).Walkable(map) && !interactionSpots.Contains(Beyond(rect, c))
+                && Beyond(rect, c).GetThingList(map).All(t => t.def.category != ThingCategory.Building && !(t is Blueprint) && !(t is Frame))).ToList();
+
+        /// <summary>A door through a shared wall into a room it gets a door into (RoomKindDef.doorTo), the middle of its spots, or Invalid.</summary>
+        private IntVec3 BesideDoor(CellRect rect, IntVec3 door, RoomKindDef kind)
+        {
+            if (kind != besideKind)
+                return IntVec3.Invalid;
+            foreach (var (room, withDoor) in besides)
+            {
+                if (!withDoor)
+                    continue;
+                var spots = DoorSpots(rect, door, room);
+                if (spots.Count == 0)
+                    continue;
+                float x = (float)spots.Average(c => c.x), z = (float)spots.Average(c => c.z);
+                return spots.OrderBy(c => (c.x - x) * (c.x - x) + (c.z - z) * (c.z - z)).First();
+            }
+            return IntVec3.Invalid;
         }
 
         /// <summary>
@@ -517,7 +570,7 @@ namespace AIPawnControl
                 }
 
             float score = weights.walk * walkTiles
-                          + weights.goodsWalk * goods + weights.wallTemp * tempGap
+                          + weights.goodsWalk * goods + weights.wallTemp * tempGap + weights.besideRoom * BesideCount(rect, door)
                           + weights.sharedWallCell * reused + weights.sharedSide * sharedSides
                           + weights.alignedSide * aligned
                           + weights.sliverCell * slivers
@@ -581,8 +634,9 @@ namespace AIPawnControl
         {
             if (!kind.Fits(c.Width, c.Height))
                 return null;
-            var plan = NewPlan(c, kind);
-            var furniture = c.broughtIn.Count > 0 ? Furnish(c, kind) : Template(plan, c);
+            IntVec3 besideDoor = BesideDoor(c.rect, c.door, kind);
+            var plan = NewPlan(c, kind, besideDoor);
+            var furniture = c.broughtIn.Count > 0 || besideDoor.IsValid ? Furnish(c, kind, besideDoor) : Template(plan, c);
             if (furniture == null)
                 return null;
             IntVec3 origin = new IntVec3(c.rect.minX, 0, c.rect.minZ);
@@ -596,7 +650,7 @@ namespace AIPawnControl
                 plan.entries.Add(moved);
             }
             foreach (var cell in c.rect.EdgeCells)
-                if (cell == c.door)
+                if (cell == c.door || cell == besideDoor)
                     plan.entries.Add(new PlanEntry(ThingDefOf.Door, cell, Rot4.North));
                 else if (!plan.reusedWalls.Contains(cell) && !plan.broughtIn.Contains(cell))
                     plan.entries.Add(new PlanEntry(ThingDefOf.Wall, cell, Rot4.North));
@@ -646,7 +700,8 @@ namespace AIPawnControl
 
         private bool wallItemsWanted = true;
 
-        private RoomPlan NewPlan(Candidate c, RoomKindDef kind)
+        /// <param name="besideDoor">A second door, through a shared wall (BesideDoor), or Invalid.</param>
+        private RoomPlan NewPlan(Candidate c, RoomKindDef kind, IntVec3 besideDoor)
         {
             var plan = new RoomPlan
             {
@@ -654,8 +709,10 @@ namespace AIPawnControl
                 door = c.door, doorOutside = c.door + c.side.FacingCell, doorInside = c.door - c.side.FacingCell,
             };
             plan.broughtIn.AddRange(c.broughtIn);
+            if (besideDoor.IsValid)
+                plan.broughtIn.Add(besideDoor);
             foreach (var cell in c.rect.EdgeCells)
-                if (reusable[cell.z * w + cell.x] && cell != c.door)
+                if (reusable[cell.z * w + cell.x] && cell != c.door && cell != besideDoor)
                     plan.reusedWalls.Add(cell);
             return plan;
         }
@@ -666,14 +723,14 @@ namespace AIPawnControl
             int offset = c.side.IsHorizontal ? c.door.z - c.rect.minZ : c.door.x - c.rect.minX;
             var key = (plan.kind, plan.kind.items, c.Width, c.Height, c.side.AsInt, offset);
             if (!templates.TryGetValue(key, out var cached))
-                templates[key] = cached = Furnish(c, plan.kind);
+                templates[key] = cached = Furnish(c, plan.kind, IntVec3.Invalid);
             return cached;
         }
 
         /// <summary>The kind's furniture placed in an empty copy of the plan, relative to the footprint's corner; null if it doesn't fit.</summary>
-        private List<PlanEntry> Furnish(Candidate c, RoomKindDef kind)
+        private List<PlanEntry> Furnish(Candidate c, RoomKindDef kind, IntVec3 besideDoor)
         {
-            var scratch = NewPlan(c, kind);
+            var scratch = NewPlan(c, kind, besideDoor);
             if (!RoomPlacer.Place(scratch))
                 return null;
             IntVec3 origin = new IntVec3(c.rect.minX, 0, c.rect.minZ);
@@ -735,6 +792,18 @@ namespace AIPawnControl
         }
 
         private List<RoomPlan> Styled(List<Candidate> sorted, int n, RoomValidator validator, ThingDef material)
+        {
+            // Against the most rooms it's built beside (RoomKindDef.beside) that a valid site reaches: no other site is offered.
+            foreach (int beside in sorted.Select(c => c.beside).Distinct().OrderByDescending(b => b))
+            {
+                var sites = StyledOf(beside == 0 ? sorted : sorted.Where(c => c.beside == beside).ToList(), n, validator, material);
+                if (sites.Count > 0 || beside == 0)
+                    return sites;
+            }
+            return new List<RoomPlan>();
+        }
+
+        private List<RoomPlan> StyledOf(List<Candidate> sorted, int n, RoomValidator validator, ThingDef material)
         {
             var sites = new List<RoomPlan>();
             sites.AddRange(TopSites(sorted.Where(c => c.joined), 1, RoomKindDef.Plain, validator, material));

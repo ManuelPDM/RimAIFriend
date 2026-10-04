@@ -59,6 +59,15 @@ namespace AIPawnControl
                     control.targetTemperature = project.kindDef.holdTemperature;
                     results.Add($"Set the {control.parent.def.label} to {project.kindDef.holdTemperature.ToStringTemperature("F0")}.");
                 }
+            // The art the ideoligion asks for is ordered for it, in the room's material if the piece takes it (Art).
+            if (project.art != null)
+            {
+                ThingDef stuff = !project.art.MadeFromStuff ? null
+                    : GenStuff.AllowedStuffsFor(project.art).Contains(project.material) ? project.material : GenStuff.DefaultStuffFor(project.art);
+                results.Add(Upgrades.SlotIn(room, pawn, project.art, stuff) is PlanEntry at
+                    ? Art.Order(pawn, project.art, stuff, project.artPrecept, at, $"in the {project.Kind}")
+                    : $"No free spot for the {project.artPrecept?.LabelCap.ToString() ?? project.art.label}.");
+            }
             ModLog.Message($"Outfitted {pawn.LabelShort}'s {project.Kind}: {(results.Count > 0 ? string.Join(" ", results) : "nothing to add")}");
         }
 

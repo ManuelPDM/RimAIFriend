@@ -408,7 +408,10 @@ namespace AIPawnControl
             var missing = project.Missing();
             log.Line($"barracks in {material.label}: missing {(missing.Count > 0 ? string.Join(", ", missing.Select(kv => $"{kv.Value} {kv.Key.label}")) : "nothing")}");
             log.Line("result: " + result);
-            if (missing.Count > 0)
+            // Trees an earlier room marked (Every kind builds) already cover a wood shortfall: nothing new to mark.
+            int marked = TreeCutting.MarkedWood(Map);
+            log.Line($"wood already marked: {marked}");
+            if (missing.Any(kv => kv.Key != ThingDefOf.WoodLog || kv.Value > marked))
                 log.Check(result.Contains("Marked") || result.Contains("Ordered") || result.Contains("Raised") || result.Contains("short"),
                     "materials are missing, but nothing was marked and no reason was given");
             DevTools.Cancel(project);

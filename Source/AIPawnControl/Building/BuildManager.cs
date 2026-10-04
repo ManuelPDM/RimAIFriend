@@ -33,7 +33,13 @@ namespace AIPawnControl
         public bool unclaimed;  // nobody's: the bed stays free and vanilla assigns it
         public bool outfitted;  // its bills and stockpile were added once it was done (STREAMLINE.md §7)
         public IntVec3 roomCell = IntVec3.Invalid; // a cell inside its room, for shapes with no centre (BASE_LAYOUT.md)
-        public IntVec3 closeDoor = IntVec3.Invalid; // a way out being closed: the door comes down, then the wall goes up
+        // What comes down before the entries go up: a way out being closed (the door, then the wall), a bench or light
+        // being swapped for a better one (Upgrades.BetterVersions). Its cell and def; invalid when nothing does.
+        public IntVec3 removeFirst = IntVec3.Invalid;
+        public ThingDef removeDef;
+        public ThingDef art;     // a room the ideoligion asks art for: the piece is ordered for it once it's done (Outfitting, Art)
+        public Precept_Building artPrecept;
+        public List<Bill> bills; // the swapped bench's orders, for the new one once it's built; not saved (a reload leaves the new one bare)
 
         /// <summary>Whose bed it is: hers, or the colonist she built it for.</summary>
         public Pawn Owner => occupant ?? pawn;
@@ -126,7 +132,7 @@ namespace AIPawnControl
                 TickFloor();
                 return;
             }
-            if (closeDoor.IsValid && !TickClose())
+            if (removeFirst.IsValid && !TickRemoveFirst())
                 return;
             for (int i = 0; i < entries.Count; i++)
             {
@@ -161,6 +167,9 @@ namespace AIPawnControl
                 state = State.Done;
                 ModLog.Message($"{pawn.LabelShort}'s {(furnishing ? ItemLabel + " " + where : Kind)} is done: {room.Role.label}, {room.CellCount} cells, impressiveness {room.GetStat(RoomStatDefOf.Impressiveness):0.0} ({BuildManager.Impressiveness(room)}).");
                 Messages.Message($"{pawn.LabelShort}'s new {Kind} is finished.", pawn, MessageTypeDefOf.PositiveEvent, false);
+                if (furnishing && bills != null && entries[0].cell.GetFirstThing(map, entries[0].def) is IBillGiver bench)
+                    foreach (var bill in bills.Where(b => entries[0].def.AllRecipes.Contains(b.recipe)))
+                        bench.BillStack.AddBill(bill);
                 if (furnishing)
                     Remember($"Added {where}: {ItemLabel}.", 4);
                 else
@@ -195,22 +204,25 @@ namespace AIPawnControl
             Remember($"I took over {was.LabelShort}'s unfinished {Kind} {where}.", 5);
         }
 
+        /// <summary>What comes down first, while it still stands; null once it's gone.</summary>
+        public Thing ToRemove => removeFirst.IsValid ? removeFirst.GetThingList(map).Find(t => t.def == removeDef && t.Position == removeFirst) : null;
+
         /// <summary>
-        /// Closing a way out: wait while the door is deconstructed (cancelling that calls it off), then place the wall.
-        /// True once the wall is placed, so the usual tracking takes over.
+        /// Wait while what comes down first is deconstructed (cancelling that calls it off), then place the entries not yet
+        /// placed. True once they're placed, so the usual tracking takes over.
         /// </summary>
-        private bool TickClose()
+        private bool TickRemoveFirst()
         {
-            if (closeDoor.GetEdifice(map) is Building_Door door)
+            if (ToRemove is Thing old)
             {
-                if (map.designationManager.DesignationOn(door, DesignationDefOf.Deconstruct) == null)
+                if (map.designationManager.DesignationOn(old, DesignationDefOf.Deconstruct) == null)
                     Abandon(byPlayer: true);
                 return false;
             }
-            var wall = entries[0];
-            if (Pending(wall) == null && !Built(wall))
-                BuildManager.Place(wall.def, wall.cell, map, wall.rot, wall.stuff);
-            closeDoor = IntVec3.Invalid;
+            foreach (var e in entries)
+                if (Pending(e) == null && !Built(e))
+                    BuildManager.Place(e.def, e.cell, map, e.rot, e.stuff);
+            removeFirst = IntVec3.Invalid;
             return true;
         }
 
@@ -367,7 +379,10 @@ namespace AIPawnControl
             Scribe_Values.Look(ref unclaimed, "unclaimed");
             Scribe_Values.Look(ref outfitted, "outfitted");
             Scribe_Values.Look(ref roomCell, "roomCell", IntVec3.Invalid);
-            Scribe_Values.Look(ref closeDoor, "closeDoor", IntVec3.Invalid);
+            Scribe_Values.Look(ref removeFirst, "removeFirst", IntVec3.Invalid);
+            Scribe_Defs.Look(ref removeDef, "removeDef");
+            Scribe_Defs.Look(ref art, "art");
+            Scribe_References.Look(ref artPrecept, "artPrecept");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 builtOnce = builtOnce ?? new List<int>();
@@ -420,6 +435,9 @@ namespace AIPawnControl
 
         /// <summary>Who designed a finished room, for [Rooms]' credit, or null.</summary>
         public Pawn BuilderOf(Room room) => Finished(room)?.pawn;
+
+        /// <summary>The kind of the finished project that built the room, or null.</summary>
+        public RoomKindDef KindOf(Room room) => Finished(room)?.kindDef;
 
         private BuildProject Finished(Room room) => projects.Find(p => p.state == BuildProject.State.Done && !p.furnishing && p.map == room.Map && p.Room == room);
 
@@ -542,7 +560,12 @@ namespace AIPawnControl
                 return null;
             }
             plan.ApplyMaterial(material);
-            foreach (var e in plan.entries)
+            // What draws power gets its conduit line, outside the room (RoomPlacer only planned it where one reaches).
+            var conduits = new List<PlanEntry>();
+            foreach (var e in plan.entries.Where(e => Wiring.DrawsPower(e.def)))
+                if (Wiring.Route(plan.map, e.def, e.cell, e.rot, plan.footprint.Cells.ToList()) is List<IntVec3> line)
+                    conduits.AddRange(Wiring.Entries(line));
+            foreach (var e in conduits.Concat(plan.entries))
                 Place(e.def, e.cell, plan.map, e.rot, e.stuff, e.precept);
             var project = new BuildProject
             {
@@ -550,7 +573,7 @@ namespace AIPawnControl
                 map = plan.map,
                 kindDef = plan.kind,
                 footprint = plan.footprint,
-                entries = plan.entries,
+                entries = plan.entries.Concat(conduits).ToList(),
                 material = material,
                 placedTick = Find.TickManager.TicksGame,
                 where = where,
@@ -580,7 +603,7 @@ namespace AIPawnControl
             {
                 pawn = pawn, map = plan.map, kindDef = plan.kind, footprint = plan.footprint, entries = plan.entries, material = material,
                 placedTick = Find.TickManager.TicksGame, where = where, byMind = MindManager.Instance?.MindOf(pawn) != null, roomCell = roomCell,
-                closeDoor = close?.Position ?? IntVec3.Invalid,
+                removeFirst = close?.Position ?? IntVec3.Invalid, removeDef = close?.def,
             };
             projects.Add(project);
             RecordDoors(project);

@@ -5,6 +5,8 @@
   earlier item), inWall (in the wall facing out, a cooler), repeat/min, forEveryone (one per sleeper, at least repeat), perAnchor (with nextTo: this many per copy
   of the anchor, which repeats until all fit), optional, preferNew, medical, clearAround. need (bed, seat, shelf, accessory, cooler, heater, joy) picks the
   best buildable def by what it does instead of a defs list (FURNISHING.md §4), so research and mods reach it. minSize: x = the short side, z = the long side.
+  beside: kinds it's built against where one stands, doorTo: of those, the ones it gets a door into through the shared
+  wall (either side of a pair may list it).
   stores: what its stockpile and shelves take (Root = vanilla's default stockpile), storePriority, holdTemperature (its
   coolers' setting). No kind carries a heater: a mind chooses to warm (or cool) a room once it's uncomfortable (the
   Base call's "warm the X" line, Upgrades.Temperature); the need is still there for a kind that wants one. size: the interior code builds it at (default 5x5; STREAMLINE.md §7). Order matters: it's the order the kinds are listed
@@ -43,6 +45,20 @@
       <li><defs><li>FueledStove</li></defs><backToWall>true</backToWall></li>
       <li><defs><li>TableButcher</li><li>ButcherSpot</li></defs><backToWall>true</backToWall><optional>true</optional></li>
     </items>
+    <beside><li>AIPC_Storeroom</li><li>AIPC_GreatHall</li></beside> <!-- the cook's walk: ingredients in, meals out -->
+    <doorTo><li>AIPC_Storeroom</li></doorTo>
+  </AIPawnControl.RoomKindDef>
+
+  <AIPawnControl.RoomKindDef>
+    <defName>AIPC_Storeroom</defName>
+    <label>storeroom</label>
+    <description>shelves along the walls</description>
+    <role>Storeroom</role>
+    <items>
+      <li><need>shelf</need><backToWall>true</backToWall><repeat>6</repeat></li>
+    </items>
+    <stores><li>Root</li></stores> <!-- vanilla's default "everything" stockpile on its free floor -->
+    <beside><li>AIPC_GreatHall</li></beside> <!-- meals from the shelves to the tables -->
   </AIPawnControl.RoomKindDef>
 
   <!-- BASE_GROWTH.md §11: one room where everyone eats and relaxes. No role: vanilla calls it a dining room or a rec room
@@ -109,17 +125,6 @@
     <items>
       <li><defs><li>HospitalBed</li><li>Bed</li></defs><backToWall>true</backToWall><repeat>3</repeat><medical>true</medical></li>
     </items>
-  </AIPawnControl.RoomKindDef>
-
-  <AIPawnControl.RoomKindDef>
-    <defName>AIPC_Storeroom</defName>
-    <label>storeroom</label>
-    <description>shelves along the walls</description>
-    <role>Storeroom</role>
-    <items>
-      <li><need>shelf</need><backToWall>true</backToWall><repeat>6</repeat></li>
-    </items>
-    <stores><li>Root</li></stores> <!-- vanilla's default "everything" stockpile on its free floor -->
   </AIPawnControl.RoomKindDef>
 
   <AIPawnControl.RoomKindDef>

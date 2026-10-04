@@ -49,7 +49,7 @@ namespace AIPawnControl
         public CellRect footprint;
         public IntVec3 door, doorOutside, doorInside;
         public HashSet<IntVec3> reusedWalls = new HashSet<IntVec3>();
-        public List<IntVec3> broughtIn = new List<IntVec3>(); // existing doors in its ring that now open into it (a hub), or other doors of the room (an upgrade)
+        public List<IntVec3> broughtIn = new List<IntVec3>(); // existing doors in its ring that now open into it (a hub), its door through a shared wall (RoomKindDef.doorTo), or other doors of the room (an upgrade)
         public List<PlanEntry> entries = new List<PlanEntry>();
 
         // Scoring and description inputs, filled by the site finder.
@@ -93,7 +93,11 @@ namespace AIPawnControl
         /// <summary>A wall of the finished room, new or reused: what people can't walk through once it's built.</summary>
         public bool IsWall(IntVec3 c) => footprint.IsOnEdge(c) && (reusedWalls.Contains(c) || entries.Exists(e => e.cell == c && e.def != ThingDefOf.Door));
 
-        /// <summary>The material each entry would use: the chosen one where the def allows it, else the allowed one storage has most of (leather for a couch when there's no cloth), else vanilla's default.</summary>
+        /// <summary>
+        /// The material each entry would use: the chosen one where the def allows it, else vanilla's default if storage pays
+        /// for it, else the cheapest allowed one storage pays for (leather for a couch when there's no cloth; never silver
+        /// for a stove while there's steel), else vanilla's default.
+        /// </summary>
         public static ThingDef StuffFor(ThingDef def, ThingDef material, Map map = null)
         {
             if (!def.MadeFromStuff)
@@ -101,9 +105,14 @@ namespace AIPawnControl
             var allowed = GenStuff.AllowedStuffsFor(def).ToList();
             if (allowed.Contains(material))
                 return material;
-            var stocked = map == null ? null : allowed.Where(s => map.resourceCounter.GetCount(s) >= def.costStuffCount)
-                .OrderByDescending(s => map.resourceCounter.GetCount(s)).FirstOrDefault();
-            return stocked ?? GenStuff.DefaultStuffFor(def);
+            var fallback = GenStuff.DefaultStuffFor(def);
+            if (map == null)
+                return fallback;
+            int Needed(ThingDef s) => def.CostListAdjusted(s).FirstOrDefault(c => c.thingDef == s)?.count ?? def.costStuffCount;
+            var paid = allowed.Where(s => map.resourceCounter.GetCount(s) >= Needed(s)).ToList();
+            if (paid.Contains(fallback))
+                return fallback;
+            return paid.OrderBy(s => Needed(s) * s.BaseMarketValue).FirstOrDefault() ?? fallback;
         }
 
         public void ApplyMaterial(ThingDef material)

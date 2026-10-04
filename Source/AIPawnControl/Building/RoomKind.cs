@@ -59,7 +59,7 @@ namespace AIPawnControl
                 // A hospital bed only when its steel and components are in storage for every bed; else a plain bed, set medical.
                 if (medical && !(Needs.OtherCostsInStorage(def, map, Count(map)) && Needs.StuffCanBeHad(def, map, Count(map))))
                     continue;
-                if (!preferNew || map.listerBuildings.ColonistsHaveBuilding(def) == false)
+                if (!preferNew || !Upgrades.HasBenchFor(map, def))
                     return def;
                 first = first ?? def;
             }
@@ -108,6 +108,17 @@ namespace AIPawnControl
         public StoragePriority storePriority = StoragePriority.Normal;
         /// <summary>The temperature its coolers or heaters are set to once it's done (a freezer: -10). NaN: vanilla's default.</summary>
         public float holdTemperature = float.NaN;
+        /// <summary>Kinds it's built against where one stands (the kitchen, storeroom and great hall: the cook's walk). Either side may list the pair.</summary>
+        public List<RoomKindDef> beside = new List<RoomKindDef>();
+        /// <summary>Of beside: kinds it also gets a door into, in the shared wall (the kitchen into the storeroom). Either side may list the pair.</summary>
+        public List<RoomKindDef> doorTo = new List<RoomKindDef>();
+
+        public bool Beside(RoomKindDef other) => beside.Contains(other) || other.beside.Contains(this);
+
+        public bool DoorTo(RoomKindDef other) => doorTo.Contains(other) || other.doorTo.Contains(this);
+
+        /// <summary>A built room of this kind: vanilla gives it the kind's role, or, for a kind with none (a great hall), one of our projects built it.</summary>
+        public bool Is(Room room) => role != null ? room.Role == role : BuildManager.Instance?.KindOf(room) == this;
 
         /// <summary>The filter its storage gets.</summary>
         public ThingFilter StoreFilter()
@@ -193,10 +204,11 @@ namespace AIPawnControl
                 int count = 0;
                 // Shelves tied for best (a crate, tall crate and pallet) are mixed: each copy is one of them at random.
                 var tied = item.need == Needs.Shelf && def != null ? Needs.Tied(Needs.Shelf, map, item.Count(map)) : null;
+                var unwired = new List<ThingDef>(); // games no conduit line reaches here: another kind is tried
                 if (def != null)
                     while (count < target)
                     {
-                        if (item.need == Needs.Joy && (def = item.Resolve(map, anchorDef, s.placed.Select(p => p.def))) == null)
+                        if (item.need == Needs.Joy && (def = item.Resolve(map, anchorDef, s.placed.Select(p => p.def).Concat(unwired))) == null)
                             break; // no game of another joy kind
                         if (tied != null && tied.Count > 0)
                             def = tied.RandomElement();
@@ -211,6 +223,14 @@ namespace AIPawnControl
                             : AgainstWall(def, s, rules);
                         if (entry == null)
                             break;
+                        // Something that draws power is only planned where a conduit line can reach it (Wiring), outside the room.
+                        if (Wiring.Route(map, def, entry.cell, entry.rot, plan.footprint.Cells.ToList()) == null)
+                        {
+                            if (item.need != Needs.Joy)
+                                break;
+                            unwired.Add(def);
+                            continue;
+                        }
                         if (seated && !WithSeats(entry, s, map))
                             break;
                         if (stall != null)

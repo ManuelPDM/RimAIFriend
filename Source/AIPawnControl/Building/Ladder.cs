@@ -38,9 +38,10 @@ namespace AIPawnControl
                 new Rung { label = gap == 1 ? "a bed for everyone" : "beds for everyone", kind = Kind(gap == 1 ? "AIPC_Bedroom" : "AIPC_Barracks"), met = gap <= 0,
                            counts = new List<RoomKindDef> { Kind("AIPC_Bedroom"), Kind("AIPC_Barracks") } },
                 new Rung { label = "a kitchen", kind = Kind("AIPC_Kitchen"), met = buildings.Any(b => Needs.MealSource(b.def) && Indoors(b)) },
+                // Right after the kitchen, while its walls are free: the storeroom gets a door into it (RoomKindDef.doorTo).
+                new Rung { label = "a storeroom", kind = Kind("AIPC_Storeroom"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Storeroom")) },
                 // BASE_GROWTH.md §11: the great hall, placed while the base is small so it grows around it. Any table indoors meets it.
                 new Rung { label = "a great hall", kind = Kind("AIPC_GreatHall"), met = buildings.Any(b => b.def.surfaceType == SurfaceType.Eat && Indoors(b)) },
-                new Rung { label = "a storeroom", kind = Kind("AIPC_Storeroom"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Storeroom")) },
                 new Rung { label = "a workshop", kind = Kind("AIPC_Workshop"), met = HasRole(map, DefDatabase<RoomRoleDef>.GetNamedSilentFail("Workshop")) },
                 new Rung { label = "a research bench", kind = Kind("AIPC_Laboratory"),
                            met = !CanResearch(map) || buildings.Any(b => b is Building_ResearchBench && Indoors(b)) },

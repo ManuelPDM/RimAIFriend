@@ -323,7 +323,7 @@ namespace AIPawnControl
                 return pawn.ownership?.OwnedRoom == null;
             if (BuildManager.Instance.ActiveOn(map).Any(p => p.kindDef == kind))
                 return false;
-            if (kind.items.Any(i => i.preferNew) && kind.items.Where(i => i.preferNew).All(i => i.Resolve(map) is ThingDef def && !map.listerBuildings.ColonistsHaveBuilding(def)))
+            if (kind.items.Any(i => i.preferNew) && kind.items.Where(i => i.preferNew).All(i => i.Resolve(map) is ThingDef def && !Upgrades.HasBenchFor(map, def)))
                 return true;
             return kind.role != null && !map.regionGrid.AllRooms.Any(r => r.Role == kind.role && Ground.Indoor(r));
         }
@@ -345,6 +345,8 @@ namespace AIPawnControl
             string what = furniture.Count > 0 ? $"{items}; {SiteFinder.CostText(cost, materials)}" : kind.description;
             if (ask?.floorTags != null)
                 what += "; all floored";
+            if (ask?.art != null)
+                what += $"; then the {ask.precept.LabelCap} is made at the {Art.Bench(plan.map, ask.art)?.def.label} and goes in";
             if (ask?.alsoWants.Count > 0)
                 what += "; it also wants: " + string.Join(", ", ask.alsoWants);
             string label = (name != null && name != "a " + kind.label ? $"{name}: a {kind.label}" : $"a {kind.label}") + $" ({plan.SizeLabel.Replace('×', 'x')}: {what})";
@@ -461,6 +463,8 @@ namespace AIPawnControl
             if (ask != null)
             {
                 project.occupant = ask.who; // the throne's owner, or nobody's
+                project.art = ask.art;
+                project.artPrecept = ask.art != null ? ask.precept : null;
                 if (AskedFor.LayFloor(ask, project) is TerrainDef floor)
                     ModLog.Message($"{pawn.LabelShort} laid {floor.label} in the new {kind.label}.");
             }

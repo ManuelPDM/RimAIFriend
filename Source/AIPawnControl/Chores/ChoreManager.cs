@@ -26,6 +26,12 @@ namespace AIPawnControl
         public Zone zone;
         public int done, vetoed;
         public bool harvested; // a field's first harvest was remembered
+        // A piece of art on order (Art): it's installed at artCell in that room, in artWhere's words, once the bill has made it.
+        public ThingDef art;
+        public Precept_Building artPrecept;
+        public IntVec3 artCell = IntVec3.Invalid;
+        public Rot4 artRot;
+        public string artWhere;
         private bool ripeSeen;
 
         public bool Active => state == State.Active;
@@ -79,6 +85,11 @@ namespace AIPawnControl
                         Close();
                     break;
                 case Kind.Bill:
+                    if (art != null && bill != null && !bill.DeletedOrDereferenced && bill.repeatCount == 0 && Art.TryInstall(this))
+                    {
+                        state = State.Done;
+                        return;
+                    }
                     if (bill == null || bill.DeletedOrDereferenced)
                     {
                         if (bill != null && bill.billStack?.billGiver is Thing table && table.Destroyed)
@@ -170,6 +181,11 @@ namespace AIPawnControl
             Scribe_Values.Look(ref vetoed, "vetoed");
             Scribe_Values.Look(ref harvested, "harvested");
             Scribe_Values.Look(ref ripeSeen, "ripeSeen");
+            Scribe_Defs.Look(ref art, "art");
+            Scribe_References.Look(ref artPrecept, "artPrecept");
+            Scribe_Values.Look(ref artCell, "artCell", IntVec3.Invalid);
+            Scribe_Values.Look(ref artRot, "artRot");
+            Scribe_Values.Look(ref artWhere, "artWhere");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 targets = targets ?? new List<LocalTargetInfo>();

@@ -14,7 +14,7 @@ namespace AIPawnControl
     /// </summary>
     public static class Upgrades
     {
-        public enum Gain { Looks, Comfort, Temperature }
+        public enum Gain { Looks, Comfort, Temperature, Better } // Better: a faster bench, or one with no fuel to keep it going
 
         public const int MaxOptions = 3;
 
@@ -28,8 +28,11 @@ namespace AIPawnControl
             public ThingDef def, stuff;
             public PlanEntry entry;   // an item to add, or to place over `replaces`
             public Thing replaces;
+            public bool removeFirst;  // `replaces` comes down before the new one goes up (vanilla has no in-place swap for it)
             public TerrainDef floor;
             public List<IntVec3> cells;
+            public List<IntVec3> conduits = new List<IntVec3>(); // its line to the powered grid (Wiring)
+            public bool art;          // made at a bench and installed (Art): picking it orders it
         }
 
         private static readonly HashSet<string> ItemCategories = new HashSet<string> { "Furniture", "Joy", "Temperature", "Misc", "Hygiene" }; // Hygiene: Dubs Bad Hygiene's tab (a basin, a bath mat)
@@ -74,6 +77,32 @@ namespace AIPawnControl
                 .FirstOrDefault(r => For(r, pawn, materials ??= Supplies.WallMaterials(pawn)).Count > 0);
         }
 
+        /// <summary>
+        /// How many of the room's dark cells a light at the cell would light, by vanilla's falloff (ComputeGlowGridsJob:
+        /// lerp(1 - d/radius, 1/d², 0.4) of its colour) added to the glow already there, against vanilla's lit threshold.
+        /// </summary>
+        private static int LitCells(Room room, ThingDef def, IntVec3 at, out int darkCells)
+        {
+            Map map = room.Map;
+            var glower = def.GetCompProperties<CompProperties_Glower>();
+            float colour = Mathf.Max(glower.glowColor.r, Mathf.Max(glower.glowColor.g, glower.glowColor.b)) / 255f * 3.6f; // GlowGrid.GroundGlowAt's factor
+            int lit = 0;
+            darkCells = 0;
+            foreach (var c in room.Cells)
+            {
+                if (map.glowGrid.PsychGlowAt(c) != PsychGlow.Dark)
+                    continue;
+                darkCells++;
+                float d = c.DistanceTo(at);
+                if (d > glower.glowRadius)
+                    continue;
+                float falloff = d < 1f ? 1f : Mathf.Lerp(1f - d / glower.glowRadius, 1f / (d * d), 0.4f);
+                if (GlowGrid.PsychGlowAtGlow(Mathf.Min(0.5f, map.glowGrid.GroundGlowAt(c) + colour * falloff)) != PsychGlow.Dark)
+                    lit++;
+            }
+            return lit;
+        }
+
         /// <summary>Vanilla's darkness: most of the room is dark to the eye (the "in darkness" mood).</summary>
         private static bool Dark(Room room) => room.Cells.Count(c => room.Map.glowGrid.PsychGlowAt(c) == PsychGlow.Dark) * 2 > room.CellCount;
 
@@ -91,6 +120,8 @@ namespace AIPawnControl
             var ctx = new Context(room, pawn, materials ?? Supplies.WallMaterials(pawn));
             all.AddRange(ItemUpgrades(ctx));
             all.AddRange(Replacements(ctx));
+            all.AddRange(BetterVersions(ctx));
+            all.AddRange(ArtUpgrades(ctx));
             if (FloorUpgrade(ctx) is Upgrade floor)
                 all.Add(floor);
             var ranked = all.Where(u => u.value > 0f).OrderByDescending(u => u.value / Math.Max(1f, u.cost)).ToList();
@@ -175,6 +206,28 @@ namespace AIPawnControl
 
             /// <summary>What it needs to work once built is there: power from a generator for what draws power, some fuel for what burns it.</summary>
             public bool CanRun(ThingDef def) => Needs.CanRun(def, map, f => CanHave(f, 1));
+
+            /// <summary>
+            /// The upgrade's conduit line to the powered grid (none for what draws no power), paid for with the item: false
+            /// when no line can be laid or the steel isn't there. Its cost and label then count the conduits.
+            /// </summary>
+            public bool Wire(Upgrade u)
+            {
+                var line = Wiring.Route(map, u.def, u.entry.cell, u.entry.rot);
+                if (line == null)
+                    return false;
+                if (line.Count == 0)
+                    return true;
+                var costs = u.def.CostListAdjusted(u.stuff).Concat(Wiring.Cost(line.Count)).GroupBy(c => c.thingDef);
+                if (!costs.All(g => CanHave(g.Key, g.Sum(c => c.count))))
+                    return false;
+                u.conduits = line;
+                u.cost += Wiring.Cost(line.Count).Sum(c => c.count * c.thingDef.BaseMarketValue);
+                int colon = u.label.IndexOf("): ");
+                if (colon >= 0)
+                    u.label = u.label.Insert(colon, $"; {ThingDefOf.PowerConduit.label} x{line.Count}");
+                return true;
+            }
         }
 
         // ---------- Candidates ----------
@@ -233,22 +286,24 @@ namespace AIPawnControl
                 }
                 else if (light)
                 {
-                    // A dark room is vanilla's "in darkness" mood: the cheapest light wins the comfort pick.
+                    // A dark room is vanilla's "in darkness" mood: the light that lights most of it for its cost wins (counted once it has a slot).
                     u.gain = Gain.Comfort;
                     u.value = 1f;
-                    u.label = $"{def.label}{CostText(def, stuff)}: lights the dark room";
                 }
                 else
                 {
+                    if (!Decoration(def, stuff))
+                        continue;
+                    ThingDef plant = PotPlant(def);
                     var s = ctx.stats;
-                    s.wealth += def.GetStatValueAbstract(StatDefOf.MarketValue, stuff);
-                    s.beautySum += def.GetStatValueAbstract(StatDefOf.Beauty, stuff);
+                    s.wealth += def.GetStatValueAbstract(StatDefOf.MarketValue, stuff) + (plant?.BaseMarketValue ?? 0f);
+                    s.beautySum += def.GetStatValueAbstract(StatDefOf.Beauty, stuff) + (plant?.GetStatValueAbstract(StatDefOf.Beauty) ?? 0f);
                     s.cleanSum += def.GetStatValueAbstract(StatDefOf.Cleanliness, stuff);
                     s.space -= SpaceTaken(def);
                     u.gain = Gain.Looks;
                     u.value = s.Impressiveness - ctx.stats.Impressiveness;
                     u.predicted = s.Impressiveness;
-                    u.label = $"{def.label}{CostText(def, stuff)}: {LooksText(ctx.stats, s)}";
+                    u.label = $"{def.label}{(plant != null ? $" ({plant.label})" : "")}{CostText(def, stuff)}: {LooksText(ctx.stats, s)}";
                 }
                 // For offers gains only, so the slow checks (the room's role, a free slot) are left for those.
                 if (u.value <= 0f || !KeepsRole(room, def, stuff))
@@ -256,12 +311,28 @@ namespace AIPawnControl
                 u.entry = Slot(ctx, def, anchor);
                 if (u.entry == null)
                     continue;
+                // A pot's plant only grows where it gets vanilla's light for it (a daylily: lit).
+                if (PotPlant(def) is ThingDef potPlant && ctx.map.glowGrid.GroundGlowAt(u.entry.cell) < potPlant.plant.growMinGlow)
+                    continue;
+                if (light && anchor == null)
+                {
+                    int lit = LitCells(room, def, u.entry.cell, out int darkCells);
+                    if (lit == 0)
+                        continue;
+                    u.value = lit;
+                    u.label = $"{def.label}{CostText(def, stuff)}: lights {lit} of the {darkCells} dark cells";
+                }
+                if (!ctx.Wire(u))
+                    continue;
                 u.entry.stuff = stuff;
                 yield return u;
             }
         }
 
-        /// <summary>A better version of an item in the room, placed over it: vanilla swaps it (replace tags: bed, chair, table).</summary>
+        /// <summary>
+        /// A more comfortable version of an item in the room, placed over it: vanilla swaps it (replace tags: bed, chair,
+        /// table). Comfort only: looks come from decoration (the user), so a swap for looks alone isn't offered.
+        /// </summary>
         private static IEnumerable<Upgrade> Replacements(Context ctx)
         {
             foreach (var old in ctx.things.Where(t => t.Faction == Faction.OfPlayer && t.def.replaceTags != null && !(t is Blueprint) && !(t is Frame)))
@@ -273,31 +344,166 @@ namespace AIPawnControl
                     float comfort = def.GetStatValueAbstract(StatDefOf.Comfort, stuff) - old.GetStatValue(StatDefOf.Comfort);
                     if (def.IsBed)
                         comfort += def.GetStatValueAbstract(StatDefOf.BedRestEffectiveness, stuff) - old.GetStatValue(StatDefOf.BedRestEffectiveness);
-                    var s = ctx.stats;
-                    s.wealth += def.GetStatValueAbstract(StatDefOf.MarketValue, stuff) - old.MarketValue;
-                    s.beautySum += def.GetStatValueAbstract(StatDefOf.Beauty, stuff) - old.GetStatValue(StatDefOf.Beauty);
-                    s.cleanSum += def.GetStatValueAbstract(StatDefOf.Cleanliness, stuff) - old.GetStatValue(StatDefOf.Cleanliness);
-                    float looks = s.Impressiveness - ctx.stats.Impressiveness;
-                    float predicted = s.Impressiveness;
+                    if (comfort <= 0f)
+                        continue;
                     string name = stuff != null && def == old.def ? $"{stuff.label} {def.label}" : GenLabel.ThingLabel(def, stuff);
-                    var u = new Upgrade { def = def, stuff = stuff, cost = Cost(def, stuff), replaces = old, entry = new PlanEntry(def, old.Position, old.Rotation) { stuff = stuff } };
-                    if (comfort > 0f)
+                    var u = new Upgrade
                     {
-                        u.gain = Gain.Comfort;
-                        u.value = comfort;
-                        u.label = $"{name} in place of the {old.LabelNoCount}{CostText(def, stuff)}: comfort {comfort:+0.00}";
-                    }
-                    else
-                    {
-                        u.gain = Gain.Looks;
-                        u.value = looks;
-                        u.predicted = predicted;
-                        u.label = $"{name} in place of the {old.LabelNoCount}{CostText(def, stuff)}: {LooksText(ctx.stats, s)}";
-                    }
+                        gain = Gain.Comfort, value = comfort, def = def, stuff = stuff, cost = Cost(def, stuff), replaces = old,
+                        entry = new PlanEntry(def, old.Position, old.Rotation) { stuff = stuff },
+                        label = $"{name} in place of the {old.LabelNoCount}{CostText(def, stuff)}: comfort {comfort:+0.00}",
+                    };
                     if (!GenConstruct.CanPlaceBlueprintAt(def, old.Position, old.Rotation, ctx.map, stuffDef: stuff).Accepted)
                         continue;
                     yield return u;
                 }
+        }
+
+        /// <summary>
+        /// A better version of a bench or light in the room, in its place: one for the same work (every recipe the old bench
+        /// has, or research, or light) that vanilla rates faster, or that needs no fuel. Vanilla can't swap these in place,
+        /// so the old one comes down first (BuildProject.removeFirst). Only where the new one fits and a conduit line reaches.
+        /// </summary>
+        private static IEnumerable<Upgrade> BetterVersions(Context ctx)
+        {
+            foreach (var old in ctx.things.Where(t => t.Faction == Faction.OfPlayer && !(t is Blueprint) && !(t is Frame) && t.def.BuildableByPlayer))
+            {
+                if (Required(ctx.room, old.def))
+                    continue; // a throne room's braziers stay
+                StatDef speed = SpeedStat(old.def);
+                if (speed == null && !IsLight(old.def))
+                    continue;
+                bool oldFuel = old.def.HasComp(typeof(CompRefuelable));
+                foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading.Where(d => d != old.def && d.category == ThingCategory.Building && d.BuildableByPlayer
+                             && SameWork(old.def, d) && RoomKindDef.Buildable(d, ctx.map)))
+                {
+                    float before = speed != null ? old.def.GetStatValueAbstract(speed, old.Stuff) : 1f;
+                    float after = speed != null ? def.GetStatValueAbstract(speed, GenStuff.DefaultStuffFor(def)) : 1f;
+                    bool noFuel = oldFuel && !def.HasComp(typeof(CompRefuelable));
+                    if (after < before || (after == before && !noFuel))
+                        continue;
+                    if (!ctx.CanPay(def, out ThingDef stuff) || !ctx.CanRun(def)
+                        || !GenConstruct.CanPlaceBlueprintAt(def, old.Position, old.Rotation, ctx.map, thingToIgnore: old, stuffDef: stuff).Accepted)
+                        continue;
+                    var gains = new List<string>();
+                    if (after > before)
+                        gains.Add($"{speed.label} {before.ToStringPercent()} → {after.ToStringPercent()}");
+                    if (noFuel)
+                        gains.Add("no fuel to keep it going");
+                    var u = new Upgrade
+                    {
+                        gain = Gain.Better, def = def, stuff = stuff, cost = Cost(def, stuff), replaces = old, removeFirst = true,
+                        value = after / before - 1f + (noFuel ? 1f : 0f),
+                        entry = new PlanEntry(def, old.Position, old.Rotation) { stuff = stuff },
+                        label = $"{GenLabel.ThingLabel(def, stuff)} in place of the {old.LabelNoCount}{CostText(def, stuff)}: {string.Join(", ", gains)}",
+                    };
+                    if (ctx.Wire(u))
+                        yield return u;
+                }
+            }
+        }
+
+        /// <summary>
+        /// A piece of art for the room (a sculpture), made at the colony's bench in a wall material storage holds: its looks
+        /// at normal quality, since the artist decides the rest. One on order per room at a time.
+        /// </summary>
+        private static IEnumerable<Upgrade> ArtUpgrades(Context ctx)
+        {
+            if (Art.Ordered(ctx.map, ctx.room))
+                yield break;
+            foreach (var def in Art.Pieces)
+            {
+                if (def.size.x > 3 || def.size.z > 3 || ctx.things.Any(t => t.def == def) || !(Art.Bench(ctx.map, def) is Building bench))
+                    continue;
+                ThingDef stuff = def.MadeFromStuff ? ctx.materials.Select(m => m.stuff).FirstOrDefault(m => GenStuff.AllowedStuffsFor(def).Contains(m)
+                                     && ctx.map.resourceCounter.GetCount(m) >= def.CostListAdjusted(m).Where(c => c.thingDef == m).Sum(c => c.count)) : null;
+                if (def.MadeFromStuff && stuff == null)
+                    continue;
+                var s = ctx.stats;
+                s.wealth += def.GetStatValueAbstract(StatDefOf.MarketValue, stuff);
+                s.beautySum += def.GetStatValueAbstract(StatDefOf.Beauty, stuff);
+                s.space -= SpaceTaken(def);
+                var u = new Upgrade
+                {
+                    gain = Gain.Looks, art = true, def = def, stuff = stuff, cost = Cost(def, stuff),
+                    value = s.Impressiveness - ctx.stats.Impressiveness, predicted = s.Impressiveness,
+                    label = $"{def.label}, made at the {bench.def.label}{CostText(def, stuff)}: {LooksText(ctx.stats, s)} at normal quality",
+                };
+                if (u.value <= 0f || !KeepsRole(ctx.room, def, stuff))
+                    continue;
+                u.entry = Slot(ctx, def, null);
+                if (u.entry == null)
+                    continue;
+                u.entry.stuff = stuff;
+                yield return u;
+            }
+        }
+
+        /// <summary>What vanilla rates a bench's work by: research speed for a research bench, work speed for a work table; null for neither.</summary>
+        private static StatDef SpeedStat(ThingDef def) =>
+            typeof(Building_ResearchBench).IsAssignableFrom(def.thingClass) ? StatDefOf.ResearchSpeedFactor
+            : typeof(Building_WorkTable).IsAssignableFrom(def.thingClass) && def.AllRecipes.Count > 0 ? StatDefOf.WorkTableWorkSpeedFactor : null;
+
+        /// <summary>
+        /// Something only there to look at (the user: looks upgrades are decoration): it adds beauty, or grows a plant that
+        /// does (a plant pot), and has no other job: no seat, bed, table, storage, game, work, light, facility, heat or
+        /// bathroom fixture.
+        /// </summary>
+        private static bool Decoration(ThingDef def, ThingDef stuff)
+        {
+            var b = def.building;
+            if (b == null || b.isSittable || def.IsBed || def.surfaceType != SurfaceType.None || b.joyKind != null
+                || typeof(Building_Storage).IsAssignableFrom(def.thingClass) || typeof(IBillGiver).IsAssignableFrom(def.thingClass)
+                || typeof(Building_ResearchBench).IsAssignableFrom(def.thingClass) || def.HasComp(typeof(CompGlower)) || def.GetCompProperties<CompProperties_Facility>() != null
+                || def.HasComp(typeof(CompTempControl)) || def.HasComp(typeof(CompHeatPusher)) || def.designationCategory?.defName == "Hygiene")
+                return false;
+            return def.GetStatValueAbstract(StatDefOf.Beauty, stuff) > 0f || PotPlant(def) != null;
+        }
+
+        /// <summary>The plant a grower is sown with by default (a plant pot: daylilies), whose beauty is the pot's point; null for anything else.</summary>
+        private static ThingDef PotPlant(ThingDef def) =>
+            typeof(Building_PlantGrower).IsAssignableFrom(def.thingClass) ? def.building?.defaultPlantToGrow : null;
+
+        /// <summary>A light: something vanilla files under furniture that glows (a torch, a standing lamp).</summary>
+        private static bool IsLight(ThingDef def) => def.HasComp(typeof(CompGlower)) && def.designationCategory?.defName == "Furniture";
+
+        /// <summary>
+        /// Something vanilla's requirements for this room name, so it stays: a throne room's braziers (its owner's title),
+        /// what an ideoligion building asks of its room.
+        /// </summary>
+        private static bool Required(Room room, ThingDef def)
+        {
+            var requirements = new List<RoomRequirement>();
+            foreach (var t in room.ContainedAndAdjacentThings.Distinct())
+            {
+                if (t is Building_Throne throne && throne.AssignedPawn?.royalty?.HighestTitleWithThroneRoomRequirements()?.def.throneRoomRequirements is List<RoomRequirement> titled)
+                    requirements.AddRange(titled);
+                if (t.StyleSourcePrecept is Precept_Building precept && precept.presenceDemand?.roomRequirements is List<RoomRequirement> asked)
+                    requirements.AddRange(asked);
+            }
+            return requirements.Any(r => r switch
+            {
+                RoomRequirement_ThingCount c => c.thingDef == def,
+                RoomRequirement_ThingAnyOfCount c => c.things.Contains(def),
+                RoomRequirement_Thing c => c.thingDef == def,
+                RoomRequirement_ThingAnyOf c => c.things.Contains(def),
+                _ => false,
+            });
+        }
+
+        /// <summary>The colony has a building for this work: the def itself, or one that does all its work (an electric tailor bench for a hand one).</summary>
+        public static bool HasBenchFor(Map map, ThingDef def) =>
+            map.listerBuildings.allBuildingsColonist.Any(b => b.def == def || (SpeedStat(def) != null && SameWork(def, b.def)));
+
+        /// <summary>The new one does all the old one's work: a research bench for a research bench, every recipe of a work table, a light for a light.</summary>
+        private static bool SameWork(ThingDef old, ThingDef def)
+        {
+            StatDef speed = SpeedStat(old);
+            if (speed == StatDefOf.ResearchSpeedFactor)
+                return SpeedStat(def) == speed;
+            if (speed != null)
+                return SpeedStat(def) == speed && old.AllRecipes.All(r => def.AllRecipes.Contains(r));
+            return IsLight(def) && def.building?.canPlaceOverWall == old.building?.canPlaceOverWall;
         }
 
         /// <summary>The wood or stone floor that does the most for the room's looks, on every cell it would improve.</summary>
@@ -484,6 +690,15 @@ namespace AIPawnControl
             return GenConstruct.CanPlaceBlueprintAt(def, entry.cell, entry.rot, map, stuffDef: ctx.StuffFor(def, def.costStuffCount)).Accepted ? entry : null;
         }
 
+        /// <summary>A free slot for one more item in the room, by the same rules as an upgrade's (a made sculpture whose planned spot was taken).</summary>
+        public static PlanEntry SlotIn(Room room, Pawn pawn, ThingDef def, ThingDef stuff)
+        {
+            var entry = Slot(new Context(room, pawn, Supplies.WallMaterials(pawn)), def, null);
+            if (entry != null)
+                entry.stuff = stuff;
+            return entry;
+        }
+
         /// <summary>
         /// Dev check (FURNISHING.md §7, check 5): applies a looks upgrade for real (the floor laid, the item spawned, the old
         /// one hidden), reads vanilla's impressiveness, and puts everything back. Returns vanilla's number.
@@ -509,8 +724,17 @@ namespace AIPawnControl
                 u.replaces?.DeSpawn();
                 Thing thing = ThingMaker.MakeThing(u.def, u.stuff);
                 thing.SetFactionDirect(Faction.OfPlayer);
+                thing.TryGetComp<CompQuality>()?.SetQuality(QualityCategory.Normal, null); // what the prediction assumes (art: normal quality)
                 GenSpawn.Spawn(thing, u.entry.cell, map, u.entry.rot);
+                Plant grown = null;
+                if (PotPlant(u.def) is ThingDef plant)
+                {
+                    grown = (Plant)ThingMaker.MakeThing(plant);
+                    grown.Growth = 1f;
+                    GenSpawn.Spawn(grown, u.entry.cell, map);
+                }
                 result = Recount(probe, map);
+                grown?.Destroy(DestroyMode.Vanish);
                 thing.Destroy(DestroyMode.Vanish);
                 if (u.replaces != null)
                     GenSpawn.Spawn(u.replaces, oldPos, map, oldRot);
@@ -526,17 +750,22 @@ namespace AIPawnControl
             return room.GetStat(RoomStatDefOf.Impressiveness);
         }
 
+        /// <summary>A one-item (or floor) upgrade project for the room, not yet added.</summary>
+        public static BuildProject NewProject(Pawn pawn, Room room, string where, ThingDef material) => new BuildProject
+        {
+            pawn = pawn, map = pawn.Map, footprint = room.ExtentsClose.ExpandedBy(1), placedTick = Find.TickManager.TicksGame,
+            where = where, byMind = MindManager.Instance?.MindOf(pawn) != null, furnishing = true, material = material,
+            kindDef = (Ground.HallRole(room.Role) ? RoomKindDef.GreatHall : DefDatabase<RoomKindDef>.AllDefsListForReading.FirstOrDefault(k => k.role == room.Role)) ?? RoomKindDef.Plain,
+        };
+
         /// <summary>Places her pick as blueprints and tracks it as a one-item (or floor) upgrade project; marks what's missing.</summary>
         public static string Place(Pawn pawn, Room room, Upgrade u)
         {
             Map map = pawn.Map;
             string where = room.Owners.Contains(pawn) ? $"in my {room.Role.label}" : $"in the {BuildManager.Label(room)}";
-            var project = new BuildProject
-            {
-                pawn = pawn, map = map, footprint = room.ExtentsClose.ExpandedBy(1), placedTick = Find.TickManager.TicksGame,
-                where = where, byMind = true, furnishing = true, material = u.stuff,
-                kindDef = (Ground.HallRole(room.Role) ? RoomKindDef.GreatHall : DefDatabase<RoomKindDef>.AllDefsListForReading.FirstOrDefault(k => k.role == room.Role)) ?? RoomKindDef.Plain,
-            };
+            if (u.art)
+                return Art.Order(pawn, u.def, u.stuff, null, u.entry, where);
+            var project = NewProject(pawn, room, where, u.stuff);
             if (u.floor != null)
             {
                 var cells = u.cells.Where(c => c.GetTerrain(map) != u.floor && GenConstruct.CanPlaceBlueprintAt(u.floor, c, Rot4.North, map).Accepted).ToList();
@@ -550,11 +779,24 @@ namespace AIPawnControl
             else
             {
                 var e = u.entry;
-                var report = GenConstruct.CanPlaceBlueprintAt(e.def, e.cell, e.rot, map, stuffDef: e.stuff);
+                var report = GenConstruct.CanPlaceBlueprintAt(e.def, e.cell, e.rot, map, thingToIgnore: u.removeFirst ? u.replaces : null, stuffDef: e.stuff);
                 if (!report.Accepted)
                     return $"Couldn't place the {e.def.label}: {report.Reason}";
-                BuildManager.Place(e.def, e.cell, map, e.rot, e.stuff);
+                var conduits = Wiring.Entries(u.conduits);
+                foreach (var c in conduits)
+                    BuildManager.Place(c.def, c.cell, map, c.rot, null);
+                if (u.removeFirst)
+                {
+                    // The old one comes down first; its blueprint follows (BuildProject.TickRemoveFirst), and its orders move over once built.
+                    map.designationManager.AddDesignation(new Designation(u.replaces, DesignationDefOf.Deconstruct));
+                    project.removeFirst = u.replaces.Position;
+                    project.removeDef = u.replaces.def;
+                    project.bills = (u.replaces as IBillGiver)?.BillStack?.Bills.Select(b => b.Clone()).ToList();
+                }
+                else
+                    BuildManager.Place(e.def, e.cell, map, e.rot, e.stuff);
                 project.entries = new List<PlanEntry> { e };
+                project.entries.AddRange(conduits);
             }
             BuildManager.Instance.Add(project);
             string marked = Supplies.MarkFor(pawn, project);

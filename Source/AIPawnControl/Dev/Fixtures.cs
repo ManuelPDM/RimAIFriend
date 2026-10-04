@@ -255,6 +255,23 @@ namespace AIPawnControl
                         allowDowned: true, developmentalStages: DevelopmentalStage.Baby));
                     GenSpawn.Spawn(baby, spot, map);
                     return $"{baby.LabelShort}, a baby, joined the colony.";
+                case "child":
+                    if (!ModsConfig.BiotechActive)
+                        return "No children without Biotech.";
+                    Pawn child = PawnGenerator.GeneratePawn(new PawnGenerationRequest(PawnKindDefOf.Colonist, Faction.OfPlayer, forceGenerateNewPawn: true,
+                        developmentalStages: DevelopmentalStage.Child));
+                    GenSpawn.Spawn(child, spot, map);
+                    return $"{child.LabelShort}, a child, joined the colony.";
+                case "animal":
+                    Pawn animal = PawnGenerator.GeneratePawn(new PawnGenerationRequest(DefDatabase<PawnKindDef>.GetNamed("Muffalo"), Faction.OfPlayer));
+                    GenSpawn.Spawn(animal, spot, map);
+                    return $"{animal.LabelShort}, a muffalo, joined the colony.";
+                case "cold":
+                case "hot":
+                    var rooms = map.regionGrid.AllRooms.Where(Ground.Indoor).ToList();
+                    foreach (var room in rooms)
+                        room.Temperature = what == "cold" ? -45f : 50f;
+                    return $"{rooms.Count} rooms set to {(what == "cold" ? -45 : 50)}°C.";
                 case "deathrest":
                     if (!ModsConfig.BiotechActive || DefDatabase<GeneDef>.GetNamedSilentFail("Deathrest") is not GeneDef gene)
                         return "No deathrest gene (Biotech).";
@@ -265,6 +282,30 @@ namespace AIPawnControl
                 default:
                     return "Unknown condition " + what;
             }
+        }
+
+        /// <summary>A stockpile of every building material in plenty, in a clear area near the colonists, so nothing waits on stock.</summary>
+        public static string StockMaterials(Map map)
+        {
+            var stock = new[] { ("WoodLog", 3000), ("BlocksGranite", 3000), ("BlocksMarble", 1500), ("Steel", 2000), ("ComponentIndustrial", 200),
+                ("ComponentSpacer", 20), ("Plasteel", 600), ("Silver", 3000), ("Gold", 600), ("Cloth", 800), ("Uranium", 300), ("Jade", 300) }
+                .Select(s => (def: DefDatabase<ThingDef>.GetNamedSilentFail(s.Item1), count: s.Item2)).Where(s => s.def != null).ToList();
+            var stacks = stock.SelectMany(s => Enumerable.Range(0, (s.count + s.def.stackLimit - 1) / s.def.stackLimit)
+                .Select(i => (s.def, count: Math.Min(s.def.stackLimit, s.count - i * s.def.stackLimit)))).ToList();
+            int side = (int)Math.Ceiling(Math.Sqrt(stacks.Count));
+            if (!TryFindArea(map, side, side, out IntVec3 o))
+                return $"No clear {side}x{side} area near the colonists.";
+            var area = new CellRect(o.x, o.z, side, side);
+            Clear(map, area);
+            var zone = new Zone_Stockpile(StorageSettingsPreset.DefaultStockpile, map.zoneManager);
+            map.zoneManager.RegisterZone(zone);
+            var cells = area.Cells.ToList();
+            for (int i = 0; i < stacks.Count; i++)
+            {
+                zone.AddCell(cells[i]);
+                Stack(map, stacks[i].def, stacks[i].count, cells[i]);
+            }
+            return $"Stocked {string.Join(", ", stock.Select(s => $"{s.count} {s.def.label}"))} at ({o.x},{o.z}).";
         }
 
         /// <summary>Power at the base: electricity and air conditioning researched, a fueled wood-fired generator by the first colonist.</summary>
