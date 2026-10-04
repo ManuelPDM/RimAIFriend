@@ -289,6 +289,8 @@ namespace AIPawnControl
             var plan = finder.Hubs(kind, validator, material, 3).OrderBy(h => h.footprint.CenterCell.DistanceToSquared(offered.CenterCell)).FirstOrDefault();
             if (plan == null)
                 return $"Wanted a {kind.label} the others open into, but it doesn't fit there any more.";
+            if (Supplies.BlocksShort(plan, material) is string blocksShort)
+                return $"Didn't lay out the {kind.label} in {material.label}: {blocksShort}.";
             string where = "joining the " + HubRooms(plan);
             var project = BuildManager.Instance.Place(pawn, plan, material, validator, where);
             if (project == null)
@@ -307,6 +309,8 @@ namespace AIPawnControl
                 return "Wanted to close an outside door, but it's still needed.";
             var plan = new RoomPlan { kind = Kind("AIPC_ClosedDoor"), map = map, footprint = CellRect.SingleCell(cell) };
             plan.entries.Add(new PlanEntry(ThingDefOf.Wall, cell, Rot4.North));
+            if (Supplies.BlocksShort(plan, material) is string blocksShort)
+                return $"Didn't wall up the {Name(way.room)}'s outside door in {material.label}: {blocksShort}.";
             var project = BuildManager.Instance.PlaceLayout(pawn, plan, material, InsideCell(cell, way.room), $"in the {Name(way.room)}'s outside door", way.door);
             string marked = Supplies.MarkFor(pawn, project);
             return $"Marked the {Name(way.room)}'s outside door to come down and be walled up ({material.label})." + (marked.Length > 0 ? " " + marked : "");
@@ -320,6 +324,8 @@ namespace AIPawnControl
                 return "Wanted a door between two rooms, but it isn't needed any more.";
             var plan = new RoomPlan { kind = Kind("AIPC_Doorway"), map = map, footprint = CellRect.SingleCell(cell) };
             plan.entries.Add(new PlanEntry(ThingDefOf.Door, cell, Rot4.North));
+            if (Supplies.BlocksShort(plan, material) is string blocksShort)
+                return $"Didn't lay out the door in {material.label}: {blocksShort}.";
             string where = $"between the {Name(door.from)} and the {Name(door.into)}";
             var project = BuildManager.Instance.PlaceLayout(pawn, plan, material, InsideCell(cell, door.from), where);
             string marked = Supplies.MarkFor(pawn, project);

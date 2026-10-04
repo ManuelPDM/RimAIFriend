@@ -533,6 +533,38 @@ namespace AIPawnControl
                     log.Check(pawn.playerSettings.AreaRestrictionInPawnCurrentMap == null, "\"fight\" left an area on her");
                     log.Check(pawn.playerSettings.hostilityResponse == HostilityResponseMode.Attack, "\"fight\" didn't set Attack");
                 }
+
+                // The plan (§9): Hold and Out only with the base's rooms and someone who can fight; Hold puts her outside, facing the enemy.
+                var plan = new DangerPlan.Plan { map = map };
+                DangerPlan.FindEdge(plan);
+                var options = DangerPlan.Options(plan, new List<PawnMind> { mind });
+                log.Line($"plans (the {plan.side ?? "no"} side): " + string.Join(" | ", options.Select(o => o.label)));
+                log.Check(options.Last().kind == DangerPlan.None, "\"No fighting\" isn't offered last");
+                log.Check(options.Any(o => o.kind == DangerPlan.Hold) == (canFight && DangerResponse.InsideCells(map).Count > 0),
+                    "\"Hold the base\" offered when it can't be, or missing when it can");
+                var hold = options.FirstOrDefault(o => o.kind == DangerPlan.Hold);
+                if (hold != null)
+                {
+                    pawn.jobs.EndCurrentJob(Verse.AI.JobCondition.InterruptForced); // "fight" above: a fighter already fighting is left to it
+                    log.Line("plan: " + DangerPlan.Assign(plan, hold, new List<PawnMind> { mind }, new List<PawnMind>()));
+                    log.Check(plan.fighters.TryGetValue(pawn, out IntVec3 spot) && spot.IsValid && !DangerResponse.InsideCells(map).Contains(spot),
+                        "her spot isn't a cell outside the base");
+                    log.Check(pawn.playerSettings.hostilityResponse == HostilityResponseMode.Attack && pawn.playerSettings.AreaRestrictionInPawnCurrentMap == null,
+                        "a fighter in the plan didn't get Attack and no area");
+                    var job = pawn.CurJob;
+                    log.Check(job != null && (job.def == JobDefOf.Goto || job.def == JobDefOf.Wait_Combat) && job.targetA.Cell == spot,
+                        $"she isn't going to her spot or waiting there ({job?.def.defName})");
+                    log.Line("my part: " + DangerPlan.Part(plan, pawn));
+                    log.Line($"her spot {spot}: cover {CoverUtility.CalculateOverallBlockChance(spot, plan.enemyAt, map):P0} against the enemy at {plan.enemyAt}");
+                    var from = pawn.Position;
+                    pawn.Position = spot; // there already: she waits on her spot, shooting what comes (Wait_Combat, which must expire undrafted)
+                    pawn.Notify_Teleported();
+                    DangerPlan.Keep(plan, mind);
+                    job = pawn.CurJob;
+                    log.Check(job != null && job.def == JobDefOf.Wait_Combat && job.expiryInterval > 0, $"on her spot she isn't waiting to fight ({job?.def.defName})");
+                    pawn.Position = from;
+                    pawn.Notify_Teleported();
+                }
             }
             finally
             {

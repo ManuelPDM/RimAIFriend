@@ -27,10 +27,10 @@ namespace AIPawnControl
         // ---------- Act ----------
 
         /// <summary>Every AI order goes through here, from the main-thread pump (never OnGUI, see the Shift-queue trap).</summary>
-        internal static bool Order(PawnMind mind, Job job)
+        internal static bool Order(PawnMind mind, Job job, bool queue = false)
         {
             mind.RememberOurJob(job);
-            return mind.pawn.jobs.TryTakeOrderedJob(job, JobTag.Misc);
+            return mind.pawn.jobs.TryTakeOrderedJob(job, JobTag.Misc, requestQueueing: queue);
         }
 
         /// <summary>
@@ -95,6 +95,8 @@ namespace AIPawnControl
             Job job;
             if (verb == null || verb.IsMeleeAttack)
                 job = JobMaker.MakeJob(JobDefOf.AttackMelee, enemy);
+            else if (DangerPlan.Holding(pawn))
+                return $"Shooting at the {DangerResponse.Label(enemy)} from my spot."; // her spot's wait shoots what's in range
             else if (DangerResponse.TryShootingPosition(pawn, enemy, verb, out IntVec3 dest))
                 job = JobMaker.MakeJob(JobDefOf.Goto, dest);
             else

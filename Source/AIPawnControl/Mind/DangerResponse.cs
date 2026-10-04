@@ -31,7 +31,7 @@ namespace AIPawnControl
 
         public static string Label(Thing t) => (t as Pawn)?.KindLabel ?? t.def.label;
 
-        private static string Weapon(Pawn p) => p.equipment?.Primary?.def.label;
+        internal static string Weapon(Pawn p) => p.equipment?.Primary?.def.label;
 
         // ---------- The Inside area ----------
 
@@ -100,6 +100,8 @@ namespace AIPawnControl
                 : $"Me: {Weapon(pawn) ?? "no weapon"}, Shooting {pawn.skills?.GetSkill(SkillDefOf.Shooting).Level ?? 0}, Melee {pawn.skills?.GetSkill(SkillDefOf.Melee).Level ?? 0}");
             var armed = pawn.Map.mapPawns.FreeColonistsSpawned.Where(p => p != pawn && Weapon(p) != null).Select(p => $"{p.LabelShort} ({Weapon(p)})").ToList();
             parts.Add("Armed: " + (armed.Count > 0 ? string.Join(", ", armed) : "nobody else"));
+            if (DangerPlan.Line(pawn) is string plan)
+                parts.Add(plan.TrimEnd('.'));
             return string.Join(". ", parts) + ".";
         }
 
@@ -107,7 +109,7 @@ namespace AIPawnControl
 
         /// <summary>
         /// While there's danger: go inside, fight, help each colonist something is going after. Only what she can do now:
-        /// no fighting for someone incapable of violence, no "go inside" without indoor rooms.
+        /// no fighting for someone incapable of violence, no "go inside" without indoor rooms. Each one takes her out of the plan.
         /// </summary>
         public static List<ActionCatalog.ActOption> Options(Pawn pawn, PawnMind mind, List<Thing> threats, int firstId)
         {
@@ -116,7 +118,7 @@ namespace AIPawnControl
             var current = pawn.playerSettings?.AreaRestrictionInPawnCurrentMap;
             if (pawn.playerSettings != null && (current == null || current.Label != InsideLabel) && CanGoInside(map))
                 options.Add(new ActionCatalog.ActOption { Id = firstId + options.Count, Key = "inside", Label = "go inside and stay there until the danger is over",
-                    Apply = _ => MindActions.GoInside(mind) });
+                    Apply = _ => { DangerPlan.Leave(pawn); return MindActions.GoInside(mind); } });
             if (pawn.WorkTagIsDisabled(WorkTags.Violent) || pawn.playerSettings == null)
                 return options;
 
@@ -127,14 +129,14 @@ namespace AIPawnControl
             var nearest = reachable[0];
             options.Add(new ActionCatalog.ActOption { Id = firstId + options.Count, Key = "fight",
                 Label = $"fight: go after the nearest enemy ({Label(nearest)}, {(int)nearest.Position.DistanceTo(pawn.Position)} tiles away)",
-                Apply = _ => MindActions.Fight(mind, nearest) });
+                Apply = _ => { DangerPlan.Leave(pawn, fighting: nearest); return MindActions.Fight(mind, nearest); } });
             foreach (var group in reachable.Select(t => (t, victim: Victim(t))).Where(x => x.victim != null && x.victim != pawn).GroupBy(x => x.victim))
             {
                 var victim = group.Key;
                 var attacker = group.First().t; // the nearest to her
                 options.Add(new ActionCatalog.ActOption { Id = firstId + options.Count, Key = "help " + victim.ThingID,
                     Label = $"help {victim.LabelShort}: go after the {Label(attacker)} attacking them",
-                    Apply = _ => MindActions.Fight(mind, attacker) });
+                    Apply = _ => { DangerPlan.Leave(pawn, victim, attacker); return MindActions.Fight(mind, attacker); } });
             }
             return options;
         }

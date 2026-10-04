@@ -79,7 +79,7 @@ namespace AIPawnControl
         /// <summary>
         /// Wall materials for the Base call (STREAMLINE.md §5): wood or stone blocks only (the user: steel is for other
         /// things). Up to 3 that can be had: wood first, then by what's in storage, then by what's near the base. Grown trees
-        /// for wood, reachable chunks for their blocks once a stonecutter's table exists or can be built.
+        /// for wood; stone blocks only from storage (the user: cutting a room's worth of blocks takes too long to wait on).
         /// </summary>
         public static List<(ThingDef stuff, int stock, int nearby)> WallMaterials(Pawn pawn)
         {
@@ -88,13 +88,7 @@ namespace AIPawnControl
             var scan = new ChoreScan(pawn);
             var foci = SiteFinder.NoBuildFoci(map);
             int wood = TreeCutting.Candidates(scan, foci).Sum(t => t.YieldNow()) + TreeCutting.MarkedWood(map);
-            var blocks = new Dictionary<ThingDef, int>();
-            if (CanCutStone(map))
-                foreach (var chunk in map.listerThings.ThingsInGroup(ThingRequestGroup.HaulableEver)
-                             .Where(t => t.def.IsWithinCategory(ThingCategoryDefOf.StoneChunks) && t.Spawned && scan.WalkAt(t.Position) >= 0 && !t.IsForbidden(Faction.OfPlayer)))
-                    foreach (var product in chunk.def.butcherProducts ?? new List<ThingDefCountClass>())
-                        blocks[product.thingDef] = (blocks.TryGetValue(product.thingDef, out int had) ? had : 0) + product.count * chunk.stackCount;
-            int Nearby(ThingDef stuff) => stuff == ThingDefOf.WoodLog ? wood : blocks.TryGetValue(stuff, out int n) ? n : 0;
+            int Nearby(ThingDef stuff) => stuff == ThingDefOf.WoodLog ? wood : 0; // stone blocks count only once they're in storage
             var list = GenStuff.AllowedStuffsFor(ThingDefOf.Wall)
                 .Where(IsWallMaterial)
                 .Select(s => (stuff: s, stock: map.resourceCounter.GetCount(s), nearby: Nearby(s)))
@@ -125,17 +119,22 @@ namespace AIPawnControl
             return need;
         }
 
+        /// <summary>A stone build goes ahead only with all its blocks in storage: what's short ("it needs 185 granite blocks and storage has 40"), or null.</summary>
+        public static string BlocksShort(RoomPlan plan, ThingDef material)
+        {
+            if (!material.IsWithinCategory(ThingCategoryDefOf.StoneBlocks))
+                return null;
+            int need = plan.Cost(material).TryGetValue(material, out int n) ? n : 0, have = plan.map.resourceCounter.GetCount(material);
+            return need > have ? $"it needs {need} {material.label} and storage has {have}" : null;
+        }
+
         /// <summary>Walls are wood or stone blocks: steel is for stoves, weapons and components.</summary>
         public static bool IsWallMaterial(ThingDef stuff) => stuff == ThingDefOf.WoodLog || stuff.IsWithinCategory(ThingCategoryDefOf.StoneBlocks);
-
-        /// <summary>A stonecutter's table is built (a room can't wait on blocks nothing can cut yet).</summary>
-        public static bool CanCutStone(Map map) =>
-            map.listerBuildings.allBuildingsColonist.Any(b => b.def.AllRecipes.Any(r => WorkOrders.GoalOf(r) == WorkOrders.Goal.Blocks));
 
         /// <summary>"steel 480 in storage (~600 more to mine nearby), wood 31 (~40 more from trees nearby)".</summary>
         public static string WallMaterialsLine(List<(ThingDef stuff, int stock, int nearby)> materials) =>
             string.Join(", ", materials.Select(m => $"{m.stuff.label} {m.stock} in storage" +
-                (m.nearby > 0 ? $" (~{m.nearby} more {(m.stuff == ThingDefOf.WoodLog ? "from trees" : "from rock chunks, cut at a stonecutter's table")} nearby)" : " (no more nearby)")));
+                (m.stuff != ThingDefOf.WoodLog ? "" : m.nearby > 0 ? $" (~{m.nearby} more from trees nearby)" : " (no more nearby)")));
 
         /// <summary>
         /// An order for this stone's own blocks (granite blocks for a granite room), until storage has what's short. An

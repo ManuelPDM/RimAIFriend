@@ -96,6 +96,8 @@ namespace AIPawnControl
             var threats = DangerResponse.Threats(pawn.Map);
             if (threats.Count > 0)
             {
+                if (DangerPlan.Part(DangerPlan.Of(pawn.Map), pawn) is string part)
+                    options[0].Label = $"keep to my part in the plan ({part})";
                 options.AddRange(DangerResponse.Options(pawn, mind, threats, options.Count + 1)); // the danger menu: nothing else while it lasts
                 return options;
             }

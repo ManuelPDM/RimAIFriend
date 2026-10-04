@@ -915,7 +915,7 @@ namespace AIPawnControl
             var needs = new List<string>();
             var extras = new Dictionary<ThingDef, int>();
             bool usesMaterial = false;
-            foreach (var m in materials)
+            foreach (var m in materials.Where(m => Supplies.BlocksShort(plan, m) == null))
             {
                 var cost = plan.Cost(m);
                 if (cost.TryGetValue(m, out int n))

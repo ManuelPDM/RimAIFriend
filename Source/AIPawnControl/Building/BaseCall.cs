@@ -192,6 +192,24 @@ namespace AIPawnControl
                 // Fewer ways out (BASE_LAYOUT.md §5.7): the rung as a hub, a hall, a closed way out, a door between rooms.
                 choices.AddRange(Layout.Options(map, rung, finder, validator, call.materials).Select(o => new Choice { group = o.group, label = o.label, layout = o.apply }));
             }
+            else if (call.underway != null && rung?.kind != null && rung.waiting == null)
+            {
+                // A project is underway: the ladder's next room is still an option, in the materials storage has all of it in now.
+                finder = new SiteFinder(map, SiteFinder.BaseCenter(map));
+                var had = Supplies.WallMaterials(pawn);
+                var validator = new RoomValidator(map, finder.center, finder.weights.maxWalk);
+                finder.For(rung.kind);
+                call.sites = finder.Sites(validator, had[0].stuff, out _);
+                var size = SizeFor(rung.kind, map);
+                var plan = call.sites.Count > 0 ? finder.Fit(call.sites[0], rung.kind, size.w, size.h, validator, had[0].stuff, out _) : null;
+                call.materials = plan == null ? new List<ThingDef>()
+                    : had.Select(m => m.stuff).Where(m => plan.Cost(m).All(kv => map.resourceCounter.GetCount(kv.Key) >= kv.Value)).ToList();
+                if (call.materials.Count > 0 && RoomChoice(rung.kind, size, "Next for the base", rung.label, finder, validator, call.sites, call.materials) is Choice next)
+                {
+                    materialsLine = Supplies.WallMaterialsLine(had.Where(m => call.materials.Contains(m.stuff)).ToList());
+                    choices.Add(next);
+                }
+            }
             if (TemperatureChoice(pawn) is Choice temperature)
                 choices.Add(temperature);
 
@@ -429,6 +447,8 @@ namespace AIPawnControl
             if (picked != null)
                 sites = sites.OrderBy(s => s.Interior.CenterCell.DistanceToSquared(picked.Interior.CenterCell)).Take(1).ToList();
             var plan = sites.Select(s => finder.Fit(s, kind, size.w, size.h, validator, material, out _)).FirstOrDefault(p => p != null);
+            if (plan != null && Supplies.BlocksShort(plan, material) is string blocksShort)
+                return $"Didn't lay out the {kind.label} in {material.label}: {blocksShort}.";
             if (plan != null && ask?.precept != null)
                 foreach (var e in plan.entries.Where(e => e.def == ask.precept.ThingDef))
                     e.precept = ask.precept;

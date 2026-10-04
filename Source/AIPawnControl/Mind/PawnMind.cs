@@ -59,7 +59,7 @@ namespace AIPawnControl
         private int dangerSinceTick = -1; // when the danger on her map began; -1 = none
         private readonly HashSet<Pawn> hitInDanger = new HashSet<Pawn>(); // colonists hurt since then: each one makes her think once
         private bool dangerThink; // a danger event she hasn't thought about yet
-        private readonly HashSet<int> ourJobIds = new HashSet<int>(); // jobs we ordered, to tell them apart from the player's
+        private HashSet<int> ourJobIds = new HashSet<int>(); // jobs we ordered, to tell them apart from the player's (saved: a reload mid-job isn't a player order)
         private int talkLineJobId = -1;
         private string talkLine;
         private bool chatWokeHer;
@@ -107,8 +107,12 @@ namespace AIPawnControl
             Scribe_Values.Look(ref keptSettings, "keptSettings");
             Scribe_References.Look(ref areaBefore, "areaBefore");
             Scribe_Values.Look(ref responseBefore, "responseBefore");
+            if (Scribe.mode == LoadSaveMode.Saving && pawn?.jobs != null)
+                ourJobIds.IntersectWith(pawn.jobs.AllJobs().Select(j => j.loadID)); // only the jobs she still has
+            Scribe_Collections.Look(ref ourJobIds, "ourJobIds", LookMode.Value);
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
+                ourJobIds = ourJobIds ?? new HashSet<int>();
                 decisions = decisions ?? new List<string>();
                 decisionTicks = decisionTicks ?? new List<int>();
                 lastInteractionTicks = lastInteractionTicks ?? new Dictionary<string, int>();
@@ -185,6 +189,8 @@ namespace AIPawnControl
                 AddDecision(set, importance: 0);
                 ModLog.Message($"{pawn.LabelShort}: {set}");
             }
+            if (dangerThink && DangerPlan.Instance?.Waiting(this) == true)
+                return; // the colony's plan comes first (DANGER_RESPONSE.md §9): she makes it, or waits for it
 
             int now = Find.TickManager.TicksGame;
             bool idle = pawn.CurJob == null || pawn.CurJob.def.isIdle || pawn.mindState.IsIdle;
@@ -437,6 +443,7 @@ namespace AIPawnControl
                 ["trigger"] = trigger,
                 ["menu"] = ActionCatalog.DescribeMenu(menu),
                 ["talkto"] = TalkToText(menu),
+                ["danger"] = DangerResponse.Threats(pawn.Map).Count > 0 ? "\n\n" + Prompts.Fill("danger", new Dictionary<string, string>()) : "", // only with the danger menu
             }, recall.Sections);
 
         /// <summary>
@@ -503,6 +510,9 @@ namespace AIPawnControl
         }
 
         // ---------- Danger (DANGER_RESPONSE.md) ----------
+
+        /// <summary>The Plan call was her think about the danger starting.</summary>
+        public void DangerThought() => dangerThink = false;
 
         /// <summary>Before a danger choice changes them: her own area and hostility response, once, to restore afterwards.</summary>
         public void KeepSettings()

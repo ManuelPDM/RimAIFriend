@@ -279,6 +279,25 @@ namespace AIPawnControl
         }
 
         /// <summary>Answers a choice from code, as the selected colonist (or the first free one). No LLM.</summary>
+        // Danger plans forced without the Plan call. Direct actions, not a submenu: the dev menu keeps a submenu's first list.
+        [DebugAction(Category, "Danger: force Hold the base", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void DangerForceHold() => ForcePlan(DangerPlan.Hold);
+
+        [DebugAction(Category, "Danger: force Go out together", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void DangerForceOut() => ForcePlan(DangerPlan.Out);
+
+        [DebugAction(Category, "Danger: force Save (first under attack)", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void DangerForceSave() => ForcePlan(DangerPlan.Save);
+
+        [DebugAction(Category, "Danger: force No fighting", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static void DangerForceNone() => ForcePlan(DangerPlan.None);
+
+        private static void ForcePlan(string kind)
+        {
+            var option = DangerPlan.OptionsNow(Find.CurrentMap).FirstOrDefault(o => o.kind == kind);
+            Report(option == null ? "Not possible now." : DangerPlan.Instance?.Force(Find.CurrentMap, kind, option.victim) ?? "Not possible now.");
+        }
+
         [DebugAction(Category, "Choices: answer...", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         private static List<DebugActionNode> ChoicesAnswer()
         {

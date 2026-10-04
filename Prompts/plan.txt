@@ -1,0 +1,21 @@
+It's {time}. Danger has come to the colony, and the plan falls to you: {why}. Your plan goes into the group chat, so everyone will know it was you.
+
+{snapshot}
+
+[Colonists]
+{colonists}
+
+The plans:
+{plans}
+
+Pick one plan, and who does what:
+- "fighters": the names of the colonists who carry out the plan. Only those who can fight may be named. For "No fighting", leave it empty.
+- "inside": the names of the colonists who go inside the base and stay there until the danger is over.{noinside}
+- Nobody has to do anything. Anyone you don't put in "fighters" or "inside" just keeps doing what they were doing.
+Everyone can still change their own mind later.
+
+Decide from who you are, what [Danger] shows (the enemy, their weapons, who they're after) and what each colonist can do.
+
+"reason": why, in your own voice, briefly.
+"plan": the plan's number.
+"say": what you tell the others in the group chat about it, or "" to say nothing. 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks.
