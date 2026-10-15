@@ -380,7 +380,7 @@ Hubs, doors between rooms, other rooms and upgrades wait until the project is do
 underway is "next", and rungs are never skipped:
 
 ```
-barracks → kitchen → great hall → bathroom (Dubs Bad Hygiene only) → storeroom
+barracks → kitchen → storeroom → great hall → bathroom (Dubs Bad Hygiene only)
 → workshop → research bench → hospital → private bedrooms → better rooms
 ```
 
@@ -403,6 +403,12 @@ on every scan:
 | shelter from the map edge | being near the map edge |
 | the bigger size | walls shared with a room at a very different temperature |
 | short walks to linked rooms (kitchen ↔ storeroom ↔ hall) | |
+| sharing a wall with a room it's built beside | |
+
+**Built beside:** the kitchen, storeroom and great hall are built against each other where one already
+stands (`beside` in `RoomKinds.xml`). A kitchen and storeroom that touch get a door through their
+shared wall (`doorTo`), so the cook walks straight from the shelves to the stove; that pair counts
+twice where the door fits (not behind the stove). Only the sites touching the most of them are offered.
 
 Three sites are offered:
 - **A**: the best site joined to the base;
@@ -448,20 +454,36 @@ fewer ways out.
 `Needs` resolves each item ("bed", "seat", "joy", "heater", …) to the best def that is:
 - buildable now (research and someone's skill);
 - affordable from storage;
-- runnable: power, fuel and plumbing.
+- runnable: fuel and plumbing, and for what draws power, enough spare power on the map's nets.
 
 Furniture nobody can build is skipped if it's optional. If it's required, the room kind waits.
 
+**Power lines** (`Wiring`): whatever a mind places that draws power gets the shortest line of conduit
+blueprints to the powered grid. It ends where vanilla connects (6 cells), and it may cross walls. An
+electric item no line can reach isn't offered (a room's game: another kind is tried). Generators stay
+the player's.
+
 **The Upgrade call** offers up to 3 upgrades for one room, ranked by gain per cost. Each improves one
 of:
-- **looks**: vanilla impressiveness;
-- **comfort**: a facility bonus or a light;
-- **temperature**: a heater or cooler.
+- **looks**: vanilla impressiveness, from decoration only: something with beauty and no other job (a
+  stele, a plant pot, a sculpture), or a floor. A plant pot counts its plant's beauty, and it's only
+  offered where the plant gets enough light to grow.
+- **comfort**: a facility bonus, a more comfortable replacement (an armchair for a dining chair), or a
+  light, scored by how many of the room's dark cells it lights (vanilla's falloff);
+- **temperature**: a heater or cooler;
+- **better**: a bench or light swapped for one that does the same work faster or needs no fuel (an
+  electric stove for a fueled one). The old one is deconstructed first, the new one goes in its place,
+  and the old one's bills move over.
 
-An upgrade is a new item, a better replacement or a floor.
+**Art:** a sculpture is offered as a looks upgrade when the colony has a bench that makes it and
+someone who can do art, scored at normal quality. Picking it adds a "make 1" bill at that bench. The
+bill runs as a chore and doesn't block building. Once the piece exists, it gets an install blueprint
+in its room, and the install is the project. An ideoligion building that is art (a styled sculpture)
+works the same way: the room it asks for is built with what vanilla requires (columns), then the piece
+is ordered for it.
 
 **After a room is built:** `Outfitting` adds a default bill per work table and a filtered stockpile
-for storerooms, and claims the throne.
+for storerooms, claims the throne, and orders the ideoligion's art.
 
 ### Materials
 
@@ -470,6 +492,8 @@ for storerooms, and claims the throne.
   for cutting.
 - **Stone** counts storage only. Every block must already be stored before placing.
 - Steel and components must already be in storage.
+- Furniture is made of the wall material when it can be. If it can't, it uses vanilla's default (steel for a stove)
+  when storage pays for it, or else the cheapest material storage pays for.
 
 ### Dubs Bad Hygiene
 
@@ -712,7 +736,7 @@ Close the game first; it locks the DLL.
 | File | Contents |
 |---|---|
 | `prompts-YYYY-MM-DD.jsonl` | every prompt and reply (the best record of what happened) |
-| `self-tests.txt`, `base-report.txt`, `base-map.txt`, `context.txt`, `choices.txt`, `customs.txt` | dev reports |
+| `self-tests.txt`, `base-report.txt`, `base-map.txt`, `context.txt`, `choices.txt`, `customs.txt`, `village.txt` | dev reports |
 
 **Debug actions** (category "AI Pawn Control"):
 
@@ -722,9 +746,9 @@ Close the game first; it locks the DLL.
 | Calls | Base call now, Upgrade call now, Group chat post/pass/compact, Choices show/answer/decide |
 | Danger | force Hold / Go out / Save / No fighting |
 | Customs | report, make fluid, reform; Gatherings start…; Burials kill selected |
-| Building | Build room now…, Build room apart…, Finish project(s) instantly, Cancel project, Build best layout line, Grow test base |
+| Building | Build room now…, Build room apart…, Finish project(s) instantly, Cancel project, Build best layout line, Grow test base, Grow full village… (the Base call's own menu, every line taken and finished at once, or one pick left for the colonists to build; `village.txt`) |
 | Chores | Apply chore…, Finish my chores instantly, Player removes my chores |
-| Setup and reports | Build fixture…, Test setup…, Base report |
+| Setup and reports | Build fixture…, Test setup… (colonists, power, materials, a title, prisoner, baby, child, animal or deathrester, chilled or heated rooms), Base report |
 
 **Self-tests** (`Run self-tests…`):
 - **all read-only** runs on any map: helpers, prompts, Base call menu, sites, chores, memory,
