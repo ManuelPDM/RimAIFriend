@@ -116,7 +116,7 @@ namespace AIPawnControl
 
         // ---------- Messages ----------
 
-        public void PlayerWrites(string text) => Add(Player, text);
+        public void PlayerWrites(string text) => Add(MindManager.Speaker, text);
 
         /// <summary>Adds a message, writes it into every mind's event log, and compacts at 15.</summary>
         public void Add(string author, string text)
@@ -170,7 +170,7 @@ namespace AIPawnControl
         {
             var chat = Instance;
             var readers = Minds.Where(m => m != mind && m.pawn != null).Select(m => m.pawn.LabelShort).ToList();
-            readers.Add(Player);
+            readers.Add(MindManager.Speaker);
             Dictionary<string, string> recalled = null;
             if (AIPawnControlMod.Settings.memoryEnabled && chat != null)
             {

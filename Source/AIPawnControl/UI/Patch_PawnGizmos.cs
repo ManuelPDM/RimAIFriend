@@ -23,20 +23,21 @@ namespace AIPawnControl
 
             Pawn pawn = __instance;
             PawnMind mind = manager.MindOf(pawn);
-            yield return new Command_Toggle
-            {
-                defaultLabel = "AIPawnControl_MindToggle".Translate(),
-                defaultDesc = "AIPawnControl_MindToggleDesc".Translate(pawn.LabelShort),
-                icon = MindIcon,
-                isActive = () => mind != null,
-                toggleAction = () =>
+            if (pawn != manager.PlayingAs) // the colonist the player plays has no mind
+                yield return new Command_Toggle
                 {
-                    if (mind != null)
-                        manager.Disable(pawn);
-                    else
-                        Find.WindowStack.Add(new Dialog_EnableMind(pawn));
-                },
-            };
+                    defaultLabel = "AIPawnControl_MindToggle".Translate(),
+                    defaultDesc = "AIPawnControl_MindToggleDesc".Translate(pawn.LabelShort),
+                    icon = MindIcon,
+                    isActive = () => mind != null,
+                    toggleAction = () =>
+                    {
+                        if (mind != null)
+                            manager.Disable(pawn);
+                        else
+                            Find.WindowStack.Add(new Dialog_EnableMind(pawn));
+                    },
+                };
 
             if (Prefs.DevMode)
                 foreach (var gizmo in DevGizmos.For(pawn, mind))

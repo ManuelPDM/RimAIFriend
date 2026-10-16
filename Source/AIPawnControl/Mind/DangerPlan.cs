@@ -411,8 +411,8 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// Keeps a fighter at her part: to her spot, then wait there and fight what comes (vanilla's Wait_Combat shoots
-        /// what's in range); once Out has gone, or for Save, after the nearest enemy (X's attacker for Save).
+        /// Keeps a fighter at her part: to her spot (fighting an enemy in reach on the way), then wait there and fight what
+        /// comes (vanilla's Wait_Combat shoots what's in range); once Out has gone, or for Save, after the nearest enemy (X's attacker for Save).
         /// </summary>
         internal static void Keep(Plan plan, PawnMind mind)
         {
@@ -425,6 +425,20 @@ namespace AIPawnControl
             {
                 if (p.Position != spot)
                 {
+                    var met = DangerResponse.Threats(plan.map)
+                        .Where(t => InReach(p, t) && GenSight.LineOfSight(p.Position, t.Position, plan.map))
+                        .OrderBy(t => t.Position.DistanceToSquared(p.Position)).FirstOrDefault();
+                    if (met != null)
+                    {
+                        // an enemy in reach on her way: fight it from here, then on to her spot
+                        Verb verb = p.TryGetAttackVerb(met);
+                        Job attack = JobMaker.MakeJob(verb == null || verb.IsMeleeAttack ? JobDefOf.AttackMelee : JobDefOf.AttackStatic, met);
+                        attack.endIfCantShootTargetFromCurPos = true;
+                        MindActions.Order(mind, attack);
+                        MindActions.Order(mind, JobMaker.MakeJob(JobDefOf.Goto, spot), queue: true);
+                        MindActions.Order(mind, WaitOn(spot), queue: true);
+                        return;
+                    }
                     if (job?.def != JobDefOf.Goto || job.targetA.Cell != spot)
                     {
                         MindActions.Order(mind, JobMaker.MakeJob(JobDefOf.Goto, spot));

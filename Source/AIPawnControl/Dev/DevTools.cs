@@ -113,6 +113,25 @@ namespace AIPawnControl
                 ModLog.Message($"{mind.pawn.LabelShort} (dev) talk to {other.pawn.LabelShort}: {result}");
             })).ToList();
 
+        /// <summary>The nearest colonist without a mind steps next to this mind and asks it out the vanilla way, as a random
+        /// interaction would, so its Answer call runs without waiting for chance.</summary>
+        [DebugAction(Category, "Ask mind out (vanilla colonist)", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static List<DebugActionNode> AskMindOut() =>
+            (MindManager.Instance?.Minds ?? new List<PawnMind>()).Select(mind => new DebugActionNode(mind.pawn.LabelShort, DebugActionType.Action, () =>
+            {
+                Pawn target = mind.pawn;
+                Pawn asker = target.Map.mapPawns.FreeColonistsSpawned.Where(p => p != target && MindManager.Instance.MindOf(p) == null)
+                    .OrderBy(p => p.Position.DistanceToSquared(target.Position)).FirstOrDefault();
+                IntVec3 cell = GenAdj.CellsAdjacent8Way(target).FirstOrDefault(c => c.InBounds(target.Map) && c.Standable(target.Map));
+                if (asker == null || !cell.IsValid || cell == IntVec3.Zero)
+                    return;
+                asker.jobs.StopAll();
+                asker.Position = cell;
+                asker.Notify_Teleported();
+                bool ok = asker.interactions.TryInteractWith(target, InteractionDefOf.RomanceAttempt);
+                ModLog.Message($"(dev) {asker.LabelShort} asks {target.LabelShort} out: {ok}, asking: {mind.Asking(asker)}");
+            })).ToList();
+
         /// <summary>A fixed chat message from the player, like the Mind tab's Send button (RimBridge can't type into the tab).</summary>
         [DebugAction(Category, "Chat as player", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         private static List<DebugActionNode> ChatAsPlayer()

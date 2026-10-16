@@ -35,6 +35,9 @@
   <AIPawnControl_AnswerChoices>Minds answer the colony's choices</AIPawnControl_AnswerChoices>
   <AIPawnControl_Gatherings>Minds hold gatherings and take part in the ideoligion</AIPawnControl_Gatherings>
   <AIPawnControl_GatheringsTip>AI colonists can start the ideoligion's rituals (a funeral, a festival, a dance party), take on a role through the role ceremony, throw a party or hold their wedding, each only when the game would allow it. When the ideoligion can reform, one of them picks a custom to change. Without Ideology, only parties and weddings.</AIPawnControl_GatheringsTip>
+  <AIPawnControl_PlayAs>Play as (this game)</AIPawnControl_PlayAs>
+  <AIPawnControl_PlayAsNone>Nobody (the player)</AIPawnControl_PlayAsNone>
+  <AIPawnControl_PlayAsTip>Your messages in a mind's chat and in the group chat come from this colonist, and the minds answer them as that colonist. When a mind talks to this colonist, its line shows up in its chat for you to answer. A colonist with a mind can't be picked.</AIPawnControl_PlayAsTip>
   <AIPawnControl_AnswerChoicesTip>An AI colonist (the best negotiator who's free) decides when a wanderer or lodger wants to join, a ransom is demanded, a quest is offered on the home map, or beggars ask for items. The decision is posted in the group chat. You can still answer first. Quests away from home, choosing a pawn, babies and growth moments stay yours.</AIPawnControl_AnswerChoicesTip>
   <AIPawnControl_MindsAnswerTip>When an AI colonist talks to another AI colonist, the other one answers with a line of their own, and may agree to help. Off: only the first line is said.</AIPawnControl_MindsAnswerTip>
   <AIPawnControl_ParallelRequests>Parallel requests: {0}</AIPawnControl_ParallelRequests>
@@ -80,6 +83,7 @@
   <AIPawnControl_ChatYou>You</AIPawnControl_ChatYou>
   <AIPawnControl_ChatThinking>{0} is thinking...</AIPawnControl_ChatThinking>
   <AIPawnControl_ChatWaiting>{0} is unconscious and will answer after coming to.</AIPawnControl_ChatWaiting>
+  <AIPawnControl_TalkingToYou>{0} to {1}: "{2}"</AIPawnControl_TalkingToYou>
   <AIPawnControl_ChatUnreachable>(Couldn't reach {0}'s mind: {1})</AIPawnControl_ChatUnreachable>
 
   <!-- Group chat -->

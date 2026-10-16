@@ -10,6 +10,7 @@ namespace AIPawnControl
 
         private List<PawnMind> minds = new List<PawnMind>();
         private SpokenLines lines = new SpokenLines();
+        private Pawn playingAs;
 
         private static MindManager instance;
 
@@ -21,6 +22,16 @@ namespace AIPawnControl
         public SpokenLines Lines => lines;
 
         public List<PawnMind> Minds => minds;
+
+        /// <summary>The colonist the player plays as (mod settings), or null. Never a mind; dead or gone, it's the player again.</summary>
+        public Pawn PlayingAs
+        {
+            get => playingAs != null && !playingAs.Dead && playingAs.IsColonist && MindOf(playingAs) == null ? playingAs : null;
+            set => playingAs = value;
+        }
+
+        /// <summary>Who the player's chat and group chat messages come from: the played colonist's name, or "the player".</summary>
+        public static string Speaker => Instance?.PlayingAs?.LabelShort ?? PersonFile.Player;
 
         public MindManager(Game game)
         {
@@ -70,6 +81,7 @@ namespace AIPawnControl
             {
                 mind.UpdateChat();
                 mind.UpdateReply();
+                mind.UpdateAsked();
             }
         }
 
@@ -77,6 +89,7 @@ namespace AIPawnControl
         {
             Scribe_Collections.Look(ref minds, "minds", LookMode.Deep);
             Scribe_Deep.Look(ref lines, "spokenLines");
+            Scribe_References.Look(ref playingAs, "playingAs");
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 minds = minds ?? new List<PawnMind>();

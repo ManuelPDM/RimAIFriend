@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using RimWorld;
 using UnityEngine;
 using Verse;
@@ -125,6 +126,18 @@ namespace AIPawnControl
             list.CheckboxLabeled("AIPawnControl_MindsAnswer".Translate(), ref mindsAnswer, "AIPawnControl_MindsAnswerTip".Translate());
             list.CheckboxLabeled("AIPawnControl_AnswerChoices".Translate(), ref answerChoices, "AIPawnControl_AnswerChoicesTip".Translate());
             list.CheckboxLabeled("AIPawnControl_Gatherings".Translate(), ref gatherings, "AIPawnControl_GatheringsTip".Translate());
+            var manager = MindManager.Instance;
+            if (manager != null)
+            {
+                string none = "AIPawnControl_PlayAsNone".Translate();
+                if (list.ButtonTextLabeled("AIPawnControl_PlayAs".Translate(), manager.PlayingAs?.LabelShort ?? none, tooltip: "AIPawnControl_PlayAsTip".Translate()))
+                {
+                    var options = new List<FloatMenuOption> { new FloatMenuOption(none, () => manager.PlayingAs = null) };
+                    foreach (Pawn p in PawnsFinder.AllMaps_FreeColonists.Where(p => manager.MindOf(p) == null))
+                        options.Add(new FloatMenuOption(p.LabelShort, () => manager.PlayingAs = p));
+                    Find.WindowStack.Add(new FloatMenu(options));
+                }
+            }
             list.Label("AIPawnControl_ParallelRequests".Translate(parallelRequests), tooltip: "AIPawnControl_ParallelRequestsTip".Translate());
             parallelRequests = (int)System.Math.Round(list.Slider(parallelRequests, 1, 4));
             embedEndpoint = list.TextEntryLabeled("AIPawnControl_EmbedEndpoint".Translate(), embedEndpoint);

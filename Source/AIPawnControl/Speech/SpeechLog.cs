@@ -41,6 +41,9 @@ namespace AIPawnControl
             }
         }
 
+        /// <summary>The line WithLine is about to show for this speaker, or null.</summary>
+        internal static string PendingLine(Pawn speaker) => pendingSpeaker == speaker ? pendingLine : null;
+
         /// <summary>A line said out loud to nobody in particular: a single-pawn entry (bubble + her log), never saved.
         /// Callers check the settings: remarks follow "Speak lines", chat replies follow "Chat bubbles".</summary>
         public static void Say(Pawn speaker, string line)

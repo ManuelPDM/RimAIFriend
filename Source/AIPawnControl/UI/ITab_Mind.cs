@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using RimWorld;
@@ -12,7 +13,6 @@ namespace AIPawnControl
     {
         private const float ChatHeight = 230f;
         private const float InputHeight = 30f;
-        private const int ShownChatLines = 8;
         private const string InputControl = "AIPC_ChatInput";
 
         private Vector2 scroll;
@@ -78,10 +78,17 @@ namespace AIPawnControl
                 "AIPawnControl_TabChat".Translate(name).CapitalizeFirst().Colorize(ColoredText.TipSectionTitleColor));
 
             string you = "AIPawnControl_ChatYou".Translate();
-            var lines = mind.chat.Skip(Mathf.Max(0, mind.chat.Count - ShownChatLines)).Select(l =>
-                l.from == ChatLine.From.Player ? you + ": " + l.text
-                : l.from == ChatLine.From.Mind ? name + ": " + l.text
-                : l.text.Colorize(ColoredText.SubtleGrayColor)).ToList();
+            Map map = mind.pawn.MapHeld;
+            var lines = new List<string>();
+            for (int i = 0; i < mind.chat.Count; i++)
+            {
+                var l = mind.chat[i];
+                if (map != null && mind.ConversationStart(i) == i) // each conversation opens with its day and time
+                    lines.Add((i > 0 ? "\n" : "") + $"{GameTime.DayLabel(l.tick, map)} {GameTime.Clock(l.tick, map)}".Colorize(ColoredText.SubtleGrayColor));
+                lines.Add(l.from == ChatLine.From.Player ? you + ": " + l.text
+                    : l.from == ChatLine.From.Mind ? name + ": " + l.text
+                    : l.text.Colorize(ColoredText.SubtleGrayColor));
+            }
             if (mind.ChatThinking)
                 lines.Add("AIPawnControl_ChatThinking".Translate(name).Colorize(ColoredText.SubtleGrayColor));
             else if (mind.ChatWaitingForWake)

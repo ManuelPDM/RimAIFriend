@@ -1,0 +1,12 @@
+It's {time}. {speaker} just came over to talk to you ({kind}).
+
+{snapshot}
+{said}
+First decide, then say something that matches it.
+
+"accept": true to say yes, false to say no.
+
+"reply": answer {speaker} out loud, in character, 1 short sentence, under 120 characters. Plain speech. No narration, no *actions*, no quotation marks. It must match your "accept".
+Your past is only what [I remember], [From my diary], [Since yesterday], the [About ...] lines and this conversation show. Don't make anything up.
+
+"memory": the M-number from [I remember] that you drew on, otherwise 0.

@@ -19,6 +19,8 @@ namespace AIPawnControl
 
         public static Dictionary<string, object> Str(int maxLength) => new Dictionary<string, object> { ["type"] = "string", ["maxLength"] = maxLength };
 
+        public static Dictionary<string, object> Bool() => new Dictionary<string, object> { ["type"] = "boolean" };
+
         public static Dictionary<string, object> StrEnum(IEnumerable<string> values) =>
             new Dictionary<string, object> { ["type"] = "string", ["enum"] = values.Cast<object>().ToList() };
 

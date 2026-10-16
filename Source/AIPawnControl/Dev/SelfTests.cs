@@ -189,7 +189,7 @@ namespace AIPawnControl
                 {
                     var menu = ActionCatalog.BuildActMenu(pawn, mind, inConversation: true);
                     var recall = Recall.Conversation(mind, PersonFile.Player, null, null, 5, peek: true);
-                    Check("chat", mind.ChatMessages("The player is talking to you.", new List<string>(), "How are you?", ActionCatalog.DescribeMenu(menu), recall),
+                    Check("chat", mind.ChatMessages(PersonFile.Player, "You're talking with the player.", new List<string>(), "How are you?", ActionCatalog.DescribeMenu(menu), recall),
                         ActionCatalog.ChatSchema(menu, recall.Shown));
                 });
                 if (Colonists.FirstOrDefault(p => p != pawn) is Pawn other)
@@ -197,6 +197,12 @@ namespace AIPawnControl
                     {
                         var recall = Recall.Conversation(mind, other.LabelShort, null, null, 3, peek: true);
                         Check("reply", mind.ReplyMessages(other.LabelShort, "Nice weather today.", "chitchat", "(just answer)", recall), null);
+                    });
+                if (Colonists.FirstOrDefault(p => p != pawn) is Pawn asker)
+                    Try("answer", () =>
+                    {
+                        var recall = Recall.Conversation(mind, asker.LabelShort, null, null, 3, peek: true);
+                        Check("answer", mind.AnswerMessages(asker.LabelShort, InteractionDefOf.RomanceAttempt.label, "Want to watch the stars with me tonight?", recall), null);
                     });
                 Try("base", () =>
                 {

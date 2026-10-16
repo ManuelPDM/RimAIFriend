@@ -17,7 +17,7 @@ namespace AIPawnControl
         private const int MinTicksBetweenThinks = GenDate.TicksPerHour;
         private const float MinRealSecondsBetweenThinks = 10f;
         private const int IdleTicksBeforeAct = GenDate.TicksPerHour;
-        private const int MaxChatLines = 16; // 8 turns
+        private const int MaxChatLines = 16; // 8 turns of the current conversation go into the Chat prompt
         private const int ChatForgetTicks = 6 * GenDate.TicksPerHour;
         private const int ReflectTokens = 3000; // the reply is several fields long; a cut-off reply isn't valid JSON
 
@@ -36,7 +36,6 @@ namespace AIPawnControl
         private Dictionary<string, int> lastInteractionTicks = new Dictionary<string, int>(); // "defName|targetThingId" → tick
         private int lastNegativeTick = -99999999;
         public List<ChatLine> chat = new List<ChatLine>();
-        private int lastChatTick = -1;
         private bool chatPending; // unanswered player messages, e.g. while unconscious or while another call was running
         private bool chatWhileOut;
         public MindMemory memory = new MindMemory(); // events, memories, diary, person files, lately
@@ -100,7 +99,6 @@ namespace AIPawnControl
             Scribe_Collections.Look(ref lastInteractionTicks, "lastInteractionTicks", LookMode.Value, LookMode.Value);
             Scribe_Values.Look(ref lastNegativeTick, "lastNegativeTick", -99999999);
             Scribe_Collections.Look(ref chat, "chat", LookMode.Deep);
-            Scribe_Values.Look(ref lastChatTick, "lastChatTick", -1);
             Scribe_Values.Look(ref chatPending, "chatPending");
             Scribe_Values.Look(ref chatWhileOut, "chatWhileOut");
             Scribe_Deep.Look(ref memory, "memory");
@@ -152,8 +150,6 @@ namespace AIPawnControl
         /// <summary>Called by MindManager every check interval.</summary>
         public void CheckTriggers()
         {
-            if (chat.Count > 0 && !chatPending && Find.TickManager.TicksGame - lastChatTick > ChatForgetTicks)
-                chat.Clear(); // long chat histories make small models drift; memory across conversations is Phase 3
             if (keptSettings && pawn != null && pawn.Spawned && DangerResponse.Threats(pawn.Map).Count == 0)
                 EndDanger();
             if (chatPending)
@@ -309,8 +305,14 @@ namespace AIPawnControl
                 text += $" I said: \"{line}\"";
             AddDecision(text, importance: success ? 0 : 2); // a talk that happened is recorded from the PlayLog
             ModLog.Message($"{pawn.LabelShort}: {text}");
-            if (success && line != null && AIPawnControlMod.Settings.mindsAnswer && AIPawnControlMod.Settings.speakLines)
+            if (success && line != null && AIPawnControlMod.Settings.mindsAnswer && AIPawnControlMod.Settings.speakLines && !Romance.IsAsk(def)) // an ask got its Answer call
                 MindManager.Instance?.MindOf(target)?.Hear(pawn, def, line);
+            if (success && line != null && target == MindManager.Instance?.PlayingAs)
+            {
+                // The player plays this colonist: her line opens a Mind tab chat, which the player answers there
+                AddChat(ChatLine.From.Mind, line);
+                Messages.Message("AIPawnControl_TalkingToYou".Translate(pawn.LabelShort, target.LabelShort, line), pawn, MessageTypeDefOf.NeutralEvent);
+            }
         }
 
         // ---------- Replies to other minds (PHASE6.md §4) ----------
@@ -401,6 +403,106 @@ namespace AIPawnControl
             }
             AddDecision(result, importance: 0); // the talk events above are the memory
             ModLog.Message($"{pawn.LabelShort} reply to {speaker}: \"{text}\" | act: {option?.Label ?? (picked != null ? $"{picked.Label} (no longer an option)" : "none")}");
+        }
+
+        // ---------- Being asked out or proposed to ----------
+
+        private class Asked
+        {
+            public Pawn asker;
+            public InteractionDef def;
+            public string line;
+            public int tick;
+            public bool sent;
+            public bool? accept;
+            public string reply;
+        }
+
+        private Asked asked; // not saved: a reload drops the question, and the asker's talk job gives up
+
+        /// <summary>Someone's romance attempt or proposal waits for her answer (Romance.Hold). One question at a time.</summary>
+        public void Ask(Pawn asker, InteractionDef def, string line)
+        {
+            if (asked == null)
+                asked = new Asked { asker = asker, def = def, line = line, tick = Find.TickManager.TicksGame };
+        }
+
+        public bool Asking(Pawn asker) => asked != null && asked.asker == asker;
+
+        /// <summary>Her answer to this asker, or null while she's still deciding.</summary>
+        public bool? Answer(Pawn asker) => Asking(asker) ? asked.accept : null;
+
+        /// <summary>The asker's talk job ran the interaction with her answer: she says her line.</summary>
+        public void Answered(Pawn asker)
+        {
+            var a = asked;
+            asked = null;
+            string speaker = asker.LabelShort;
+            if (a.reply == null)
+                return;
+            if (AIPawnControlMod.Settings.speakLines)
+                SpeechLog.Say(pawn, a.reply);
+            memory.Record(pawn, "talk", a.def.defName, $"I answered {speaker}: \"{a.reply}\"", 3, MemoryEvent.TookPart, new[] { speaker });
+            MindManager.Instance?.MindOf(asker)?.memory.Record(asker, "talk", a.def.defName, $"{pawn.LabelShort} answered me: \"{a.reply}\"",
+                3, MemoryEvent.Told, new[] { pawn.LabelShort });
+        }
+
+        /// <summary>Called every frame with UpdateReply: sends the Answer call when she's free; drops a question left too long.</summary>
+        public void UpdateAsked()
+        {
+            if (asked == null)
+                return;
+            if (Find.TickManager.TicksGame - asked.tick > ReplyMaxAgeTicks || !asked.asker.Spawned)
+            {
+                ModLog.Message($"{pawn.LabelShort}: didn't answer {asked.asker.LabelShort}'s {asked.def.label}.");
+                asked = null;
+                return;
+            }
+            if (asked.sent || chatPending || PausedReason() != null)
+                return;
+            if (reflecting)
+                CancelReflect();
+            if (Thinking)
+                return;
+            RequestAnswer(asked);
+        }
+
+        private void RequestAnswer(Asked a)
+        {
+            a.sent = true;
+            string speaker = a.asker.LabelShort;
+            AfterRecall($"{a.line ?? a.def.label} ({speaker})", (vector, tag) =>
+            {
+                var recall = Recall.Conversation(this, speaker, vector, tag, 3);
+                Send("answer", AnswerMessages(speaker, a.def.label, a.line, recall), AnswerSchema(recall.Shown),
+                    reply => OnAnswer(a, reply, recall), stillValid: () => PausedReason());
+            });
+        }
+
+        /// <summary>The Answer call's prompt: yes or no to a romance attempt or proposal. The asker's line only when a mind said one.</summary>
+        internal List<KeyValuePair<string, string>> AnswerMessages(string speaker, string kind, string line, Recall recall) =>
+            PromptBuilder.Build("answer", this, new Dictionary<string, string>
+            {
+                ["speaker"] = speaker,
+                ["kind"] = kind,
+                ["said"] = line == null ? "" : "\n" + Prompts.Fill("answer-said", new Dictionary<string, string> { ["speaker"] = speaker, ["line"] = line }) + "\n",
+            }, recall.Sections);
+
+        private static Dictionary<string, object> AnswerSchema(List<int> memories) => Schema.Obj(new Dictionary<string, object>
+        {
+            ["accept"] = Schema.Bool(),
+            ["reply"] = Schema.Str(ActionCatalog.MaxChatReply + 60),
+            ["memory"] = Schema.IntEnum(new[] { 0 }.Concat(memories)),
+        });
+
+        private void OnAnswer(Asked a, Dictionary<string, object> reply, Recall recall)
+        {
+            if (asked != a)
+                return;
+            recall.MarkUsed(this, reply.Int("memory"), a.asker.LabelShort);
+            a.accept = reply.TryGetValue("accept", out object v) && v is bool yes && yes;
+            a.reply = SpeechLog.Clean(reply.Str("reply"), ActionCatalog.MaxChatReply);
+            ModLog.Message($"{pawn.LabelShort} answers {a.asker.LabelShort}'s {a.def.label}: {(a.accept.Value ? "yes" : "no")} \"{a.reply}\"");
         }
 
         private void CountAct()
@@ -543,8 +645,11 @@ namespace AIPawnControl
         public void PlayerSays(string text)
         {
             AddChat(ChatLine.From.Player, text);
-            memory.Record(pawn, "chat", null, $"The player said: \"{text}\"", 3, MemoryEvent.PlayerSaid, new[] { PersonFile.Player });
-            lastChatTick = Find.TickManager.TicksGame;
+            string speaker = MindManager.Speaker;
+            if (speaker == PersonFile.Player)
+                memory.Record(pawn, "chat", null, $"The player said: \"{text}\"", 3, MemoryEvent.PlayerSaid, new[] { PersonFile.Player });
+            else
+                memory.Record(pawn, "chat", null, $"{speaker} said to me: \"{text}\"", 3, MemoryEvent.Told, new[] { speaker });
             chatPending = true;
             if (!CanBeAwake)
             {
@@ -575,13 +680,16 @@ namespace AIPawnControl
         {
             string cantAct = PausedReason(ignoreSleep: true);
             var menu = cantAct == null ? ActionCatalog.BuildActMenu(pawn, this, inConversation: true) : new List<ActionCatalog.ActOption>();
-            int lastAnswer = chat.FindLastIndex(l => l.from == ChatLine.From.Mind);
-            var unanswered = chat.Skip(lastAnswer + 1).Where(l => l.from == ChatLine.From.Player).Select(l => l.text).ToList();
-            var earlier = chat.Take(lastAnswer + 1).Where(l => l.from != ChatLine.From.System)
-                .Select(l => (l.from == ChatLine.From.Player ? "Player: " : "Me: ") + l.text).ToList();
-            string situation = chatWhileOut ? "You just came to after being unconscious. While you were out, the player spoke to you."
-                : chatWokeHer ? "The player's message just woke you up."
-                : "The player is talking to you.";
+            // Only the current conversation's last lines: long chat histories make small models drift; older talks are in memory
+            var talk = chat.Skip(System.Math.Max(ConversationStart(chat.Count - 1), chat.Count - MaxChatLines)).ToList();
+            int lastAnswer = talk.FindLastIndex(l => l.from == ChatLine.From.Mind);
+            var unanswered = talk.Skip(lastAnswer + 1).Where(l => l.from == ChatLine.From.Player).Select(l => l.text).ToList();
+            string speaker = MindManager.Speaker;
+            var earlier = talk.Take(lastAnswer + 1).Where(l => l.from != ChatLine.From.System)
+                .Select(l => (l.from == ChatLine.From.Player ? speaker : "Me") + ": " + l.text).ToList();
+            string situation = chatWhileOut ? $"You just came to after being unconscious. While you were out, {speaker} spoke to you."
+                : chatWokeHer ? $"A message from {speaker} just woke you up."
+                : $"You're talking with {speaker}.";
             chatWhileOut = false;
             chatWokeHer = false;
             string message = string.Join("\n", unanswered);
@@ -589,9 +697,9 @@ namespace AIPawnControl
             chatThinking = true;
             AfterRecall(query, (vector, tag) =>
             {
-                var recall = Recall.Conversation(this, PersonFile.Player, vector, tag, 5, mentioned);
+                var recall = Recall.Conversation(this, speaker, vector, tag, 5, mentioned);
                 string menuText = cantAct == null ? ActionCatalog.DescribeMenu(menu) : $"(you can't do anything else right now: {cantAct})";
-                Send("chat", ChatMessages(situation, earlier, message, menuText, recall), ActionCatalog.ChatSchema(menu, recall.Shown), reply => OnChat(reply, menu, recall),
+                Send("chat", ChatMessages(speaker, situation, earlier, message, menuText, recall), ActionCatalog.ChatSchema(menu, recall.Shown), reply => OnChat(speaker, reply, menu, recall),
                     stillValid: () => pawn == null || pawn.Destroyed || pawn.Dead || !pawn.Spawned ? "gone" : null,
                     onError: error =>
                     {
@@ -602,24 +710,26 @@ namespace AIPawnControl
             });
         }
 
-        /// <summary>The Chat call's prompt: the conversation so far and the player's new message.</summary>
-        internal List<KeyValuePair<string, string>> ChatMessages(string situation, List<string> earlier, string message, string menu, Recall recall) =>
+        /// <summary>The Chat call's prompt: the conversation so far and the player's new message. Played as a colonist, the
+        /// player's own stance line (chat-player.txt) is left out: she answers that colonist as who they are to her.</summary>
+        internal List<KeyValuePair<string, string>> ChatMessages(string speaker, string situation, List<string> earlier, string message, string menu, Recall recall) =>
             PromptBuilder.Build("chat", this, new Dictionary<string, string>
             {
+                ["speaker"] = speaker,
+                ["stance"] = speaker == PersonFile.Player ? "\n" + Prompts.Fill("chat-player", new Dictionary<string, string>()) : "",
                 ["situation"] = situation,
                 ["history"] = earlier.Count > 0 ? string.Join("\n", earlier) : "(this is the start of the conversation)",
                 ["message"] = message,
                 ["menu"] = menu,
             }, recall.Sections);
 
-        private void OnChat(Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
+        private void OnChat(string speaker, Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
         {
             chatThinking = false;
-            recall.MarkUsed(this, reply.Int("memory"), PersonFile.Player);
+            recall.MarkUsed(this, reply.Int("memory"), speaker);
             string text = SpeechLog.Clean(reply.Str("reply"), ActionCatalog.MaxChatReply) ?? "...";
             AddChat(ChatLine.From.Mind, text);
-            memory.Record(pawn, "chat", null, $"I told the player: \"{text}\"", 3, MemoryEvent.TookPart, new[] { PersonFile.Player });
-            lastChatTick = Find.TickManager.TicksGame;
+            memory.Record(pawn, "chat", null, $"I told {speaker}: \"{text}\"", 3, MemoryEvent.TookPart, new[] { speaker });
             if (AIPawnControlMod.Settings.chatBubbles)
                 SpeechLog.Say(pawn, text);
 
@@ -627,15 +737,18 @@ namespace AIPawnControl
             if (option == null)
                 return;
             string result = MindActions.Safely(pawn, option.Label, () => option.Apply(null));
-            AddDecision($"Asked by the player: {option.Label}: {result}");
+            AddDecision($"Asked by {speaker}: {option.Label}: {result}");
             ModLog.Message($"{pawn.LabelShort} chat act: {option.Label} | {result}");
         }
 
-        private void AddChat(ChatLine.From from, string text)
+        private void AddChat(ChatLine.From from, string text) => chat.Add(new ChatLine(from, text));
+
+        /// <summary>Where the conversation chat line i belongs to starts: after 6 h of silence, the next line starts a new one.</summary>
+        public int ConversationStart(int i)
         {
-            chat.Add(new ChatLine(from, text));
-            while (chat.Count > MaxChatLines)
-                chat.RemoveAt(0);
+            while (i > 0 && chat[i].tick - chat[i - 1].tick <= ChatForgetTicks)
+                i--;
+            return i;
         }
 
         public void Cancel()

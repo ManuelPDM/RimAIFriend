@@ -73,6 +73,7 @@ namespace AIPawnControl
             {
                 case "chat": return 0;
                 case "reply": return 1;
+                case "answer": return 1; // the asker stands waiting for it
                 case "decide": return 1; // the choice has a deadline, and the game may be paused on it
                 case "plan": return 1; // everyone waits for it while the danger comes
                 case "base": return 3;

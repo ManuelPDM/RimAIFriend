@@ -17,6 +17,7 @@ namespace AIPawnControl
     /// Walk into interaction range of TargetA, then start job.interaction with vanilla TryInteractWith
     /// (thoughts, opinion, social log entry, Bubbles bubble all come from vanilla).
     /// Retries a few times if the shared 120-tick interaction cooldown is taken, e.g. by vanilla random chatter.
+    /// Asking a mind out or proposing to it waits here for its answer (Romance), then runs with that answer.
     /// </summary>
     public class JobDriver_AITalkTo : JobDriver
     {
@@ -27,6 +28,7 @@ namespace AIPawnControl
         private int attempts;
         private int talkStartTick = -1;
         private int nextTryTick;
+        private bool waitingForAnswer; // not saved: the question isn't either, so a reload asks again
 
         private Pawn Target => (Pawn)job.targetA.Thing;
 
@@ -64,8 +66,18 @@ namespace AIPawnControl
                     return;
                 }
                 string line = MindManager.Instance?.MindOf(pawn)?.TalkLine(job);
+                if (waitingForAnswer)
+                {
+                    WaitForAnswer(line);
+                    return;
+                }
                 if (SpeechLog.WithLine(pawn, line, () => pawn.interactions.TryInteractWith(Target, job.interaction)))
                 {
+                    if (Romance.IsAsk(job.interaction) && MindManager.Instance?.MindOf(Target)?.Asking(pawn) == true)
+                    {
+                        waitingForAnswer = true;
+                        return;
+                    }
                     Report(true, null);
                     EndJobWith(JobCondition.Succeeded);
                     return;
@@ -83,9 +95,29 @@ namespace AIPawnControl
             yield return talk;
         }
 
+        /// <summary>Runs the held ask once the asked mind has answered; ends the job if it dropped the question.</summary>
+        private void WaitForAnswer(string line)
+        {
+            var mind = MindManager.Instance?.MindOf(Target);
+            if (mind == null || !mind.Asking(pawn))
+            {
+                Report(false, "they didn't answer");
+                EndJobWith(JobCondition.Incompletable);
+                return;
+            }
+            if (!(mind.Answer(pawn) is bool accept) || !pawn.interactions.CanInteractNowWith(Target, job.interaction))
+                return;
+            if (SpeechLog.WithLine(pawn, line, () => Romance.WithAnswer(accept, () => pawn.interactions.TryInteractWith(Target, job.interaction))))
+            {
+                mind.Answered(pawn);
+                Report(true, null);
+                EndJobWith(JobCondition.Succeeded);
+            }
+        }
+
         private bool CheckGiveUp()
         {
-            if (talkStartTick < 0 || Find.TickManager.TicksGame - talkStartTick < GiveUpTicks)
+            if (waitingForAnswer || talkStartTick < 0 || Find.TickManager.TicksGame - talkStartTick < GiveUpTicks)
                 return false;
             Report(false, "I couldn't get to them in time");
             EndJobWith(JobCondition.Incompletable);
