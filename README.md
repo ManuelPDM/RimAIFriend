@@ -673,13 +673,13 @@ flowchart LR
 - **Speech:** a mind's lines show as vanilla play-log entries (bubbles, social log). Solo remarks never go
   into saves.
 - **Settings** (`mpreston.aipawncontrol`):
-  - **Model:** endpoint, model, temperature, timeout, max tokens, thinking, log prompts, parallel
+  - **Model:** endpoint, API key, model, temperature, timeout, max tokens, thinking, log prompts, parallel
     requests (1-4).
   - **Cadence:** periodic hours (4), decisions per day (10).
   - **Voice:** speak lines, chat bubbles.
   - **Features:** memory, building, chores, minds answer each other, answer colony choices,
     gatherings.
-  - **Embeddings:** endpoint, model.
+  - **Embeddings:** endpoint, API key (only with its own endpoint; otherwise the chat key), model.
   - **Buttons:** Test connection, Test embeddings, Reload prompts.
 
 ---
@@ -720,7 +720,10 @@ docs/test-scripts/         RimBridge Lua and Python helpers (see §15)
 - Harmony (Workshop 2009463077);
 - an OpenAI-compatible LLM server: LM Studio, Ollama, llama.cpp, vLLM or anything else that serves
   `/chat/completions` with `json_schema` structured output. It can be local or remote. Set its URL and
-  model in the mod settings.
+  model in the mod settings. A hosted one (OpenAI, Google's OpenAI-compatible endpoint, OpenRouter…) also
+  takes an API key: it is sent as an `Authorization: Bearer` header, only over https or to localhost (a
+  plain-http remote endpoint fails with an error instead), never written to the prompt log, and shown
+  masked in the settings. It is stored in plain text in the mod's settings file in the game's Config folder.
 - an `/embeddings` endpoint, which is only needed for memory recall. By default it's the same server.
 
 ```

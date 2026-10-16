@@ -8,6 +8,7 @@ namespace AIPawnControl
     public class Settings : ModSettings
     {
         public string endpoint = "http://localhost:1234/v1";
+        public string apiKey = "";      // sent as a Bearer header; empty: none
         public string model = "qwen/qwen3.6-35b-a3b";
         public float temperature = 0.7f;
         public bool thinking;
@@ -26,6 +27,7 @@ namespace AIPawnControl
         public bool gatherings = true;     // off: no rituals, roles, reforms, parties or weddings started by minds (IDEOLOGY.md)
         public int parallelRequests = 4;  // requests LM Studio runs at once (its own parallel setting must allow it)
         public string embedEndpoint = ""; // empty: same as the chat endpoint
+        public string embedApiKey = "";   // used only when embedEndpoint is set
         public string embedModel = "google/embedding-gemma-300m";
         public int embedDims;              // the model's own size, as detected by "Test embeddings"
         public string embedDimsModel;      // the model embedDims was detected for
@@ -36,10 +38,13 @@ namespace AIPawnControl
         private string actsBuffer;
         private string timeoutBuffer;
         private string maxTokensBuffer;
+        private bool showApiKey;
+        private bool showEmbedApiKey;
 
         public override void ExposeData()
         {
             Scribe_Values.Look(ref endpoint, "endpoint", "http://localhost:1234/v1");
+            Scribe_Values.Look(ref apiKey, "apiKey", "");
             Scribe_Values.Look(ref model, "model", "qwen/qwen3.6-35b-a3b");
             Scribe_Values.Look(ref temperature, "temperature", 0.7f);
             Scribe_Values.Look(ref thinking, "thinking");
@@ -58,12 +63,30 @@ namespace AIPawnControl
             Scribe_Values.Look(ref gatherings, "gatherings", true);
             Scribe_Values.Look(ref parallelRequests, "parallelRequests", 4);
             Scribe_Values.Look(ref embedEndpoint, "embedEndpoint", "");
+            Scribe_Values.Look(ref embedApiKey, "embedApiKey", "");
             Scribe_Values.Look(ref embedModel, "embedModel", "google/embedding-gemma-300m");
             Scribe_Values.Look(ref embedDims, "embedDims");
             Scribe_Values.Look(ref embedDimsModel, "embedDimsModel");
         }
 
         public string EmbedEndpoint => string.IsNullOrWhiteSpace(embedEndpoint) ? endpoint : embedEndpoint;
+        public string EmbedApiKey => string.IsNullOrWhiteSpace(embedEndpoint) ? apiKey : embedApiKey;
+
+        /// <summary>A labeled key field that shows only asterisks until "Show" is pressed.</summary>
+        private static string KeyEntry(Listing_Standard list, string label, string key, ref bool shown)
+        {
+            Rect row = list.GetRect(Text.LineHeight);
+            list.Gap(list.verticalSpacing);
+            Rect field = new Rect(row.x, row.y, row.width - 64f, row.height);
+            Widgets.Label(field.LeftHalf(), label);
+            if (shown)
+                key = Widgets.TextField(field.RightHalf(), key);
+            else
+                Widgets.Label(field.RightHalf(), new string('*', System.Math.Min(key.Length, 24)));
+            if (Widgets.ButtonText(row.RightPartPixels(60f), (shown ? "AIPawnControl_HideKey" : "AIPawnControl_ShowKey").Translate()))
+                shown = !shown;
+            return key;
+        }
 
         public void DoWindowContents(Rect rect)
         {
@@ -71,6 +94,7 @@ namespace AIPawnControl
             list.Begin(rect);
 
             endpoint = list.TextEntryLabeled("AIPawnControl_Endpoint".Translate(), endpoint);
+            apiKey = KeyEntry(list, "AIPawnControl_ApiKey".Translate(), apiKey, ref showApiKey);
             model = list.TextEntryLabeled("AIPawnControl_Model".Translate(), model);
             list.Label("AIPawnControl_Temperature".Translate(temperature.ToString("0.00")));
             temperature = list.Slider(temperature, 0f, 1.5f);
@@ -104,6 +128,8 @@ namespace AIPawnControl
             list.Label("AIPawnControl_ParallelRequests".Translate(parallelRequests), tooltip: "AIPawnControl_ParallelRequestsTip".Translate());
             parallelRequests = (int)System.Math.Round(list.Slider(parallelRequests, 1, 4));
             embedEndpoint = list.TextEntryLabeled("AIPawnControl_EmbedEndpoint".Translate(), embedEndpoint);
+            if (!string.IsNullOrWhiteSpace(embedEndpoint))
+                embedApiKey = KeyEntry(list, "AIPawnControl_EmbedApiKey".Translate(), embedApiKey, ref showEmbedApiKey);
             embedModel = list.TextEntryLabeled("AIPawnControl_EmbedModel".Translate(), embedModel);
             if (list.ButtonText("AIPawnControl_TestEmbeddings".Translate()))
             {

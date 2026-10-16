@@ -4,6 +4,9 @@
 
   <!-- Settings -->
   <AIPawnControl_Endpoint>Endpoint (OpenAI-compatible)</AIPawnControl_Endpoint>
+  <AIPawnControl_ApiKey>API key (empty: none)</AIPawnControl_ApiKey>
+  <AIPawnControl_ShowKey>Show</AIPawnControl_ShowKey>
+  <AIPawnControl_HideKey>Hide</AIPawnControl_HideKey>
   <AIPawnControl_Model>Model</AIPawnControl_Model>
   <AIPawnControl_Temperature>Temperature: {0}</AIPawnControl_Temperature>
   <AIPawnControl_Timeout>Timeout (seconds)</AIPawnControl_Timeout>
@@ -38,6 +41,7 @@
   <AIPawnControl_ParallelRequestsTip>How many requests go to the model server at once. More than 1 only helps if the server runs requests in parallel (LM Studio's parallel option). Waiting requests go in order: your chat, answers between colonists, decisions, then the base, personas and nightly reflection.</AIPawnControl_ParallelRequestsTip>
   <AIPawnControl_MemoryTip>Off: no nightly reflection and no recalled memories in prompts. What happens is still noted.</AIPawnControl_MemoryTip>
   <AIPawnControl_EmbedEndpoint>Embedding endpoint (empty: same as above)</AIPawnControl_EmbedEndpoint>
+  <AIPawnControl_EmbedApiKey>Embedding API key (empty: none)</AIPawnControl_EmbedApiKey>
   <AIPawnControl_EmbedModel>Embedding model</AIPawnControl_EmbedModel>
   <AIPawnControl_TestEmbeddings>Test embeddings</AIPawnControl_TestEmbeddings>
   <AIPawnControl_EmbedTestOk>OK in {0}s: the model makes {1}-number vectors; memories store {2}.</AIPawnControl_EmbedTestOk>

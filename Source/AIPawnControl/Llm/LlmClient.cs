@@ -158,6 +158,7 @@ namespace AIPawnControl
                 maxTokens = settings.maxTokens;
             var request = new LlmRequest(callType);
             string url = settings.endpoint.TrimEnd('/') + "/chat/completions";
+            string apiKey = settings.apiKey;
             int timeoutSeconds = settings.timeoutSeconds;
             int slots = Math.Max(1, settings.parallelRequests);
 
@@ -188,7 +189,7 @@ namespace AIPawnControl
 
             Task.Run(async () =>
             {
-                LlmResult result = await Run(request, url, bodyJson, timeoutSeconds, slots);
+                LlmResult result = await Run(request, url, apiKey, bodyJson, timeoutSeconds, slots);
                 ModLog.Prompt(new Dictionary<string, object>
                 {
                     ["id"] = request.Id,
@@ -212,7 +213,7 @@ namespace AIPawnControl
             return request;
         }
 
-        private static async Task<LlmResult> Run(LlmRequest request, string url, string bodyJson, int timeoutSeconds, int slots)
+        private static async Task<LlmResult> Run(LlmRequest request, string url, string apiKey, string bodyJson, int timeoutSeconds, int slots)
         {
             var result = new LlmResult();
             var watch = Stopwatch.StartNew();
@@ -225,8 +226,8 @@ namespace AIPawnControl
                 watch.Restart(); // don't count time spent waiting behind another request
                 request.Cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
-                var content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-                using (var response = await http.PostAsync(url, content, request.Cts.Token).ConfigureAwait(false))
+                using (var message = Post(url, bodyJson, apiKey))
+                using (var response = await http.SendAsync(message, request.Cts.Token).ConfigureAwait(false))
                 {
                     string text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     if (!response.IsSuccessStatusCode)
@@ -252,6 +253,26 @@ namespace AIPawnControl
                 result.Seconds = watch.Elapsed.TotalSeconds;
             }
             return result;
+        }
+
+        /// <summary>
+        /// A JSON POST, with the API key (if any) as a Bearer header. The key only goes over https or to this machine,
+        /// and never into the URL or the prompt log.
+        /// </summary>
+        internal static HttpRequestMessage Post(string url, string bodyJson, string apiKey)
+        {
+            var message = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(bodyJson, Encoding.UTF8, "application/json"),
+            };
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                var uri = new Uri(url);
+                if (uri.Scheme != Uri.UriSchemeHttps && !uri.IsLoopback)
+                    throw new InvalidOperationException("API key not sent: the endpoint must be https (or localhost)");
+                message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey.Trim());
+            }
+            return message;
         }
 
         private static void ParseCompletion(string text, LlmResult result)

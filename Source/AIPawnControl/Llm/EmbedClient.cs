@@ -35,6 +35,7 @@ namespace AIPawnControl
             var settings = AIPawnControlMod.Settings;
             string model = settings.embedModel;
             string url = settings.EmbedEndpoint.TrimEnd('/') + "/embeddings";
+            string apiKey = settings.EmbedApiKey;
             int timeoutSeconds = settings.timeoutSeconds;
             string prefix = Embedding.Prefix(model, query);
             var body = new Dictionary<string, object>
@@ -46,7 +47,7 @@ namespace AIPawnControl
 
             Task.Run(async () =>
             {
-                EmbedResult result = await Run(model, url, bodyJson, texts.Count, timeoutSeconds);
+                EmbedResult result = await Run(model, url, apiKey, bodyJson, texts.Count, timeoutSeconds);
                 ModLog.Prompt(new Dictionary<string, object>
                 {
                     ["callType"] = query ? "embed-query" : "embed",
@@ -62,7 +63,7 @@ namespace AIPawnControl
             });
         }
 
-        private static async Task<EmbedResult> Run(string model, string url, string bodyJson, int count, int timeoutSeconds)
+        private static async Task<EmbedResult> Run(string model, string url, string apiKey, string bodyJson, int count, int timeoutSeconds)
         {
             var result = new EmbedResult();
             var watch = Stopwatch.StartNew();
@@ -70,8 +71,8 @@ namespace AIPawnControl
             {
                 try
                 {
-                    var content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-                    using (var response = await http.PostAsync(url, content, cts.Token).ConfigureAwait(false))
+                    using (var message = LlmClient.Post(url, bodyJson, apiKey))
+                    using (var response = await http.SendAsync(message, cts.Token).ConfigureAwait(false))
                     {
                         string text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                         if (!response.IsSuccessStatusCode)
