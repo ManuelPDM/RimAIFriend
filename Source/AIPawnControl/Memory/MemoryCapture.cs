@@ -199,8 +199,10 @@ namespace AIPawnControl
     {
         private static void Postfix(Letter let, int delayTicks)
         {
-            if (delayTicks <= 0) // a delayed letter comes back through here when it arrives
-                MemoryCapture.OnLetter(let);
+            if (delayTicks > 0) // a delayed letter comes back through here when it arrives
+                return;
+            MemoryCapture.OnLetter(let);
+            DangerPlan.Instance?.Announce(let);
         }
     }
 

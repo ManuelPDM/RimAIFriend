@@ -268,7 +268,7 @@ The mind only knows what these show, and every mind knows the whole map.
 | `[Rooms]` | the room the pawn is in, then up to 12 others: impressiveness, temperature, builder, furniture |
 | `[Recent]` | the pawn's last 5 decisions |
 | `[Group chat]` | the summary, then the last 5 messages |
-| `[Danger]` | only during threats: enemies, who they're after, the pawn's weapon, who's armed, the plan and the pawn's part |
+| `[Danger]` | only during threats: enemies, who they're after, the pawn's weapon, who's armed, the plan and the pawn's part, each announced predator's own description |
 | memory sections | `[Since yesterday]`, `[About X]`, `[On my mind]`, `[I remember]`, `[From my diary]` (see §6) |
 
 Which call gets which sections:
@@ -542,7 +542,10 @@ that, Reflect changes one work type per night. Patient, bed rest and firefightin
 ## 9. Danger
 
 Danger is anything vanilla treats as an active threat to the colony: raiders, manhunters, awake
-mechs, a predator hunting a colonist.
+mechs, a predator hunting a colonist. Also **announced predators**: wild predators a letter points at
+when they arrive (a Feralisk clutch mother, say). They're danger until the plan fights nobody, then
+they're left be (danger again only by vanilla's test). `[Danger]` shows each one's own description.
+The list isn't saved.
 
 ```mermaid
 sequenceDiagram
@@ -566,7 +569,7 @@ sequenceDiagram
 - The Ideology leader plans if able; otherwise the first mind to react does. Everyone else waits for
   the plan.
 - **Hold the base:** fighters take spots near the threatened edge, ordered by line of sight, then
-  cover, then distance.
+  cover, then distance. Not offered when the only danger is announced predators.
 - **Go out together:** fighters gather at their spots, then go after the nearest enemy together.
 - **Save X:** one per colonist under attack; fighters go after X's attacker.
 - **No fighting:** always offered.

@@ -15,10 +15,12 @@ namespace AIPawnControl
     {
         /// <summary>
         /// Hostile things that are an active threat to the colony now, by vanilla's own test: raiders, manhunters, awake
-        /// mechs, and a predator hunting a colonist (GenHostility counts it hostile while it hunts).
+        /// mechs, and a predator hunting a colonist (GenHostility counts it hostile while it hunts). Plus the wild predators
+        /// a letter announced, until a plan leaves them be (DangerPlan.Announced).
         /// </summary>
         public static List<Thing> Threats(Map map) =>
-            map.attackTargetsCache.TargetsHostileToColony.Where(t => GenHostility.IsActiveThreatToPlayer(t)).Select(t => t.Thing).ToList();
+            map.attackTargetsCache.TargetsHostileToColony.Where(t => GenHostility.IsActiveThreatToPlayer(t)).Select(t => t.Thing)
+                .Union(DangerPlan.Announced(map)).ToList();
 
         /// <summary>The colonist a threat is going after right now (its job's target or the enemy it fights), or null.</summary>
         public static Pawn Victim(Thing threat)
@@ -79,7 +81,7 @@ namespace AIPawnControl
 
         /// <summary>
         /// [Danger]: the threats by kind (count, weapons, the nearest one's distance), who they're going after, her own
-        /// weapon and fighting skills, and who else is armed. Null when there's no danger.
+        /// weapon and fighting skills, and who else is armed; each announced predator's own description. Null when there's no danger.
         /// </summary>
         public static string Line(Pawn pawn)
         {
@@ -102,7 +104,8 @@ namespace AIPawnControl
             parts.Add("Armed: " + (armed.Count > 0 ? string.Join(", ", armed) : "nobody else"));
             if (DangerPlan.Line(pawn) is string plan)
                 parts.Add(plan.TrimEnd('.'));
-            return string.Join(". ", parts) + ".";
+            return string.Join(". ", parts) + "." + string.Concat(DangerPlan.Announced(pawn.Map).GroupBy(p => p.def)
+                .Select(g => $"\n{Label(g.First())}: {g.Key.description}"));
         }
 
         // ---------- The danger menu ----------

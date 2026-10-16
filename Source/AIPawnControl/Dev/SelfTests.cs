@@ -55,6 +55,7 @@ namespace AIPawnControl
             new Test { name = "Upgrades", builds = true, run = UpgradesMatchVanilla },
             new Test { name = "Layout", builds = true, run = LayoutLines },
             new Test { name = "Danger response", builds = true, run = DangerOptions },
+            new Test { name = "Announced predator", builds = true, run = AnnouncedPredator },
         };
 
         [DebugAction(DevTools.Category, "Run self-tests", allowedGameStates = AllowedGameStates.PlayingOnMap)]
@@ -623,6 +624,51 @@ namespace AIPawnControl
                 "its own area and hostility response didn't come back");
             if (!hadInside)
                 map.areaManager.AllAreas.FirstOrDefault(a => a.Label == insideLabel)?.Delete();
+        }
+
+        /// <summary>
+        /// Changes the map (spawns a wild predator for a moment): a letter pointing at it makes it danger, [Danger] shows its
+        /// description, the plans are Out and No fighting (no Hold), and "No fighting" leaves it be.
+        /// </summary>
+        private static void AnnouncedPredator(Log log)
+        {
+            Map map = Map;
+            Pawn pawn = Colonists.FirstOrDefault();
+            var kind = DefDatabase<PawnKindDef>.AllDefs.FirstOrDefault(k => k.RaceProps?.Animal == true && k.RaceProps.predator);
+            if (pawn == null || kind == null || DangerPlan.Instance == null)
+            {
+                log.Line("no colonist or no predator kind: nothing to check");
+                return;
+            }
+            log.Check(DangerResponse.Threats(map).Count == 0, "there's danger before the test: its checks would mislead");
+            if (!CellFinder.TryFindRandomCellNear(pawn.Position, map, 30, c => c.Standable(map) && !c.Fogged(map) && c.DistanceTo(pawn.Position) > 20, out IntVec3 cell))
+            {
+                log.Fail("no cell to spawn the predator on");
+                return;
+            }
+            Pawn animal = PawnGenerator.GeneratePawn(kind);
+            GenSpawn.Spawn(animal, cell, map);
+            try
+            {
+                log.Check(!DangerResponse.Threats(map).Contains(animal), $"the {animal.KindLabel} is danger before any letter");
+                DangerPlan.Instance.Announce(LetterMaker.MakeLetter("test", "test", LetterDefOf.ThreatBig, animal));
+                log.Check(DangerResponse.Threats(map).Contains(animal), $"the announced {animal.KindLabel} isn't danger");
+                string line = DangerResponse.Line(pawn);
+                log.Line("[Danger] " + line);
+                log.Check(line != null && line.Contains(animal.def.description), "[Danger] doesn't show its description");
+                var mind = new PawnMind(pawn, null);
+                var plan = new DangerPlan.Plan { map = map };
+                DangerPlan.FindEdge(plan);
+                var options = DangerPlan.Options(plan, new List<PawnMind> { mind });
+                log.Line("plans: " + string.Join(" | ", options.Select(o => o.label)));
+                log.Check(options.All(o => o.kind != DangerPlan.Hold), "\"Hold the base\" offered against a wandering predator");
+                DangerPlan.Assign(plan, options.Last(), new List<PawnMind>(), new List<PawnMind>());
+                log.Check(!DangerResponse.Threats(map).Contains(animal), "still danger after \"No fighting\"");
+            }
+            finally
+            {
+                animal.Destroy();
+            }
         }
     }
 }

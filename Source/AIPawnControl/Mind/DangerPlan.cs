@@ -46,6 +46,7 @@ namespace AIPawnControl
         }
 
         private readonly Dictionary<Map, Plan> plans = new Dictionary<Map, Plan>();
+        private readonly HashSet<Pawn> announced = new HashSet<Pawn>(); // wild predators a letter pointed at, until a plan leaves them be
 
         private static DangerPlan instance;
         private readonly Game game;
@@ -59,6 +60,23 @@ namespace AIPawnControl
         }
 
         public static Plan Of(Map map) => map != null && Instance != null && Instance.plans.TryGetValue(map, out var plan) ? plan : null;
+
+        // ---------- Announced creatures ----------
+
+        /// <summary>A letter pointing at wild predators on a map: they're danger there until a plan without fighting leaves them be.</summary>
+        internal void Announce(Letter letter)
+        {
+            foreach (var p in letter.lookTargets?.targets.Select(t => t.Thing as Pawn) ?? Enumerable.Empty<Pawn>())
+                if (p != null && p.Spawned && p.Faction == null && p.RaceProps.Animal && p.RaceProps.predator)
+                    announced.Add(p);
+        }
+
+        /// <summary>The announced predators still wild on this map.</summary>
+        public static IEnumerable<Pawn> Announced(Map map) => Instance == null ? Enumerable.Empty<Pawn>()
+            : Instance.announced.Where(p => p.Spawned && !p.Dead && p.Map == map && p.Faction == null);
+
+        /// <summary>The plan fights nobody: the announced predators on its map are left be (they're danger again only by vanilla's test).</summary>
+        private static void LeaveBe(Map map) => Instance?.announced.RemoveWhere(p => !p.Spawned || p.Map == map);
 
         // ---------- Making the plan ----------
 
@@ -89,10 +107,14 @@ namespace AIPawnControl
             if (Ask(leader ?? mind, plan, leader != null))
                 return true;
             plan.made = true; // nothing to pick: no plan, everyone thinks for herself
+            LeaveBe(map);
             return false;
         }
 
-        /// <summary>The plans possible now: Hold and Out need the base's rooms and someone who can fight; Save, someone attacked.</summary>
+        /// <summary>
+        /// The plans possible now: Hold and Out need the base's rooms and someone who can fight (Hold, something other than
+        /// announced predators, which only wander); Save, someone attacked.
+        /// </summary>
         internal static List<Option> Options(Plan plan, List<PawnMind> candidates)
         {
             var options = new List<Option>();
@@ -101,7 +123,8 @@ namespace AIPawnControl
             {
                 if (plan.edge.IsValid)
                 {
-                    options.Add(new Option { kind = Hold, label = $"Hold the base: the fighters wait just outside the base on the {plan.side} side, where the enemy is, and fight what comes to them. Home advantage: they're in place first, and the enemy has to come to them" });
+                    if (threats.Except(Announced(plan.map)).Any())
+                        options.Add(new Option { kind = Hold, label = $"Hold the base: the fighters wait just outside the base on the {plan.side} side, where the enemy is, and fight what comes to them. Home advantage: they're in place first, and the enemy has to come to them" });
                     options.Add(new Option { kind = Out, label = $"Go out together: the fighters meet just outside the base on the {plan.side} side, and once they're all there, go after the enemy together" });
                 }
                 foreach (var group in threats.Select(t => (t, victim: DangerResponse.Victim(t))).Where(x => x.victim != null).GroupBy(x => x.victim))
@@ -261,6 +284,8 @@ namespace AIPawnControl
             }
             if (plan.fighters.Count == 0 && option.kind != None)
                 plan.picked = option = new Option { kind = None, label = "No fighting" }; // a fight with nobody in it is no fight
+            if (option.kind == None)
+                LeaveBe(plan.map);
             foreach (var m in inside)
             {
                 MindActions.GoInside(m);
