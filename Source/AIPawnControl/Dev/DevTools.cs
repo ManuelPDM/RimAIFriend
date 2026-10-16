@@ -100,17 +100,20 @@ namespace AIPawnControl
                 act(mind);
         }
 
-        /// <summary>The selected mind starts a deep talk with another mind, with a fixed line asking for help, so the Reply runs without an Act.</summary>
-        [DebugAction(Category, "Talk to mind now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
-        private static List<DebugActionNode> TalkToMindNow() =>
+        /// <summary>The selected mind writes to another mind now (Message call), past the budget, so a thread starts without an Act.</summary>
+        [DebugAction(Category, "Message call now", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        private static List<DebugActionNode> MessageNow() =>
             (MindManager.Instance?.Minds ?? new List<PawnMind>()).Select(other => new DebugActionNode(other.pawn.LabelShort, DebugActionType.Action, () =>
             {
                 PawnMind mind = SelectedMind();
                 if (mind == null || mind == other)
                     return;
-                string result = MindActions.TalkTo(mind, other.pawn, InteractionDefOf.DeepTalk, $"{other.pawn.LabelShort}, could you cut some trees for us? We're short on wood.");
-                mind.AddDecision($"(dev) talk to {other.pawn.LabelShort}: {result}");
-                ModLog.Message($"{mind.pawn.LabelShort} (dev) talk to {other.pawn.LabelShort}: {result}");
+                if (mind.persona == null || mind.Thinking)
+                {
+                    Reject($"{mind.pawn.LabelShort} {(mind.Thinking ? "is thinking already" : "has no persona yet")}.");
+                    return;
+                }
+                mind.AddDecision("(dev) " + mind.StartMessage(other.pawn), importance: 0);
             })).ToList();
 
         /// <summary>The nearest colonist without a mind steps next to this mind and asks it out the vanilla way, as a random

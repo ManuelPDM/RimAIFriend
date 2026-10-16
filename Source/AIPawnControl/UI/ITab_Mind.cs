@@ -53,7 +53,7 @@ namespace AIPawnControl
             Section(sb, "AIPawnControl_TabRecent", mind.decisions.Count > 0 ? string.Join("\n", Enumerable.Reverse(mind.decisions)) : "…");
             if (mind.memory.diary.Count > 0)
                 Section(sb, "AIPawnControl_TabDiary", mind.memory.diary[mind.memory.diary.Count - 1].text);
-            sb.AppendLine("AIPawnControl_TabBudget".Translate(Mathf.Max(0, mind.ActsLeft)).ToString());
+            sb.AppendLine("AIPawnControl_TabBudget".Translate(Mathf.Max(0, mind.ActsLeft), Mathf.Max(0, mind.MessagesLeft)).ToString());
 
             Rect inner = new Rect(0f, 0f, size.x, size.y).ContractedBy(12f);
             inner.yMin += 20f; // leave room for the tab's close button
@@ -61,6 +61,8 @@ namespace AIPawnControl
             Rect viewRect = new Rect(0f, 0f, outRect.width - 16f, lastHeight);
             if (Widgets.ButtonText(new Rect(inner.xMax - 110f, inner.y, 110f, 26f), "AIPawnControl_MemoriesButton".Translate()))
                 Find.WindowStack.Add(new Dialog_Memories(mind));
+            if (Widgets.ButtonText(new Rect(inner.xMax - 226f, inner.y, 110f, 26f), "AIPawnControl_MessagesButton".Translate()))
+                Find.WindowStack.Add(new Dialog_Messages(mind));
             Widgets.BeginScrollView(outRect, ref scroll, viewRect);
             string text = sb.ToString().TrimEnd();
             lastHeight = Text.CalcHeight(text, viewRect.width);

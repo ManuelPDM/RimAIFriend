@@ -49,6 +49,7 @@ namespace AIPawnControl
             new Test { name = "Memory", run = Memory },
             new Test { name = "Hygiene", run = HygieneFixtures },
             new Test { name = "Customs", run = CustomsAndGatherings },
+            new Test { name = "Together", run = TogetherActivities },
             new Test { name = "Every kind builds", builds = true, run = EveryKindBuilds },
             new Test { name = "Workshop benches", builds = true, run = WorkshopBenches },
             new Test { name = "Materials get marked", builds = true, run = MaterialsGetMarked },
@@ -193,16 +194,20 @@ namespace AIPawnControl
                         ActionCatalog.ChatSchema(menu, recall.Shown));
                 });
                 if (Colonists.FirstOrDefault(p => p != pawn) is Pawn other)
-                    Try("reply", () =>
+                    Try("message", () =>
                     {
+                        var menu = ActionCatalog.BuildActMenu(pawn, mind, inConversation: true);
                         var recall = Recall.Conversation(mind, other.LabelShort, null, null, 3, peek: true);
-                        Check("reply", mind.ReplyMessages(other.LabelShort, "Nice weather today.", "chitchat", "(just answer)", recall), null);
+                        Check("message", mind.MessageMessages(other, $"{other.LabelShort} is talking to you.",
+                            DirectMessages.Full(DirectMessages.Instance?.Thread(pawn, other, create: false), pawn, pawn.Map), "Nice weather today.", ActionCatalog.DescribeMenu(menu), recall),
+                            PawnMind.MessageSchema(menu, recall.Shown));
                     });
                 if (Colonists.FirstOrDefault(p => p != pawn) is Pawn asker)
                     Try("answer", () =>
                     {
                         var recall = Recall.Conversation(mind, asker.LabelShort, null, null, 3, peek: true);
-                        Check("answer", mind.AnswerMessages(asker.LabelShort, InteractionDefOf.RomanceAttempt.label, "Want to watch the stars with me tonight?", recall), null);
+                        Check("answer", mind.AnswerMessages(asker.LabelShort, $"{asker.LabelShort} just came over to talk to you ({InteractionDefOf.RomanceAttempt.label}).",
+                            "Want to watch the stars with me tonight?", recall), null);
                     });
                 Try("base", () =>
                 {
@@ -354,6 +359,29 @@ namespace AIPawnControl
                     foreach (var to in Customs.Alternatives(custom))
                         log.Check(to.issue == custom.def.issue && to != custom.def, $"reform value {to.defName} isn't a swap within {custom.def.issue.defName}");
             log.Line(DevTools.CustomsText(Map).Split('\n').Length + " lines in the customs report");
+        }
+
+        /// <summary>
+        /// For every pair of colonists: what they could do together builds without throwing, each activity once, with game
+        /// words for a label; the Message call's menu has a line for each, for that pawn only; and nothing during danger.
+        /// </summary>
+        private static void TogetherActivities(Log log)
+        {
+            foreach (var pawn in Colonists)
+                foreach (var other in Colonists.Where(p => p != pawn))
+                {
+                    var activities = Together.For(pawn, other);
+                    log.Check(activities.Select(a => a.key).Distinct().Count() == activities.Count, $"{pawn.LabelShort} + {other.LabelShort}: an activity twice");
+                    foreach (var a in activities)
+                        log.Check(!string.IsNullOrWhiteSpace(a.label) && !a.label.Contains("TargetA"), $"{pawn.LabelShort} + {other.LabelShort}: {a.key} has the label \"{a.label}\"");
+                    log.Line($"{pawn.LabelShort} + {other.LabelShort}: {(activities.Count > 0 ? string.Join(" | ", activities.Select(a => a.label)) : "nothing now")}");
+                    var menu = ActionCatalog.BuildActMenu(pawn, DevTools.MindOrStandIn(pawn), inConversation: true, talkingTo: other);
+                    var lines = menu.Where(o => o.Key.StartsWith("together ")).ToList();
+                    if (other != MindManager.Instance?.PlayingAs)
+                        log.Check(lines.Count == activities.Count, $"{pawn.LabelShort} → {other.LabelShort}: {lines.Count} menu lines for {activities.Count} activities");
+                    log.Check(lines.All(o => o.Target == other), $"{pawn.LabelShort} → {other.LabelShort}: a together line for someone else");
+                    log.Check(DangerResponse.Threats(Map).Count == 0 || activities.Count == 0, $"{pawn.LabelShort} + {other.LabelShort}: offered during danger");
+                }
         }
 
         private static void HygieneFixtures(Log log)

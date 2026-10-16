@@ -5,7 +5,7 @@ does, says and remembers. It can be any OpenAI-compatible server, local or remot
 
 - has a persona;
 - keeps long-term memory and a nightly diary;
-- talks to the player and to the other minds;
+- talks to the player and to the other minds, near or far;
 - grows the base;
 - reacts to danger as a group;
 - takes part in the colony's customs.
@@ -85,7 +85,8 @@ flowchart LR
 
 `MindManager` runs every mind's `CheckTriggers()` every 250 ticks (6 in-game minutes). This is game
 time, so it stops while the game is paused. A separate per-frame update handles player chat and
-replies to other minds, and it keeps running while paused. [Game time vs real time](#game-time-vs-real-time)
+romance answers, and it keeps running while paused. A mind answers someone talking to it face to
+face from `CheckTriggers`, so that stops while paused. [Game time vs real time](#game-time-vs-real-time)
 explains what these durations look like in play.
 
 ```mermaid
@@ -102,7 +103,9 @@ flowchart TD
     Persona -- no --> PCall["Persona call"] --> Stop
     Persona -- yes --> Plan{"Danger and no<br/>colony plan yet?"}
     Plan -- "leader / first mind" --> PlanCall["Plan call<br/>(others wait)"]
-    Plan -- "plan made or no danger" --> Trig{"Which trigger?"}
+    Plan -- "plan made or no danger" --> Unread{"Unread line from someone<br/>in interaction range, no danger,<br/>messages left today?"}
+    Unread -- yes --> MCall["Message call<br/>(answer or leave it)"]
+    Unread -- no --> Trig{"Which trigger?"}
     Trig --> T1["Something important changed"]
     Trig --> T2["Check-in time<br/>(2h after 'keep going')"]
     Trig --> T3["A few hours passed<br/>(periodicHours, default 4)"]
@@ -110,11 +113,11 @@ flowchart TD
     T1 & T2 & T3 & T4 --> Gate{"≥1 game hour and 10 s since last think?<br/>Decisions left today? (danger skips both checks)"}
     Gate -- no --> Stop
     Gate -- yes --> Act["Act call"]
-    Act --> Apply["Re-check option still offered → apply<br/>speak 'say' · log decision · pass group-chat turn"]
+    Act --> Apply["Re-check option still offered → apply<br/>log decision · pass group-chat turn"]
     Apply --> Follow{"Follow-up call?"}
     Follow -- "work on the base" --> Base["Base call"] --> Up{"picked 'upgrade X'?"} -- yes --> Upg["Upgrade call"]
     Follow -- "post in group chat" --> Post["Post call"]
-    Follow -- "talk to a mind" --> Reply["the other mind's Reply call"]
+    Follow -- "talk to someone" --> Msg["Message call"]
 ```
 
 ### Game time vs real time
@@ -155,7 +158,10 @@ The first trigger that matches wins. Its text goes into `act.txt` as `{trigger}`
 
 - **Daily budget:** `actsPerDay` (default 10) Acts per local day.
   - Danger Acts are free and still run when the budget is at 0.
-  - Each action in a Reply costs 1. An action from a player Chat is free.
+  - Each action in a Message call costs 1. An action from a player Chat is free.
+- **Message budget:** `messagesPerDay` (default 20) Message calls that send something, per local day.
+  Leaving a thread for now is free. At 0, unread messages wait for the next day and "talk to someone"
+  leaves the menu.
   - A Base call with nothing to offer gives the decision back.
 - **Spacing:** at least 1 game hour and 10 real seconds between thinks. Danger skips the hour.
 - **Back-off:** 3 failures in a row (HTTP error, timeout, empty or invalid reply, a pick not on the
@@ -170,7 +176,7 @@ The first trigger that matches wins. Its text goes into `act.txt` as `{trigger}`
   | Priority | Calls |
   |---|---|
   | 0 | chat |
-  | 1 | reply, answer, decide, plan |
+  | 1 | message, answer, decide, plan |
   | 2 | act, upgrade |
   | 3 | base, post |
   | 4 | persona |
@@ -186,8 +192,7 @@ appears when it's possible right now. Unavailable options are hidden, never expl
 ```mermaid
 flowchart LR
     Act(["Act call"]) --> K["keep going"]
-    Act --> T["talk to someone<br/>(with, tone)"]
-    Act --> R["ask out / propose /<br/>break up"]
+    Act --> T["talk to someone<br/>(with)"]
     Act --> B["work on the base…"]
     Act --> G["faith line:<br/>bury · ritual · role"]
     Act --> P["throw a party /<br/>hold our wedding"]
@@ -195,8 +200,9 @@ flowchart LR
     Act --> D["danger options"]
 
     K --> K1["check in again in 2h"]
-    T --> T1["JobDriver_AITalkTo:<br/>walk over, vanilla interaction<br/>with the pawn's own line"] --> T2{"target is a mind?"} -- yes --> T3["Reply call<br/>(answer + maybe an act)"]
-    R --> R1["vanilla romance interaction"]
+    T --> T1["Message call → their thread;<br/>in range: vanilla interaction + bubble"]
+    T1 --> R1["its act menu: ask out / propose / break up<br/>→ walk over, vanilla romance interaction"]
+    T1 --> S1["its act menu: spend time with X now<br/>→ both get a vanilla joy job together"]
     B --> B1["Base call"] --> B2["room · layout · field · stockpile<br/>stock-up chore · warm/cool a room"]
     B1 --> B3["'upgrade X' → Upgrade call"]
     G --> G1["grave + funeral, or<br/>vanilla ritual / role change ceremony"]
@@ -207,18 +213,42 @@ flowchart LR
 
 | Option | When it's offered | What happens |
 |---|---|---|
-| **keep going** (job report) | Always | Carries on with vanilla's work. Plans a check-in 2 h later. During danger with a plan part, it reads "keep to my part in the plan (…)". |
-| **talk to someone** | Not in Chat/Reply; up to 5 awake colonists within 12 tiles | `with` picks the person and `tone` (positive/negative) the mood. Vanilla's weights pick the interaction, and the pawn's `say` is the line in the log and bubble. If the target is a mind, it answers with a **Reply** call. If it's the colonist the player plays ([§13](#13-player-ui-and-settings)), the line opens the speaker's Mind tab chat with a notice, and the player answers there. Cooldowns: 4 h per pair, a negative talk once a day, life-changing talks every 7 days. |
-| **ask X out / propose to X / break up with X** | Vanilla's selection weight > 0 and off cooldown | The vanilla romance interaction. Vanilla never starts these at random for a mind, so this option is the only way a mind does them. If the other pawn is a mind, it answers with an **Answer** call first (below). |
+| **keep going** (job report) | Not in Chat/Message (their act 0 is that) | Carries on with vanilla's work. Plans a check-in 2 h later. During danger with a plan part, it reads "keep to my part in the plan (…)". |
+| **talk to someone** | Not in Chat/Message; messages left today. Any other mind with a persona and the colonist the player plays, at any distance; colonists without a mind in vanilla's interaction range | `with` picks who. Opens the **Message call** ([§10](#private-messages)), which writes the words into their thread (to the played colonist: the Mind tab chat, [§13](#13-player-ui-and-settings)). In vanilla's interaction range they're also said out loud ([§10](#private-messages)). |
 | **work on the base: …** | `BaseCall.AnythingToDo` | Opens the **Base call** ([§7](#7-building-the-base)). While a project runs, the label reads "(X's barracks comes first)". |
 | **faith line** (at most one) | The `gatherings` setting is on; home map | Priority order: a burial, a due ritual obligation, a role, then an anytime ritual. See [§12](#12-ideology-gatherings-and-burials). |
 | **throw a party / hold our wedding** | Vanilla allows it now | Starts vanilla's gathering or marriage ceremony and posts it to the group chat. |
 | **post in the group chat** | Only the mind whose turn it is (round robin) | Opens the **Post call** ([§10](#10-group-chat)). |
 | **go inside / fight / help X** | Only while there's a threat. Danger replaces the rest of the menu. | See [§9](#9-danger). |
 
-Every Act reply also returns:
-- `say`: a remark spoken out loud as a bubble, or "" for silence;
-- `memory`: the memory from `[On my mind]` that shaped the choice, if any.
+Every Act reply also returns `memory`: the memory from `[On my mind]` that shaped the choice, if any. When the
+menu has a faith line or a party/wedding line (`act-announce.txt`), it also returns `say`: if the pawn starts
+one, that's what it tells the colony, posted with the group chat announcement. Nothing else is said aloud.
+
+**Ask X out / propose to X / break up with X** are not in the Act menu. They're in the **Message call**'s
+act menu, only for the pawn it's talking to, and only when that pawn is among the 5 nearest awake
+colonists within 12 tiles, vanilla's selection weight is > 0 and it's off cooldown (7 days). The message
+is the line: the pawn walks over (`JobDriver_AITalkTo`) and vanilla's romance interaction carries it. If
+the other pawn is a mind, it answers with an **Answer** call first. Vanilla never starts these at random
+for a mind, so this is the only way a mind does them.
+
+**Spend time with X now: …** is in the **Message call**'s act menu too, for the pawn it's talking to (not
+the colonist the player plays), so what two pawns agree to do together can happen (`Together`). One line per
+activity both can do right now, at any distance on the map, outside danger, both awake and free:
+- a joy thing vanilla lets more than one use at once (`joyMaxParticipants`: chess, poker, billiards, TV,
+  horseshoes), the nearest both can use;
+- a joy vanilla gives at a gathering spot (relaxing socially, a drink), at the nearest spot that gives both one;
+- with **Romance on the Rim** loaded, for lovers: each of its romantic interactions (stroll, skygaze, read
+  together…) whose own check passes now. It's found by name, so the mod isn't needed.
+
+The joy ones need both pawns' joy under vanilla's 92% (above it, vanilla gives no joy at a gathering). The
+label is vanilla's job report ("playing chess"). The message is the invitation:
+- **to a mind:** it answers with an **Answer** call. Its reply goes into their thread, and a yes starts it;
+- **to a colonist without a mind:** it comes along when what it's doing is something vanilla lets a joy or
+  social job interrupt (`casualInterruptible`) and isn't a player order.
+
+Starting it re-checks the activity, then orders each pawn one ordinary joy job (or Romance on the Rim's own
+lord). Vanilla's chatter, thoughts and joy while they're together do the rest, and both remember it.
 
 ---
 
@@ -231,17 +261,17 @@ persona and `guidance.txt`, plus its `[Who I am lately]`. All replies use a stri
 | Call | Template | Fired by | Returns | Result |
 |---|---|---|---|---|
 | **Persona** | `persona.txt` | first think with no persona; dev "Regenerate" | `persona` | 2-3 sentences with one big want, built from a passion and a trait. Then the pawn's starting work priorities are set from its passions. |
-| **Act** | `act.txt` (+ `danger.txt` during danger) | the triggers in §2 | `reason, choice, with, tone, say, memory` | Applies the pick. |
+| **Act** | `act.txt` (+ `danger.txt` during danger) | the triggers in §2 | `reason, choice, with, memory` (+ `say` with a faith or party line) | Applies the pick. |
 | **Chat** | `chat.txt` (+ `chat-player.txt`) | the player types in the Mind tab | `act, reply, memory` | The reply goes to the chat and memory, and the pawn may act from the menu. Wakes a sleeper. Played as a colonist, the prompt names that colonist and leaves out `chat-player.txt` (the player's "usually go along with it" stance). |
-| **Reply** | `reply.txt` | another mind talked to the pawn with a line | `act, reply, memory` | The answer is spoken, both minds remember it, and the pawn may act (costs 1 decision). |
-| **Answer** | `answer.txt` (+ `answer-said.txt` when a mind asks) | anyone asks the pawn out or proposes to it | `accept, reply, memory` | The attempt is held before vanilla's roll, and the asker waits by the pawn in a talk job. Vanilla then runs the interaction with the answer as its outcome (thoughts, relations, letter), and the reply is spoken. A question left 2 h unanswered is dropped and the attempt doesn't happen. The patch on vanilla's odds runs last, so the answer wins over mods that change them (Romance on the Rim). |
+| **Message** | `message.txt` | Act → "talk to someone", or an unread line from someone in vanilla's interaction range | `act, tone, message, memory` | The prompt shows the conversation as read so far, then what's new since. One message into the thread (costs 1 message); "" leaves it for now. In vanilla's interaction range it's said out loud. The pawn may act (costs 1 decision). |
+| **Answer** | `answer.txt` (+ `answer-said.txt` when a mind asks out) | anyone asks the pawn out or proposes to it; a mind asks it to spend time together | `accept, reply, memory` | Asked out or proposed to: the attempt is held before vanilla's roll, and the asker waits by the pawn in a talk job. Vanilla then runs the interaction with the answer as its outcome (thoughts, relations, letter), and the reply is spoken. The patch on vanilla's odds runs last, so the answer wins over mods that change them (Romance on the Rim). Asked along: the reply goes into their thread, and a yes starts the activity ([§3](#3-the-act-menu-and-what-each-choice-leads-to)). One question at a time; one left 2 h unanswered is dropped and doesn't happen. |
 | **Base** | `base.txt` | Act → "work on the base" | `reason, choice, site, material, say` | A room, layout change, field, stockpile, stock-up chore, temperature item, or Upgrade call. |
 | **Upgrade** | `upgrade.txt` | Base → "upgrade X" | `reason, choice, say` | A furnishing or floor project. |
 | **Post** | `post.txt` | Act → "post in the group chat" | `reason, post` | A message in the group chat. |
 | **Reflect** | `reflect.txt` | once a night | `diary, lately, memories[], people[], work` | Memory written and embedded; one work priority changed. |
 | **Decide** | `decide.txt` | an open colony choice | `reason, choice, say` | The choice is applied and posted to the group chat. |
 | **Plan** | `plan.txt` | danger starts | `reason, plan, fighters[], inside[], say` | Everyone gets their part; posted to the group chat. |
-| **Compact** | `compact.txt` | group chat has 15+ messages | `summary` | Older messages are folded into the summary. |
+| **Compact** | `compact.txt` / `compact-dm.txt` | group chat or a private thread has 15+ messages | `summary` | Older messages are folded into the summary. |
 
 The templates in `Prompts/` are loaded at runtime. Edit one and use the debug action **Reload
 prompts**; no rebuild is needed. Every prompt and reply is logged to
@@ -269,6 +299,7 @@ The mind only knows what these show, and every mind knows the whole map.
 | `[Rooms]` | the room the pawn is in, then up to 12 others: impressiveness, temperature, builder, furniture |
 | `[Recent]` | the pawn's last 5 decisions |
 | `[Group chat]` | the summary, then the last 5 messages |
+| `[Messages]` | each private thread active in the last day or unread: who, the unread count, the last 2 lines. The Mind tab chat with the colonist the player plays is one of them |
 | `[Danger]` | only during threats: enemies, who they're after, the pawn's weapon, who's armed, the plan and the pawn's part, each announced predator's own description |
 | memory sections | `[Since yesterday]`, `[About X]`, `[On my mind]`, `[I remember]`, `[From my diary]` (see §6) |
 
@@ -277,7 +308,7 @@ Which call gets which sections:
 | Call | Sections |
 |---|---|
 | Act | full snapshot + Since yesterday, About, On my mind |
-| Chat, Reply, Answer | full snapshot + Since yesterday, About, I remember, From my diary |
+| Chat, Message, Answer | full snapshot + Since yesterday, About, I remember, From my diary |
 | Post | full snapshot + Since yesterday, About |
 | Base, Decide, Plan | full snapshot + Since yesterday |
 | Reflect | Me, Time, Colony customs |
@@ -297,7 +328,7 @@ flowchart LR
         E2["talks: took part / saw"]
         E3["letters (news)"]
         E4["injuries, breaks,<br/>relations, tales"]
-        E5["chat, replies,<br/>group chat, decisions"]
+        E5["chat, messages,<br/>group chat, decisions"]
     end
     Capture --> Ev[("Events<br/>7-day log")]
     Ev --> Ref["Nightly Reflect<br/>(LLM)"]
@@ -322,7 +353,7 @@ flowchart LR
 | **Lately** | ≤600 chars about how the pawn has been. Rewritten nightly and added to every system prompt. |
 
 **Nightly Reflect** runs the first time the pawn is asleep after 22:00, or at 02:00 if it's awake. A
-missed night is made up later; a quiet day is skipped. A chat or a reply cancels it, and it runs
+missed night is made up later; a quiet day is skipped. A chat or a message cancels it, and it runs
 again later. It gets:
 - up to 40 events since the last Reflect;
 - the people involved, with the pawn's opinions and files;
@@ -613,6 +644,40 @@ flowchart LR
 - The prompts say a post is something someone *said*, not something that happened.
   `[Colony]`, `[Colony stores]` and `[Colony work]` show what's real.
 
+### Private messages
+
+Everything minds say to each other goes through `DirectMessages` (saved): one private thread per pair,
+with a summary, the lines since, and the last line each has read. Only the two of them ever see it.
+
+```mermaid
+flowchart LR
+    Act["Act → 'talk to someone'"] --> MC["Message call<br/>(whole thread)"]
+    MC -- "a message" --> TH[("thread")]
+    TH -- "unread, in range" --> MC2["the other's Message call"]
+    TH -- "unread, farther away" --> Later["[Messages] shows it unread;<br/>the reader's next Act may talk back"]
+    MC2 -- "a message, or '' to leave it" --> TH
+    TH --> Snap["[Messages] in every snapshot<br/>last 2 lines per thread"]
+    TH -- "≥15 lines" --> Compact["Compact call<br/>folds all but the last 5"]
+```
+
+- **Pacing:** face to face (in vanilla's interaction range), an unread line gets the reader's Message
+  call at its next trigger check once it's awake and free, with no danger and messages left. Farther
+  away it waits: `[Messages]` shows it as unread, and the reader's next Act may pick "talk to someone"
+  to answer. Nothing forces turns: either side can write again before an answer, and an empty reply
+  leaves the thread until someone writes.
+- The Message call's own thread is left out of its `[Messages]`, since the prompt shows it whole.
+- **Near or far:** when the other pawn is in vanilla's interaction range (`IsGoodPositionForInteraction`),
+  the words are also said out loud: vanilla's weights pick an interaction for the call's `tone` (chitchat or
+  deep talk; slight or insult), which carries them as its line with its thoughts, opinion and bubble.
+  With every interaction on cooldown (4 h per pair, a negative one once a day) it's just a bubble.
+  Farther away it's only the thread.
+- A colonist without a mind can only be talked to in range; it has no thread, since it can't answer.
+- The Message call's act menu also offers asking the other pawn out, proposing or breaking up ([§3](#3-the-act-menu-and-what-each-choice-leads-to)); then the message is that interaction's line instead of being said on the spot.
+- It also offers spending time with the other pawn now ([§3](#3-the-act-menu-and-what-each-choice-leads-to)); the message is the invitation, and another mind answers it.
+- Each sent burst is a `dm` event for both minds, so the night's Reflect sees the day's messages.
+  `[Since yesterday]` leaves them out, since `[Messages]` shows them.
+- Talking to the colonist the player plays uses the Mind tab chat as the thread and lands there.
+
 ---
 
 ## 11. Colony choices
@@ -672,8 +737,8 @@ flowchart LR
 - **Mind tab** (`ITab_Mind`):
   - status: thinking, paused and why, unreachable;
   - persona, note, lately, schedule, priorities;
-  - last reasoning, recent decisions, the latest diary entry, decisions left today;
-  - a **Memories** window;
+  - last reasoning, recent decisions, the latest diary entry, decisions and messages left today;
+  - a **Memories** window, and a **Messages** window with the pawn's private threads (read-only);
   - a **chat** with the colonist: the whole log, saved, with the day and time at the start of each
     conversation (a new one starts after 6 h of silence). The Chat call only gets the current
     conversation's last 16 lines; older talks reach it through memory.
@@ -683,10 +748,9 @@ flowchart LR
 - **Settings** (`mpreston.aipawncontrol`):
   - **Model:** endpoint, API key, model, temperature, timeout, max tokens, thinking, log prompts, parallel
     requests (1-4).
-  - **Cadence:** periodic hours (4), decisions per day (10).
+  - **Cadence:** periodic hours (4), decisions per day (10), messages per day (20).
   - **Voice:** speak lines, chat bubbles.
-  - **Features:** memory, building, chores, minds answer each other, answer colony choices,
-    gatherings.
+  - **Features:** memory, building, chores, answer colony choices, gatherings.
   - **Embeddings:** endpoint, API key (only with its own endpoint; otherwise the chat key), model.
   - **Play as** (only in a game; saved with it, on `MindManager`): a colonist without a mind, or nobody.
     The player's Mind tab chats and group chat posts then come from that colonist. Minds remember them as
@@ -711,15 +775,15 @@ Source/AIPawnControl/
   Core/      main-thread inbox, JSON, schemas, logging, flood fill, area sums, ground rules, time
   Llm/       chat client (queue, slots, schema), embeddings
   Mind/      MindManager, PawnMind (the cycle), SnapshotBuilder, PromptBuilder,
-             GroupChat, ColonyChoices, Customs, DangerResponse, DangerPlan
-  Actions/   ActionCatalog (Act menu), MindActions, talk job, Romance, Gatherings, Burials
+             GroupChat, DirectMessages, ColonyChoices, Customs, DangerResponse, DangerPlan
+  Actions/   ActionCatalog (Act menu), MindActions, talk job, Romance, Together, Gatherings, Burials
   Memory/    capture hooks, MindMemory, Reflection, Recall, Retrieval, People
   Building/  BaseCall, UpgradeCall, Ladder, Layout, SiteFinder, RoomValidator, RoomKind/RoomPlacer,
              Needs, Goods, BuildManager, Upgrades, Outfitting, Hygiene, AskedFor
   Chores/    ChoreManager, ChoreOptions, TreeCutting, Mining, Hunting, WildFood, WorkOrders,
              Supplies, Fields, Stockpiles, ZoneSites, FoodOutlook, ColonyWork, WorkWaiting
   Speech/    our lines inside vanilla log entries
-  UI/        gizmo, enable dialog, Mind tab, Memories window, group chat tab
+  UI/        gizmo, enable dialog, Mind tab, Memories and Messages windows, group chat tab
   Dev/       debug actions, dev gizmos, test fixtures, self-tests
 docs/test-scripts/         RimBridge Lua and Python helpers (see §15)
 ```
@@ -763,7 +827,7 @@ Close the game first; it locks the DLL.
 
 | Group | Actions |
 |---|---|
-| Mind | Think now, Reflect now, Regenerate persona, Talk to mind now, Chat as player…, Show context, Show retrieval, Queue status, Reload prompts, Toggle manual priorities |
+| Mind | Think now, Reflect now, Regenerate persona, Message call now, Chat as player…, Show context, Show retrieval, Queue status, Reload prompts, Toggle manual priorities |
 | Calls | Base call now, Upgrade call now, Group chat post/pass/compact, Choices show/answer/decide |
 | Danger | force Hold / Go out / Save / No fighting |
 | Customs | report, make fluid, reform; Gatherings start…; Burials kill selected |
@@ -773,7 +837,7 @@ Close the game first; it locks the DLL.
 
 **Self-tests** (`Run self-tests…`):
 - **all read-only** runs on any map: helpers, prompts, Base call menu, sites, chores, memory,
-  hygiene, customs.
+  hygiene, customs, spending time together.
 - **all (builds on this map)** needs a fresh quicktest map: every kind builds, materials get marked,
   upgrades, layout, danger response.
 

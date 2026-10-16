@@ -1,0 +1,2 @@
+Since you last answered, {other} said:
+{new}

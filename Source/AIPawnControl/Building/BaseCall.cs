@@ -528,7 +528,7 @@ namespace AIPawnControl
             return option.apply(mind);
         }
 
-        /// <summary>Her one remark (the Act's own "say" was dropped), then the decision line.</summary>
+        /// <summary>Her one remark, then the decision line.</summary>
         public static void RemarkAndLog(PawnMind mind, string rawSay, string result, string what)
         {
             string say = SpeechLog.Clean(rawSay);

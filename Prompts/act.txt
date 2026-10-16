@@ -5,13 +5,8 @@ It's {time}. {trigger}
 What do you do now? Pick one option by its number. "keep going" means carry on with your day: your work, meals, sleep and recreation happen on their own. Pick something else when it fits the colony's needs, your mood or who you are better right now.
 {menu}
 
-If you pick "talk to someone": "with" is who (one of: {talkto}), and "tone" is how: positive (friendly or personal) or negative (a jab or an insult; it hurts the relationship and can start a fight). How you feel about them ([People], [About ...]) and who you are decide it. Only people nearby can be talked to. Otherwise "with" is "-" and "tone" is "positive".
+If you pick "talk to someone": "with" is who (one of: {talkto}), and you write what you say next. Otherwise "with" is "-".{announce}{danger}
 
-Also write "say": what you say out loud, or "" to stay silent.
-- If you talk to someone, "say" is your opening line to them, in the tone you picked.
-- For anything else, only say something if you'd really say it out loud right now: a remark, a grumble, a word to someone nearby. Silence is fine.
-- 1-2 short sentences, under 120 characters, plain speech. No narration, no *actions*, no quotation marks. Only speak to people who are nearby; you can talk about anyone.{danger}
+If you pick "post in the group chat", you write the message next. [Group chat] is what people wrote, not what happened: if you or anyone said they'd do something, it isn't done until they choose it. [Recent], [Colony work] and [Colony stores] show what's actually done.
 
-If you pick "post in the group chat", you write the message next, so leave "say" "". [Group chat] is what people wrote, not what happened: if you or anyone said they'd do something, it isn't done until they choose it. [Recent], [Colony work] and [Colony stores] show what's actually done.
-
-Also write "memory": the M-number from [On my mind] if that memory shaped your choice or your words, otherwise 0.
+Also write "memory": the M-number from [On my mind] if that memory shaped your choice, otherwise 0.

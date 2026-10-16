@@ -34,25 +34,33 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// "talk to someone" (STREAMLINE.md §4): she picks the person and the tone, vanilla's weights pick the interaction
-        /// (chitchat or deep talk; slight or insult). A negative tone with nothing negative possible for the pair (the Kind
-        /// trait) falls back to a friendly one.
+        /// Words to someone in vanilla's interaction range are said out loud: vanilla's weights pick the interaction for the
+        /// tone (chitchat or deep talk; slight or insult), which carries the line with its thoughts, opinion and bubble. A
+        /// negative tone with nothing negative possible for the pair (the Kind trait) falls back to a friendly one; with every
+        /// interaction on cooldown it's just a bubble. Returns what was said out loud, or null when they're out of range.
         /// </summary>
-        public static string Talk(PawnMind mind, Pawn target, bool positive, string line)
+        public static string SayTo(PawnMind mind, Pawn target, bool positive, string line)
         {
-            var all = ActionCatalog.Interactions(mind.pawn, target, mind)
-                .Where(x => !ActionCatalog.LifeChangingInteractions.Contains(x.def.defName)).ToList();
+            Pawn pawn = mind.pawn;
+            if (!InRange(pawn, target))
+                return null;
+            var all = ActionCatalog.Interactions(pawn, target, mind).Where(x => !ActionCatalog.LifeChangingInteractions.Contains(x.def.defName)).ToList();
             var pick = all.Where(x => ActionCatalog.IsNegative(x.def) != positive).ToList();
-            string note = "";
-            if (pick.Count == 0 && !positive)
-            {
+            if (pick.Count == 0)
                 pick = all.Where(x => !ActionCatalog.IsNegative(x.def)).ToList();
-                note = " I couldn't bring myself to be unkind, so I kept it friendly.";
+            if (pick.TryRandomElementByWeight(x => x.weight, out var chosen) && SpeechLog.WithLine(pawn, line, () => pawn.interactions.TryInteractWith(target, chosen.def)))
+            {
+                mind.Interacted(target, chosen.def);
+                return chosen.def.label;
             }
-            if (!pick.TryRandomElementByWeight(x => x.weight, out var chosen))
-                return $"I've talked with {target.LabelShort} a lot lately; nothing more to say for now.";
-            return TalkTo(mind, target, chosen.def, line) + note;
+            if (AIPawnControlMod.Settings.speakLines)
+                SpeechLog.Say(pawn, line);
+            return "out loud";
         }
+
+        /// <summary>Close enough to talk face to face: vanilla's own test for an interaction between the two.</summary>
+        public static bool InRange(Pawn pawn, Pawn other) =>
+            pawn.Spawned && other.Spawned && pawn.Map == other.Map && SocialInteractionUtility.IsGoodPositionForInteraction(pawn, other);
 
         /// <param name="line">Her opening line, shown instead of vanilla's text when the interaction fires. May be null.</param>
         public static string TalkTo(PawnMind mind, Pawn target, InteractionDef interaction, string line)

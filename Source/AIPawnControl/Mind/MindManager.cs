@@ -80,7 +80,6 @@ namespace AIPawnControl
             foreach (var mind in minds)
             {
                 mind.UpdateChat();
-                mind.UpdateReply();
                 mind.UpdateAsked();
             }
         }

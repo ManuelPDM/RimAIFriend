@@ -8,7 +8,7 @@ using Verse;
 namespace AIPawnControl
 {
     /// <summary>
-    /// The memory sections of one Act, Chat or Reply prompt (PHASE3.md §6 budgets), and what she used of them. The
+    /// The memory sections of one Act, Chat or Message prompt (PHASE3.md §6 budgets), and what she used of them. The
     /// situation's query is embedded in the background first; everything else runs on the main thread.
     /// </summary>
     public class Recall
@@ -105,7 +105,7 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// Chat and Reply: the file of whoever she's talking to (the player, or the mind whose line she answers) and of anyone
+        /// Chat and Message: the file of whoever she's talking to (the player, or the other pawn in the thread) and of anyone
         /// they mention, up to max memories matched to what was said as [I remember], and the closest diary entry.
         /// </summary>
         public static Recall Conversation(PawnMind mind, string audience, float[] query, string tag, int max, List<string> mentioned = null, bool peek = false)

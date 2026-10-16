@@ -1,4 +1,4 @@
-It's {time}. {speaker} just came over to talk to you ({kind}).
+It's {time}. {situation}
 
 {snapshot}
 {said}

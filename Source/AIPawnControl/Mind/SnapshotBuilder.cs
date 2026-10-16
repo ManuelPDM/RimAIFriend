@@ -91,6 +91,7 @@ namespace AIPawnControl
                 ["Rooms"] = Rooms(pawn),
                 ["Recent"] = Recent(mind, map),
                 ["Group chat"] = GroupChat.Instance?.Context(map),
+                ["Messages"] = DirectMessages.Instance?.Context(pawn, map),
                 ["Danger"] = DangerResponse.Line(pawn),
             };
         }

@@ -76,82 +76,96 @@ namespace AIPawnControl
             public int Id;
             public string Key; // the same option in a menu built later: "keep", "talk", "base", "post", or the life-changing talk and who
             public string Label;
-            public Func<string, string> Apply; // runs on the main thread when chosen, gets her cleaned "say"; returns a readable result
-            public Func<Dictionary<string, object>, string, string> ApplyReply; // instead of Apply when it needs more of the reply ("with", "tone")
-            public bool IsTalk; // "say" is her opening line; for anything else it's a remark out loud
-            public Pawn Target; // who she talks to, for a talk (set when applied, for "talk to someone")
-            public bool OwnRemark; // a later call makes her remark (the Base call), so the Act's "say" is dropped
+            public Func<string, string> Apply; // runs on the main thread when chosen; gets her message for a life-changing talk, else null; returns a readable result
+            public Func<Dictionary<string, object>, string> ApplyReply; // instead of Apply when it needs more of the reply ("with")
+            public bool IsTalk; // a life-changing talk in the Message call: her message is its line
+            public bool Announces; // a gathering, ritual, role or burial line: the Act's "say" goes with its group chat post
+            public Pawn Target; // who she talks to (set when applied, for "talk to someone")
             public List<Pawn> TalkTargets; // "talk to someone": who "with" may name
         }
 
         /// <summary>Every action valid for this pawn right now, numbered. The schema only allows these ids.</summary>
-        /// <param name="inConversation">Chat and Reply: she's already talking, so there's no "talk to someone".</param>
-        public static List<ActOption> BuildActMenu(Pawn pawn, PawnMind mind, bool inConversation = false)
+        /// <param name="inConversation">Chat and Message: she's already talking, so there's no "talk to someone", and no "keep going" (their "act" 0 is that).</param>
+        /// <param name="talkingTo">The Message call: who she's talking to, for asking them out, proposing, breaking up, or spending time together.</param>
+        public static List<ActOption> BuildActMenu(Pawn pawn, PawnMind mind, bool inConversation = false, Pawn talkingTo = null)
         {
             var options = new List<ActOption>();
             string doing = pawn.GetJobReport()?.TrimEnd('.');
-            options.Add(new ActOption { Id = options.Count + 1, Key = "keep", Label = string.IsNullOrEmpty(doing) ? "keep going" : $"keep going ({doing})",
-                Apply = _ => mind.KeepGoing(KeepGoingHours) });
+            if (!inConversation)
+                options.Add(new ActOption { Id = options.Count + 1, Key = "keep", Label = string.IsNullOrEmpty(doing) ? "keep going" : $"keep going ({doing})",
+                    Apply = _ => mind.KeepGoing(KeepGoingHours) });
 
             var threats = DangerResponse.Threats(pawn.Map);
             if (threats.Count > 0)
             {
-                if (DangerPlan.Part(DangerPlan.Of(pawn.Map), pawn) is string part)
+                if (!inConversation && DangerPlan.Part(DangerPlan.Of(pawn.Map), pawn) is string part)
                     options[0].Label = $"keep to my part in the plan ({part})";
                 options.AddRange(DangerResponse.Options(pawn, mind, threats, options.Count + 1)); // the danger menu: nothing else while it lasts
                 return options;
             }
 
-            var targets = TalkTargets(pawn);
+            var targets = TalkTargets(pawn, mind);
             if (!inConversation && targets.Count > 0)
             {
-                var talk = new ActOption { Id = options.Count + 1, Key = "talk", Label = "talk to someone", IsTalk = true, TalkTargets = targets };
-                talk.ApplyReply = (reply, say) =>
+                var talk = new ActOption { Id = options.Count + 1, Key = "talk", Label = "talk to someone", TalkTargets = targets };
+                talk.ApplyReply = reply =>
                 {
                     string name = reply.Str("with");
-                    Pawn target = targets.FirstOrDefault(p => p.LabelShort == name) ?? targets[0];
-                    talk.Target = target;
-                    bool positive = reply.Str("tone") != "negative";
-                    return MindActions.Talk(mind, target, positive, say);
+                    talk.Target = targets.FirstOrDefault(p => p.LabelShort == name) ?? targets[0];
+                    return mind.StartMessage(talk.Target);
                 };
                 options.Add(talk);
             }
 
-            foreach (var (other, interaction) in LifeChangingTalks(pawn, mind, targets))
+            foreach (var (other, interaction) in LifeChangingTalks(pawn, mind, Nearby(pawn).Where(p => p == talkingTo).ToList()))
                 options.Add(new ActOption
                 {
                     Id = options.Count + 1,
                     Key = $"{interaction.defName} {other.ThingID}",
                     Label = LifeChangingLabel(interaction, other),
                     Target = other,
-                    Apply = say => MindActions.TalkTo(mind, other, interaction, say),
+                    Apply = line => MindActions.TalkTo(mind, other, interaction, line),
                     IsTalk = true,
                 });
 
+            if (talkingTo != null && talkingTo != MindManager.Instance?.PlayingAs) // the player's colonist is the player's to move
+                foreach (var activity in Together.For(pawn, talkingTo))
+                {
+                    string key = activity.key, label = activity.label;
+                    options.Add(new ActOption
+                    {
+                        Id = options.Count + 1,
+                        Key = $"together {key} {talkingTo.ThingID}",
+                        Label = $"spend time with {talkingTo.LabelShort} now: {label}",
+                        Target = talkingTo,
+                        Apply = _ => Together.Invite(mind, talkingTo, key, label),
+                    });
+                }
+
             if (BaseCall.AnythingToDo(pawn))
-                options.Add(new ActOption { Id = options.Count + 1, Key = "base", Label = BaseCall.MenuLabel(pawn), Apply = _ => BaseCall.Start(mind), OwnRemark = true });
+                options.Add(new ActOption { Id = options.Count + 1, Key = "base", Label = BaseCall.MenuLabel(pawn), Apply = _ => BaseCall.Start(mind) });
 
             foreach (var line in Gatherings.Lines(pawn))
             {
                 var apply = line.apply;
-                options.Add(new ActOption { Id = options.Count + 1, Key = line.key, Label = line.label, Apply = say => apply(pawn, say) });
+                options.Add(new ActOption { Id = options.Count + 1, Key = line.key, Label = line.label, Apply = say => apply(pawn, say), Announces = true });
             }
 
             if (!inConversation && GroupChat.Instance?.MayPost(mind) == true)
-                options.Add(new ActOption { Id = options.Count + 1, Key = "post", Label = "post in the group chat (everyone reads it, wherever they are)", Apply = _ => GroupChat.StartPost(mind), OwnRemark = true });
+                options.Add(new ActOption { Id = options.Count + 1, Key = "post", Label = "post in the group chat (everyone reads it, wherever they are)", Apply = _ => GroupChat.StartPost(mind) });
 
             return options;
         }
 
-        /// <summary>"ask Kira out", "propose to Kira", "break up with Kira".</summary>
+        /// <summary>"ask Kira out (your message is how you ask)", and the same for proposing and breaking up.</summary>
         private static string LifeChangingLabel(InteractionDef def, Pawn other)
         {
             switch (def.defName)
             {
-                case "RomanceAttempt": return $"ask {other.LabelShort} out";
-                case "MarriageProposal": return $"propose to {other.LabelShort}";
-                case "Breakup": return $"break up with {other.LabelShort}";
-                default: return $"{def.label} with {other.LabelShort}";
+                case "RomanceAttempt": return $"ask {other.LabelShort} out (your message is how you ask)";
+                case "MarriageProposal": return $"propose to {other.LabelShort} (your message is the proposal)";
+                case "Breakup": return $"break up with {other.LabelShort} (your message is how you end it)";
+                default: return $"{def.label} with {other.LabelShort} (your message is what you say)";
             }
         }
 
@@ -175,15 +189,16 @@ namespace AIPawnControl
         {
             var names = menu.FirstOrDefault(o => o.TalkTargets != null)?.TalkTargets.Select(p => p.LabelShort).ToList() ?? new List<string>();
             names.Add(NoOne);
-            return Schema.Obj(new Dictionary<string, object>
+            var props = new Dictionary<string, object>
             {
                 ["reason"] = Schema.Reason(),
                 ["choice"] = Schema.IntEnum(menu.Select(o => o.Id)),
                 ["with"] = Schema.StrEnum(names),
-                ["tone"] = Schema.StrEnum(Tones),
-                ["say"] = Schema.Say(),
-                ["memory"] = MemorySchema(memories),
-            });
+            };
+            if (menu.Any(o => o.Announces))
+                props["say"] = Schema.Say(); // only with a line that posts to the group chat (act-announce.txt)
+            props["memory"] = MemorySchema(memories);
+            return Schema.Obj(props);
         }
 
         private static Dictionary<string, object> MemorySchema(List<int> memories) => Schema.IntEnum(new[] { 0 }.Concat(memories));
@@ -205,8 +220,8 @@ namespace AIPawnControl
 
         public static bool IsNegative(InteractionDef def) => def.socialFightBaseChance > 0f || def.defName == "Insult" || def.defName == "Slight";
 
-        /// <summary>The nearest awake colonists she could talk to now, at most 5.</summary>
-        public static List<Pawn> TalkTargets(Pawn pawn)
+        /// <summary>The nearest awake colonists she could walk over to now, at most 5 (asking out, proposing, breaking up).</summary>
+        public static List<Pawn> Nearby(Pawn pawn)
         {
             if (pawn.interactions == null || !SocialInteractionUtility.CanInitiateInteraction(pawn))
                 return new List<Pawn>();
@@ -216,6 +231,20 @@ namespace AIPawnControl
                 .OrderBy(p => p.Position.DistanceToSquared(pawn.Position))
                 .Take(MaxTalkTargets)
                 .ToList();
+        }
+
+        /// <summary>
+        /// Who "talk to someone" reaches: the other minds and the colonist the player plays, at any distance, and colonists
+        /// without a mind in vanilla's interaction range. Nobody while she's out of messages.
+        /// </summary>
+        public static List<Pawn> TalkTargets(Pawn pawn, PawnMind mind)
+        {
+            var manager = MindManager.Instance;
+            if (manager == null || mind.MessagesLeft <= 0)
+                return new List<Pawn>();
+            return manager.Minds.Where(m => m != mind && m.persona != null && !m.pawn.Dead && !m.pawn.Destroyed).Select(m => m.pawn)
+                .Concat(Nearby(pawn).Where(p => manager.MindOf(p) == null && MindActions.InRange(pawn, p)))
+                .Append(manager.PlayingAs).Where(p => p != null).Distinct().ToList();
         }
 
         /// <summary>
@@ -250,7 +279,7 @@ namespace AIPawnControl
         public const int MaxChatReply = 300;
 
         /// <summary>
-        /// Chat and Reply: an optional action from the current menu (0 = none), then what she says back. "act" comes first so
+        /// Chat: an optional action from the current menu (0 = none), then what she says back. "act" comes first so
         /// the words are written knowing what she does (PHASE6.md §4.1). Anything for later is just what she said.
         /// </summary>
         public static Dictionary<string, object> ChatSchema(List<ActOption> menu, List<int> memories) => Schema.Obj(new Dictionary<string, object>

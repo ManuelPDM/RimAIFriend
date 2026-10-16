@@ -18,12 +18,12 @@ namespace AIPawnControl
         public bool logPrompts = true;
         public int periodicHours = 4;
         public int actsPerDay = 10;
+        public int messagesPerDay = 20;    // Message calls that send something; 0: no private messages, and nobody answers a talk
         public bool speakLines = true;
         public bool chatBubbles = true;
         public bool memoryEnabled = true; // off: no Reflect and no retrieval; events are still kept
         public bool allowBuilding = true;  // off: no room projects offered; a running one is left as-is
         public bool allowChores = true;    // off: no colony chores offered (Phase 5); what's set up stays
-        public bool mindsAnswer = true;    // off: a talk between two minds carries only the first line (PHASE6.md §4)
         public bool answerChoices = true;  // off: joiners, ransoms, quest offers and beggars are the player's (WORLD.md)
         public bool gatherings = true;     // off: no rituals, roles, reforms, parties or weddings started by minds (IDEOLOGY.md)
         public int parallelRequests = 4;  // requests LM Studio runs at once (its own parallel setting must allow it)
@@ -37,6 +37,7 @@ namespace AIPawnControl
         private string embedTestStatus;
         private string periodicBuffer;
         private string actsBuffer;
+        private string messagesBuffer;
         private string timeoutBuffer;
         private string maxTokensBuffer;
         private bool showApiKey;
@@ -54,12 +55,12 @@ namespace AIPawnControl
             Scribe_Values.Look(ref logPrompts, "logPrompts", true);
             Scribe_Values.Look(ref periodicHours, "periodicHours", 4);
             Scribe_Values.Look(ref actsPerDay, "actsPerDay", 10);
+            Scribe_Values.Look(ref messagesPerDay, "messagesPerDay", 20);
             Scribe_Values.Look(ref speakLines, "speakLines", true);
             Scribe_Values.Look(ref chatBubbles, "chatBubbles", true);
             Scribe_Values.Look(ref memoryEnabled, "memoryEnabled", true);
             Scribe_Values.Look(ref allowBuilding, "allowBuilding", true);
             Scribe_Values.Look(ref allowChores, "allowChores", true);
-            Scribe_Values.Look(ref mindsAnswer, "mindsAnswer", true);
             Scribe_Values.Look(ref answerChoices, "answerChoices", true);
             Scribe_Values.Look(ref gatherings, "gatherings", true);
             Scribe_Values.Look(ref parallelRequests, "parallelRequests", 4);
@@ -105,6 +106,7 @@ namespace AIPawnControl
             list.CheckboxLabeled("AIPawnControl_LogPrompts".Translate(), ref logPrompts, "AIPawnControl_LogPromptsTip".Translate());
             list.TextFieldNumericLabeled("AIPawnControl_PeriodicHours".Translate(), ref periodicHours, ref periodicBuffer, 1, 24);
             list.TextFieldNumericLabeled("AIPawnControl_ActsPerDay".Translate(), ref actsPerDay, ref actsBuffer, 0, 100);
+            list.TextFieldNumericLabeled("AIPawnControl_MessagesPerDay".Translate(), ref messagesPerDay, ref messagesBuffer, 0, 100);
             list.CheckboxLabeled("AIPawnControl_SpeakLines".Translate(), ref speakLines, "AIPawnControl_SpeakLinesTip".Translate());
             list.CheckboxLabeled("AIPawnControl_ChatBubbles".Translate(), ref chatBubbles, "AIPawnControl_ChatBubblesTip".Translate());
 
@@ -123,7 +125,6 @@ namespace AIPawnControl
             list.CheckboxLabeled("AIPawnControl_Memory".Translate(), ref memoryEnabled, "AIPawnControl_MemoryTip".Translate());
             list.CheckboxLabeled("AIPawnControl_AllowBuilding".Translate(), ref allowBuilding, "AIPawnControl_AllowBuildingTip".Translate());
             list.CheckboxLabeled("AIPawnControl_AllowChores".Translate(), ref allowChores, "AIPawnControl_AllowChoresTip".Translate());
-            list.CheckboxLabeled("AIPawnControl_MindsAnswer".Translate(), ref mindsAnswer, "AIPawnControl_MindsAnswerTip".Translate());
             list.CheckboxLabeled("AIPawnControl_AnswerChoices".Translate(), ref answerChoices, "AIPawnControl_AnswerChoicesTip".Translate());
             list.CheckboxLabeled("AIPawnControl_Gatherings".Translate(), ref gatherings, "AIPawnControl_GatheringsTip".Translate());
             var manager = MindManager.Instance;

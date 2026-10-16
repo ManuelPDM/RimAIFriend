@@ -36,7 +36,7 @@ namespace AIPawnControl
         private static readonly string[] Snapshot =
         {
             "Me", "Time", "Condition", "Needs", "Feelings", "Doing now", "My project",
-            "People", "Colony customs", "Colony", "Colony stores", "Colony work", "Rooms", "Recent", "Group chat", "Danger",
+            "People", "Colony customs", "Colony", "Colony stores", "Colony work", "Rooms", "Recent", "Group chat", "Messages", "Danger",
         };
 
         // Every user-prompt section, in prompt order: the snapshot, then memory.
@@ -54,8 +54,8 @@ namespace AIPawnControl
         {
             ["act"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "On my mind" },
             ["chat"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember", "From my diary" },
-            ["reply"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember", "From my diary" }, // Chat, with a colonist in the player's place
-            ["answer"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember", "From my diary" }, // Reply, for a yes or no
+            ["message"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember", "From my diary" }, // Chat, in a private thread with another pawn
+            ["answer"] = new HashSet<string>(Snapshot) { "Since yesterday", "About", "I remember", "From my diary" }, // Chat, for a yes or no
             ["base"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the Act that chose it already recalled memories
             ["post"] = new HashSet<string>(Snapshot) { "Since yesterday", "About" }, // the group chat: [About X] for who wrote lately
             ["decide"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // a choice the game asks the colony (WORLD.md)

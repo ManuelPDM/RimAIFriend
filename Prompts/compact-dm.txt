@@ -1,0 +1,12 @@
+You keep the record of the private messages between {a} and {b}, two colonists in a RimWorld colony. Nobody else reads them.
+
+The summary so far:
+{summary}
+
+Older messages to fold into it:
+{messages}
+
+The colony now:
+{now}
+
+Write a new summary ("summary") that replaces the old one: what they told each other, asked, offered, promised, planned or argued about, what they said about other people, and what's still open between them. Drop what no longer matters: anything the colony now shows is done, and plans about people who are dead or gone. A promise is only what someone said, not what happened: write "Dave said he'd cut wood", never "Dave cut wood". 3-5 sentences, plain words, past tense, use names. Use only what's written above.

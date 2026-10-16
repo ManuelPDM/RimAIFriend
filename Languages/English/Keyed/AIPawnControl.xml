@@ -21,6 +21,7 @@
   <AIPawnControl_TestFailed>Failed: {0}</AIPawnControl_TestFailed>
   <AIPawnControl_PeriodicHours>Think every N in-game hours</AIPawnControl_PeriodicHours>
   <AIPawnControl_ActsPerDay>Max decisions per in-game day</AIPawnControl_ActsPerDay>
+  <AIPawnControl_MessagesPerDay>Max private messages per in-game day</AIPawnControl_MessagesPerDay>
   <AIPawnControl_SpeakLines>Speak lines</AIPawnControl_SpeakLines>
   <AIPawnControl_SpeakLinesTip>The pawn's talks, remarks and first line show its own words in bubbles and the social log. Off: vanilla text only.</AIPawnControl_SpeakLinesTip>
   <AIPawnControl_ChatBubbles>Chat bubbles</AIPawnControl_ChatBubbles>
@@ -31,7 +32,6 @@
   <AIPawnControl_AllowBuildingTip>AI colonists may plan new rooms and furnish rooms they built. They only place blueprints; the colony builds them. Off: no new projects; a running one is left as-is.</AIPawnControl_AllowBuildingTip>
   <AIPawnControl_AllowChores>Allow colony chores</AIPawnControl_AllowChores>
   <AIPawnControl_AllowChoresTip>AI colonists may mark animals to hunt, trees to cut and rock to mine, and lay out fields; new rooms get their own bills, stockpiles and materials. The colony does the work. Off: no new chores; what's set up stays.</AIPawnControl_AllowChoresTip>
-  <AIPawnControl_MindsAnswer>Minds answer each other</AIPawnControl_MindsAnswer>
   <AIPawnControl_AnswerChoices>Minds answer the colony's choices</AIPawnControl_AnswerChoices>
   <AIPawnControl_Gatherings>Minds hold gatherings and take part in the ideoligion</AIPawnControl_Gatherings>
   <AIPawnControl_GatheringsTip>AI colonists can start the ideoligion's rituals (a funeral, a festival, a dance party), take on a role through the role ceremony, throw a party or hold their wedding, each only when the game would allow it. When the ideoligion can reform, one of them picks a custom to change. Without Ideology, only parties and weddings.</AIPawnControl_GatheringsTip>
@@ -39,7 +39,6 @@
   <AIPawnControl_PlayAsNone>Nobody (the player)</AIPawnControl_PlayAsNone>
   <AIPawnControl_PlayAsTip>Your messages in a mind's chat and in the group chat come from this colonist, and the minds answer them as that colonist. When a mind talks to this colonist, its line shows up in its chat for you to answer. A colonist with a mind can't be picked.</AIPawnControl_PlayAsTip>
   <AIPawnControl_AnswerChoicesTip>An AI colonist (the best negotiator who's free) decides when a wanderer or lodger wants to join, a ransom is demanded, a quest is offered on the home map, or beggars ask for items. The decision is posted in the group chat. You can still answer first. Quests away from home, choosing a pawn, babies and growth moments stay yours.</AIPawnControl_AnswerChoicesTip>
-  <AIPawnControl_MindsAnswerTip>When an AI colonist talks to another AI colonist, the other one answers with a line of their own, and may agree to help. Off: only the first line is said.</AIPawnControl_MindsAnswerTip>
   <AIPawnControl_ParallelRequests>Parallel requests: {0}</AIPawnControl_ParallelRequests>
   <AIPawnControl_ParallelRequestsTip>How many requests go to the model server at once. More than 1 only helps if the server runs requests in parallel (LM Studio's parallel option). Waiting requests go in order: your chat, answers between colonists, decisions, then the base, personas and nightly reflection.</AIPawnControl_ParallelRequestsTip>
   <AIPawnControl_MemoryTip>Off: no nightly reflection and no recalled memories in prompts. What happens is still noted.</AIPawnControl_MemoryTip>
@@ -73,7 +72,7 @@
   <AIPawnControl_TabPriorities>work priorities</AIPawnControl_TabPriorities>
   <AIPawnControl_TabReason>last reasoning</AIPawnControl_TabReason>
   <AIPawnControl_TabRecent>recent decisions</AIPawnControl_TabRecent>
-  <AIPawnControl_TabBudget>Left today: {0} decisions</AIPawnControl_TabBudget>
+  <AIPawnControl_TabBudget>Left today: {0} decisions, {1} messages</AIPawnControl_TabBudget>
   <AIPawnControl_StatusIdle>idle</AIPawnControl_StatusIdle>
   <AIPawnControl_StatusThinking>thinking... ({0}s)</AIPawnControl_StatusThinking>
   <AIPawnControl_StatusUnreachable>LLM unreachable, retrying later</AIPawnControl_StatusUnreachable>
@@ -99,6 +98,9 @@
 
   <!-- Memories -->
   <AIPawnControl_MemoriesButton>Memories</AIPawnControl_MemoriesButton>
+  <AIPawnControl_MessagesButton>Messages</AIPawnControl_MessagesButton>
+  <AIPawnControl_MessagesTitle>Private messages: {0}</AIPawnControl_MessagesTitle>
+  <AIPawnControl_MessagesNone>No messages yet.</AIPawnControl_MessagesNone>
   <AIPawnControl_MemoriesTitle>What {0} remembers</AIPawnControl_MemoriesTitle>
   <AIPawnControl_MemoriesMemories>memories ({0}), newest first</AIPawnControl_MemoriesMemories>
   <AIPawnControl_MemoriesPeople>people ({0})</AIPawnControl_MemoriesPeople>

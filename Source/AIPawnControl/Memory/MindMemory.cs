@@ -188,7 +188,7 @@ namespace AIPawnControl
                 return null;
             int from = Find.TickManager.TicksGame - GenDate.TicksPerDay;
             var top = events
-                .Where(e => e.lastTick >= from && e.kind != "decision" && e.kind != "groupchat" && (withChat || e.kind != "chat"))
+                .Where(e => e.lastTick >= from && e.kind != "decision" && e.kind != "groupchat" && e.kind != "dm" && (withChat || e.kind != "chat"))
                 .OrderByDescending(e => e.importance).ThenByDescending(e => e.lastTick)
                 .Take(max)
                 .OrderBy(e => e.tick)

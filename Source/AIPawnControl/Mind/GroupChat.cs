@@ -249,7 +249,7 @@ namespace AIPawnControl
         }
 
         /// <summary>The colony as it is now, so the summary can drop what's done and who's gone.</summary>
-        private static string Now(Map map)
+        internal static string Now(Map map)
         {
             if (map == null)
                 return "(unknown)";

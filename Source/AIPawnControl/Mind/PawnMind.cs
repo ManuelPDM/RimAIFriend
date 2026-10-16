@@ -31,6 +31,8 @@ namespace AIPawnControl
         private bool prioritiesSet; // work priorities from her passions, once (STREAMLINE.md §8)
         private int actsDay = -1;
         private int actsToday;
+        private int messagesDay = -1;
+        private int messagesToday;
         private int lastThinkTick = -99999;
         private int wakeAtTick = -1;
         private Dictionary<string, int> lastInteractionTicks = new Dictionary<string, int>(); // "defName|targetThingId" → tick
@@ -65,12 +67,13 @@ namespace AIPawnControl
         private bool chatThinking;
         private bool reflecting; // a Reflect is somewhere between its query embedding and its commit
         private int reflectRun;  // bumped to abandon a running Reflect
-        private bool recalling;  // an Act, Chat or Reply is waiting for its situation's query vector
+        private bool recalling;  // an Act, Chat or Message is waiting for its situation's query vector
 
         public bool Thinking => current != null || reflecting || recalling;
         public float ThinkingSeconds => UnityEngine.Time.realtimeSinceStartup - requestStartedRealtime;
         public bool Unreachable => failures >= FailuresBeforeBackoff;
         public int ActsLeft => AIPawnControlMod.Settings.actsPerDay - (LocalDay == actsDay ? actsToday : 0);
+        public int MessagesLeft => AIPawnControlMod.Settings.messagesPerDay - (LocalDay == messagesDay ? messagesToday : 0);
         public bool ChatThinking => chatThinking && Thinking;
         public bool ChatWaitingForWake => chatPending && !CanBeAwake;
         private bool CanBeAwake => pawn.health.capacities.CanBeAwake;
@@ -94,6 +97,8 @@ namespace AIPawnControl
             Scribe_Values.Look(ref prioritiesSet, "prioritiesSet");
             Scribe_Values.Look(ref actsDay, "actsDay", -1);
             Scribe_Values.Look(ref actsToday, "actsToday");
+            Scribe_Values.Look(ref messagesDay, "messagesDay", -1);
+            Scribe_Values.Look(ref messagesToday, "messagesToday");
             Scribe_Values.Look(ref lastThinkTick, "lastThinkTick", -99999);
             Scribe_Values.Look(ref wakeAtTick, "wakeAtTick", -1);
             Scribe_Collections.Look(ref lastInteractionTicks, "lastInteractionTicks", LookMode.Value, LookMode.Value);
@@ -187,6 +192,8 @@ namespace AIPawnControl
             }
             if (dangerThink && DangerPlan.Instance?.Waiting(this) == true)
                 return; // the colony's plan comes first (DANGER_RESPONSE.md §9): she makes it, or waits for it
+            if (TryAnswerMessages())
+                return;
 
             int now = Find.TickManager.TicksGame;
             bool idle = pawn.CurJob == null || pawn.CurJob.def.isIdle || pawn.mindState.IsIdle;
@@ -290,119 +297,163 @@ namespace AIPawnControl
 
         private static string InteractionKey(InteractionDef def, Pawn target) => def.defName + "|" + target.ThingID;
 
+        /// <summary>A vanilla interaction with this pawn happened: its cooldowns start.</summary>
+        public void Interacted(Pawn target, InteractionDef def)
+        {
+            int now = Find.TickManager.TicksGame;
+            lastInteractionTicks[InteractionKey(def, target)] = now;
+            if (ActionCatalog.IsNegative(def))
+                lastNegativeTick = now;
+        }
+
         /// <summary>Called by JobDriver_AITalkTo when the conversation happened or was given up.</summary>
         public void OnTalkFinished(Pawn target, InteractionDef def, bool success, string failure, string line)
         {
             if (success)
-            {
-                int now = Find.TickManager.TicksGame;
-                lastInteractionTicks[InteractionKey(def, target)] = now;
-                if (ActionCatalog.IsNegative(def))
-                    lastNegativeTick = now;
-            }
+                Interacted(target, def);
             string text = success ? $"Talked to {target.LabelShort} ({def.label})." : $"Didn't get to talk to {target.LabelShort}: {failure}.";
             if (success && line != null && AIPawnControlMod.Settings.speakLines)
                 text += $" I said: \"{line}\"";
             AddDecision(text, importance: success ? 0 : 2); // a talk that happened is recorded from the PlayLog
-            ModLog.Message($"{pawn.LabelShort}: {text}");
-            if (success && line != null && AIPawnControlMod.Settings.mindsAnswer && AIPawnControlMod.Settings.speakLines && !Romance.IsAsk(def)) // an ask got its Answer call
-                MindManager.Instance?.MindOf(target)?.Hear(pawn, def, line);
-            if (success && line != null && target == MindManager.Instance?.PlayingAs)
-            {
-                // The player plays this colonist: her line opens a Mind tab chat, which the player answers there
-                AddChat(ChatLine.From.Mind, line);
-                Messages.Message("AIPawnControl_TalkingToYou".Translate(pawn.LabelShort, target.LabelShort, line), pawn, MessageTypeDefOf.NeutralEvent);
-            }
+            ModLog.Message($"{pawn.LabelShort}: {text}"); // the line is already in their thread or chat: the Message call wrote it
         }
 
-        // ---------- Replies to other minds (PHASE6.md §4) ----------
+        // ---------- Private messages ----------
 
-        private class Heard
+        private const int ReplyMaxAgeTicks = 2 * GenDate.TicksPerHour; // a romance question left this long is dropped
+
+        /// <summary>From CheckTriggers: someone in range said something, so the pawn answers when awake and free, outside danger.</summary>
+        private bool TryAnswerMessages()
         {
-            public Pawn speaker;
-            public InteractionDef def;
-            public string line;
-            public int tick;
+            if (MessagesLeft <= 0 || PausedReason() != null || DangerResponse.Threats(pawn.Map).Count > 0)
+                return false;
+            var thread = DirectMessages.Instance?.Unanswered(pawn);
+            if (thread == null)
+                return false;
+            RequestMessage(thread.Other(pawn), started: false);
+            return true;
         }
 
-        private Heard heard; // not saved: a reload just loses an unanswered line
-        private const int ReplyMaxAgeTicks = 2 * GenDate.TicksPerHour;
-
-        /// <summary>Another mind's talk landed on her: she answers once, when she's free (never cancels her own call).</summary>
-        public void Hear(Pawn speaker, InteractionDef def, string line)
+        /// <summary>Act → "talk to someone": the Message call writes it. Returns the result line for the decisions.</summary>
+        public string StartMessage(Pawn other)
         {
-            if (persona == null)
-                return;
-            heard = new Heard { speaker = speaker, def = def, line = line, tick = Find.TickManager.TicksGame };
-            UpdateReply();
+            RequestMessage(other, started: true);
+            return $"Talking to {other.LabelShort}.";
         }
 
-        /// <summary>Called every frame with UpdateChat: the player first, then an answer to another mind.</summary>
-        public void UpdateReply()
+        /// <summary>
+        /// The Message call: the whole thread with the other pawn, then a tone, one message or none, and maybe an act. To the colonist
+        /// the player plays, the thread is the Mind tab chat's current conversation; a colonist without a mind has none.
+        /// </summary>
+        private void RequestMessage(Pawn other, bool started)
         {
-            if (heard == null || chatPending)
-                return;
-            if (Find.TickManager.TicksGame - heard.tick > ReplyMaxAgeTicks || PausedReason() != null)
-            {
-                ModLog.Message($"{pawn.LabelShort}: didn't answer {heard.speaker.LabelShort} ({PausedReason() ?? "too long ago"}).");
-                heard = null;
-                return;
-            }
             if (reflecting)
                 CancelReflect(); // a conversation never waits for background memory work
-            if (Thinking)
-                return;
-            var h = heard;
-            heard = null;
-            RequestReply(h);
-        }
-
-        private void RequestReply(Heard h)
-        {
             bool mayAct = ActsLeft > 0;
-            var menu = mayAct ? ActionCatalog.BuildActMenu(pawn, this, inConversation: true) : new List<ActionCatalog.ActOption>();
-            string speaker = h.speaker.LabelShort;
-            AfterRecall($"{h.line} ({speaker})", (vector, tag) =>
+            var menu = mayAct ? ActionCatalog.BuildActMenu(pawn, this, inConversation: true, talkingTo: other) : new List<ActionCatalog.ActOption>();
+            string name = other.LabelShort;
+            bool toPlayer = other == MindManager.Instance?.PlayingAs;
+            var thread = toPlayer ? null : DirectMessages.Instance?.Thread(pawn, other, create: false);
+            var unread = thread?.UnreadBy(pawn) ?? new List<DmLine>();
+            int readUpTo = thread?.LastId ?? 0;
+            string situation = started ? $"You decided to talk to {name}." : $"{name} is talking to you.";
+            string history = toPlayer ? PlayerThread(name) : DirectMessages.Full(thread, pawn, pawn.Map);
+            string unreadText = string.Join("\n", unread.Select(l => thread.Line(l, pawn, pawn.Map)));
+            string query = Recall.ChatQuery(this, unread.Count > 0 ? string.Join(" ", unread.Select(l => l.text)) : name, out var mentioned);
+            AfterRecall(query, (vector, tag) =>
             {
-                var recall = Recall.Conversation(this, speaker, vector, tag, 3);
-                string menuText = mayAct ? ActionCatalog.DescribeMenu(menu) : "(you've made all your decisions for today; just answer)";
-                Send("reply", ReplyMessages(speaker, h.line, h.def.label, menuText, recall), ActionCatalog.ChatSchema(menu, recall.Shown),
-                    reply => OnReply(h, reply, menu, recall), stillValid: () => PausedReason());
+                var recall = Recall.Conversation(this, name, vector, tag, 3, mentioned);
+                string menuText = mayAct ? ActionCatalog.DescribeMenu(menu) : "(you've made all your decisions for today)";
+                Send("message", MessageMessages(other, situation, history, unreadText, menuText, recall), MessageSchema(menu, recall.Shown),
+                    reply => OnMessage(other, toPlayer, readUpTo, reply, menu, recall), stillValid: () => PausedReason());
             });
         }
 
-        /// <summary>The Reply call's prompt: answering another mind's line.</summary>
-        internal List<KeyValuePair<string, string>> ReplyMessages(string speaker, string line, string kind, string menu, Recall recall) =>
-            PromptBuilder.Build("reply", this, new Dictionary<string, string>
-            {
-                ["speaker"] = speaker,
-                ["line"] = line,
-                ["kind"] = kind,
-                ["menu"] = menu,
-            }, recall.Sections);
-
-        private void OnReply(Heard h, Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
+        /// <summary>The current conversation in the Mind tab chat, for writing to the colonist the player plays.</summary>
+        private string PlayerThread(string name)
         {
-            string speaker = h.speaker.LabelShort;
-            recall.MarkUsed(this, reply.Int("memory"), speaker);
-            string text = SpeechLog.Clean(reply.Str("reply"), ActionCatalog.MaxChatReply);
-            if (text == null)
-                return;
-            SpeechLog.Say(pawn, text);
-            memory.Record(pawn, "talk", h.def.defName, $"I answered {speaker}: \"{text}\"", 3, MemoryEvent.TookPart, new[] { speaker });
-            MindManager.Instance?.MindOf(h.speaker)?.memory.Record(h.speaker, "talk", h.def.defName, $"{pawn.LabelShort} answered me: \"{text}\"",
-                3, MemoryEvent.Told, new[] { pawn.LabelShort });
+            if (chat.Count == 0)
+                return DirectMessages.Full(null, pawn, pawn.Map);
+            var talk = chat.Skip(System.Math.Max(ConversationStart(chat.Count - 1), chat.Count - MaxChatLines))
+                .Where(l => l.from != ChatLine.From.System).Select(l => (l.from == ChatLine.From.Player ? name : "Me") + ": " + l.text).ToList();
+            return talk.Count > 0 ? string.Join("\n", talk) : DirectMessages.Full(null, pawn, pawn.Map);
+        }
 
-            string result = $"Answered {speaker}: \"{text}\"";
+        /// <summary>
+        /// The Message call's prompt: the conversation as read so far, then what's new since (when there is), and what the
+        /// pawn may do now. [Messages] leaves this thread out: it's here whole.
+        /// </summary>
+        internal List<KeyValuePair<string, string>> MessageMessages(Pawn other, string situation, string history, string unread, string menu, Recall recall)
+        {
+            string name = other.LabelShort;
+            return PromptBuilder.Build("message", this, new Dictionary<string, string>
+            {
+                ["other"] = name,
+                ["situation"] = situation,
+                ["history"] = history,
+                ["new"] = unread.Length > 0 ? "\n" + Prompts.Fill("message-new", new Dictionary<string, string> { ["other"] = name, ["new"] = unread }) + "\n" : "",
+                ["menu"] = menu,
+            }, new Dictionary<string, string>(recall.Sections) { ["Messages"] = DirectMessages.Instance?.Context(pawn, pawn.Map, except: other) });
+        }
+
+        /// <summary>An optional act and the tone first (so the words match them), then the message ("" = none).</summary>
+        internal static Dictionary<string, object> MessageSchema(List<ActionCatalog.ActOption> menu, List<int> memories) => Schema.Obj(new Dictionary<string, object>
+        {
+            ["act"] = Schema.IntEnum(new[] { 0 }.Concat(menu.Select(o => o.Id))),
+            ["tone"] = Schema.StrEnum(ActionCatalog.Tones),
+            ["message"] = Schema.Str(ActionCatalog.MaxChatReply + 60),
+            ["memory"] = Schema.IntEnum(new[] { 0 }.Concat(memories)),
+        });
+
+        /// <summary>
+        /// The message goes into the thread (or the played colonist's chat) and, with the other pawn in vanilla's interaction
+        /// range, is said out loud (MindActions.SayTo). Asking out, proposing or breaking up walks over and makes the message
+        /// that interaction's line instead.
+        /// </summary>
+        private void OnMessage(Pawn other, bool toPlayer, int readUpTo, Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
+        {
+            string name = other.LabelShort;
+            recall.MarkUsed(this, reply.Int("memory"), name);
+            string text = SpeechLog.Clean(reply.Str("message"), ActionCatalog.MaxChatReply);
+            DirectMessages.Instance?.Thread(pawn, other, create: false)?.MarkRead(pawn, readUpTo);
             var picked = menu.FirstOrDefault(o => o.Id == reply.Int("act"));
-            var option = picked == null ? null : ActionCatalog.StillOffered(picked, ActionCatalog.BuildActMenu(pawn, this, inConversation: true), reply);
+            var option = picked == null ? null : ActionCatalog.StillOffered(picked, ActionCatalog.BuildActMenu(pawn, this, inConversation: true, talkingTo: other), reply);
+            string result;
+            if (text == null)
+                result = $"Left it with {name} for now.";
+            else
+            {
+                CountMessage();
+                var otherMind = MindManager.Instance?.MindOf(other);
+                if (toPlayer)
+                {
+                    AddChat(ChatLine.From.Mind, text);
+                    Messages.Message("AIPawnControl_TalkingToYou".Translate(pawn.LabelShort, name, text), pawn, MessageTypeDefOf.NeutralEvent);
+                }
+                else if (otherMind != null)
+                    DirectMessages.Instance?.Add(pawn, other, text);
+                string aloud = option?.IsTalk == true ? null : MindActions.SayTo(this, other, reply.Str("tone") != "negative", text);
+                memory.Record(pawn, toPlayer ? "chat" : "dm", null, $"I told {name}: \"{text}\"", 3, MemoryEvent.TookPart, new[] { name });
+                otherMind?.memory.Record(other, "dm", null, $"{pawn.LabelShort} told me: \"{text}\"", 3, MemoryEvent.Told, new[] { pawn.LabelShort });
+                result = $"Told {name}{(aloud != null ? $" ({aloud})" : "")}: \"{text}\"";
+            }
             if (option != null)
             {
-                CountAct(); // acting on it is her decision (§4); just answering is free
-                result += $" Then: {option.Label}: {MindActions.Safely(pawn, option.Label, () => option.Apply(null))}";
+                CountAct(); // acting on it is a decision (§4); just writing costs a message
+                result += $" Then: {option.Label}: {MindActions.Safely(pawn, option.Label, () => option.Apply(option.IsTalk ? text : null))}";
             }
-            AddDecision(result, importance: 0); // the talk events above are the memory
-            ModLog.Message($"{pawn.LabelShort} reply to {speaker}: \"{text}\" | act: {option?.Label ?? (picked != null ? $"{picked.Label} (no longer an option)" : "none")}");
+            AddDecision(result, importance: 0); // the dm events above are the memory
+            ModLog.Message($"{pawn.LabelShort} message to {name}: {result}");
+        }
+
+        private void CountMessage()
+        {
+            if (messagesDay != LocalDay)
+            {
+                messagesDay = LocalDay;
+                messagesToday = 0;
+            }
+            messagesToday++;
         }
 
         // ---------- Being asked out or proposed to ----------
@@ -416,6 +467,8 @@ namespace AIPawnControl
             public bool sent;
             public bool? accept;
             public string reply;
+            public string activity, label; // an invitation to spend time together (Together), instead of def
+            public string What => def?.label ?? label;
         }
 
         private Asked asked; // not saved: a reload drops the question, and the asker's talk job gives up
@@ -425,6 +478,15 @@ namespace AIPawnControl
         {
             if (asked == null)
                 asked = new Asked { asker = asker, def = def, line = line, tick = Find.TickManager.TicksGame };
+        }
+
+        /// <summary>Someone asks her along to spend time together now (Together.Invite). False while another question waits.</summary>
+        public bool Invite(Pawn asker, string activity, string label)
+        {
+            if (asked != null)
+                return false;
+            asked = new Asked { asker = asker, activity = activity, label = label, tick = Find.TickManager.TicksGame };
+            return true;
         }
 
         public bool Asking(Pawn asker) => asked != null && asked.asker == asker;
@@ -447,14 +509,14 @@ namespace AIPawnControl
                 3, MemoryEvent.Told, new[] { pawn.LabelShort });
         }
 
-        /// <summary>Called every frame with UpdateReply: sends the Answer call when she's free; drops a question left too long.</summary>
+        /// <summary>Called every frame with UpdateChat: sends the Answer call when she's free; drops a question left too long.</summary>
         public void UpdateAsked()
         {
             if (asked == null)
                 return;
             if (Find.TickManager.TicksGame - asked.tick > ReplyMaxAgeTicks || !asked.asker.Spawned)
             {
-                ModLog.Message($"{pawn.LabelShort}: didn't answer {asked.asker.LabelShort}'s {asked.def.label}.");
+                ModLog.Message($"{pawn.LabelShort}: didn't answer {asked.asker.LabelShort}'s {asked.What}.");
                 asked = null;
                 return;
             }
@@ -471,20 +533,21 @@ namespace AIPawnControl
         {
             a.sent = true;
             string speaker = a.asker.LabelShort;
-            AfterRecall($"{a.line ?? a.def.label} ({speaker})", (vector, tag) =>
+            string situation = a.activity != null ? $"{speaker} asks you to come along now: {a.label}." : $"{speaker} just came over to talk to you ({a.def.label}).";
+            AfterRecall($"{a.line ?? a.What} ({speaker})", (vector, tag) =>
             {
                 var recall = Recall.Conversation(this, speaker, vector, tag, 3);
-                Send("answer", AnswerMessages(speaker, a.def.label, a.line, recall), AnswerSchema(recall.Shown),
+                Send("answer", AnswerMessages(speaker, situation, a.line, recall), AnswerSchema(recall.Shown),
                     reply => OnAnswer(a, reply, recall), stillValid: () => PausedReason());
             });
         }
 
-        /// <summary>The Answer call's prompt: yes or no to a romance attempt or proposal. The asker's line only when a mind said one.</summary>
-        internal List<KeyValuePair<string, string>> AnswerMessages(string speaker, string kind, string line, Recall recall) =>
+        /// <summary>The Answer call's prompt: yes or no to a romance attempt, a proposal or an invitation. The asker's line only when a mind said one.</summary>
+        internal List<KeyValuePair<string, string>> AnswerMessages(string speaker, string situation, string line, Recall recall) =>
             PromptBuilder.Build("answer", this, new Dictionary<string, string>
             {
                 ["speaker"] = speaker,
-                ["kind"] = kind,
+                ["situation"] = situation,
                 ["said"] = line == null ? "" : "\n" + Prompts.Fill("answer-said", new Dictionary<string, string> { ["speaker"] = speaker, ["line"] = line }) + "\n",
             }, recall.Sections);
 
@@ -502,7 +565,31 @@ namespace AIPawnControl
             recall.MarkUsed(this, reply.Int("memory"), a.asker.LabelShort);
             a.accept = reply.TryGetValue("accept", out object v) && v is bool yes && yes;
             a.reply = SpeechLog.Clean(reply.Str("reply"), ActionCatalog.MaxChatReply);
-            ModLog.Message($"{pawn.LabelShort} answers {a.asker.LabelShort}'s {a.def.label}: {(a.accept.Value ? "yes" : "no")} \"{a.reply}\"");
+            ModLog.Message($"{pawn.LabelShort} answers {a.asker.LabelShort}'s {a.What}: {(a.accept.Value ? "yes" : "no")} \"{a.reply}\"");
+            if (a.activity != null)
+                AnsweredInvite(a); // no talk job waits for it
+        }
+
+        /// <summary>Her answer to an invitation goes into their thread (said out loud in range), and a yes starts the time together.</summary>
+        private void AnsweredInvite(Asked a)
+        {
+            asked = null;
+            Pawn asker = a.asker;
+            string name = asker.LabelShort;
+            var askerMind = MindManager.Instance?.MindOf(asker);
+            if (a.reply != null)
+            {
+                DirectMessages.Instance?.Add(pawn, asker, a.reply);
+                if (AIPawnControlMod.Settings.speakLines && MindActions.InRange(pawn, asker))
+                    SpeechLog.Say(pawn, a.reply);
+                memory.Record(pawn, "dm", null, $"I told {name}: \"{a.reply}\"", 3, MemoryEvent.TookPart, new[] { name });
+                askerMind?.memory.Record(asker, "dm", null, $"{pawn.LabelShort} told me: \"{a.reply}\"", 3, MemoryEvent.Told, new[] { pawn.LabelShort });
+            }
+            string why = a.accept == true ? Together.Start(asker, pawn, a.activity) : null;
+            string outcome = a.accept != true ? "no" : why == null ? "yes" : $"yes, but {why}";
+            AddDecision($"{name} asked me along ({a.label}): I said {outcome}.", importance: 0);
+            askerMind?.AddDecision($"I asked {pawn.LabelShort} along ({a.label}): {pawn.LabelShort} said {outcome}.", importance: 0);
+            ModLog.Message($"{pawn.LabelShort} and {name}, {a.label}: {outcome}");
         }
 
         private void CountAct()
@@ -545,6 +632,7 @@ namespace AIPawnControl
                 ["trigger"] = trigger,
                 ["menu"] = ActionCatalog.DescribeMenu(menu),
                 ["talkto"] = TalkToText(menu),
+                ["announce"] = menu.Any(o => o.Announces) ? "\n\n" + Prompts.Fill("act-announce", new Dictionary<string, string>()) : "", // only with a line that posts
                 ["danger"] = DangerResponse.Threats(pawn.Map).Count > 0 ? "\n\n" + Prompts.Fill("danger", new Dictionary<string, string>()) : "", // only with the danger menu
             }, recall.Sections);
 
@@ -567,8 +655,8 @@ namespace AIPawnControl
         /// <summary>"Kira, Bo (nearest first)" for act.txt, or that nobody's around.</summary>
         public static string TalkToText(List<ActionCatalog.ActOption> menu)
         {
-            var targets = menu.FirstOrDefault(o => o.TalkTargets != null)?.TalkTargets;
-            return targets != null ? string.Join(", ", targets.Select(p => p.LabelShort)) + " (nearest first)" : "nobody is around to talk to";
+            var targets = menu.FirstOrDefault(o => o.Key == "talk")?.TalkTargets;
+            return targets != null ? string.Join(", ", targets.Select(p => p.LabelShort)) : "nobody";
         }
 
         /// <summary>Gives today's decision back (a project found no site, §5).</summary>
@@ -593,20 +681,10 @@ namespace AIPawnControl
                 ModLog.Message($"{pawn.LabelShort}: dropped act reply ({picked.Label} is no longer an option).");
                 return;
             }
-            string say = SpeechLog.Clean(reply.Str("say"));
-            string result = MindActions.Safely(pawn, option.Label, () =>
-            {
-                string applied = option.ApplyReply != null ? option.ApplyReply(reply, say) : option.Apply(say);
-                if (!option.IsTalk && !option.OwnRemark && say != null && AIPawnControlMod.Settings.speakLines)
-                {
-                    SpeechLog.Say(pawn, say);
-                    applied += $" Said: \"{say}\"";
-                }
-                return applied;
-            });
+            string result = MindActions.Safely(pawn, option.Label, () => option.ApplyReply != null ? option.ApplyReply(reply) : option.Apply(option.Announces ? SpeechLog.Clean(reply.Str("say")) : null));
             AddDecision($"{option.Label}: {result}");
             ModLog.Message($"{pawn.LabelShort} act: {option.Label} | {result} | Reason: {lastReason}");
-            recall.MarkUsed(this, reply.Int("memory"), option.IsTalk ? option.Target?.LabelShort : null);
+            recall.MarkUsed(this, reply.Int("memory"), option.Target?.LabelShort);
             if (groupTurn)
                 GroupChat.Instance?.PassTurn(this); // her turn in the group chat was this Act, whatever she picked
         }
