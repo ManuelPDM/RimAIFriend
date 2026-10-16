@@ -356,7 +356,7 @@ namespace AIPawnControl
             }
             else
                 Remember(furnishing ? $"I gave up on adding a {ItemLabel} {where}." : $"I gave up on my {Kind} {where}.", 4);
-            ModLog.Message($"{pawn.LabelShort}'s {Kind} abandoned ({(byPlayer ? "the player cancelled a blueprint" : "her choice")}).");
+            ModLog.Message($"{pawn.LabelShort}'s {Kind} abandoned ({(byPlayer ? "the player cancelled a blueprint" : "the pawn's choice")}).");
         }
 
         public void ExposeData()

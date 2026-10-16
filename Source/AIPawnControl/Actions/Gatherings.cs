@@ -188,7 +188,7 @@ namespace AIPawnControl
             if (GatheringsUtility.AnyLordJobPreventsNewRituals(map))
                 return "another gathering is on";
             if (!GatheringsUtility.PawnCanStartOrContinueGathering(organizer))
-                return "she can't lead a gathering now";
+                return "the pawn can't lead a gathering now";
             IntVec3 center = SiteFinder.BaseCenter(map);
             Room heart = SiteFinder.Heart(map); // the great hall, where the colony meets: its ritual spot comes first
             // Some filters list no targets (the leader speech's): vanilla offers the ritual on any colony building whose gizmos

@@ -19,9 +19,9 @@
   <AIPawnControl_PeriodicHours>Think every N in-game hours</AIPawnControl_PeriodicHours>
   <AIPawnControl_ActsPerDay>Max decisions per in-game day</AIPawnControl_ActsPerDay>
   <AIPawnControl_SpeakLines>Speak lines</AIPawnControl_SpeakLines>
-  <AIPawnControl_SpeakLinesTip>Her talks, remarks and first line show her own words in bubbles and the social log. Off: vanilla text only.</AIPawnControl_SpeakLinesTip>
+  <AIPawnControl_SpeakLinesTip>The pawn's talks, remarks and first line show its own words in bubbles and the social log. Off: vanilla text only.</AIPawnControl_SpeakLinesTip>
   <AIPawnControl_ChatBubbles>Chat bubbles</AIPawnControl_ChatBubbles>
-  <AIPawnControl_ChatBubblesTip>Her replies in the Mind tab chat also appear as a speech bubble over her.</AIPawnControl_ChatBubblesTip>
+  <AIPawnControl_ChatBubblesTip>The pawn's replies in the Mind tab chat also appear as a speech bubble over it.</AIPawnControl_ChatBubblesTip>
   <AIPawnControl_ReloadPrompts>Reload prompts</AIPawnControl_ReloadPrompts>
   <AIPawnControl_Memory>Memory</AIPawnControl_Memory>
   <AIPawnControl_AllowBuilding>Allow building</AIPawnControl_AllowBuilding>

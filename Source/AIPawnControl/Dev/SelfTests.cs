@@ -308,7 +308,7 @@ namespace AIPawnControl
                 var act = Recall.Act(mind, Recall.Present(mind.pawn), null, null, peek: true);
                 var chat = Recall.Conversation(mind, PersonFile.Player, null, null, 5, peek: true);
                 log.Check(memory.lastOnMindTick == onMindBefore && memory.memories.Select(m => m.lastShownTick).SequenceEqual(shownBefore),
-                    $"{mind.pawn.LabelShort}: a peek changed her memories");
+                    $"{mind.pawn.LabelShort}: a peek changed its memories");
                 log.Line($"{mind.pawn.LabelShort}: {memory.memories.Count} memories, {memory.diary.Count} diary entries; without a vector: "
                          + $"[On my mind] {act.Shown.Count}, [I remember] {chat.Shown.Count}");
             }
@@ -569,14 +569,14 @@ namespace AIPawnControl
                 {
                     log.Line("go inside: " + inside.Apply(null));
                     var area = pawn.playerSettings.AreaRestrictionInPawnCurrentMap;
-                    log.Check(area != null && area.TrueCount == DangerResponse.InsideCells(map).Count, $"her area is {area?.Label ?? "none"}, not the whole inside");
+                    log.Check(area != null && area.TrueCount == DangerResponse.InsideCells(map).Count, $"its area is {area?.Label ?? "none"}, not the whole inside");
                     log.Check(pawn.playerSettings.hostilityResponse == HostilityResponseMode.Flee, "\"go inside\" didn't set Flee");
                 }
                 var fight = menu.FirstOrDefault(o => o.Key == "fight");
                 if (fight != null)
                 {
                     log.Line("fight: " + fight.Apply(null));
-                    log.Check(pawn.playerSettings.AreaRestrictionInPawnCurrentMap == null, "\"fight\" left an area on her");
+                    log.Check(pawn.playerSettings.AreaRestrictionInPawnCurrentMap == null, "\"fight\" left an area on it");
                     log.Check(pawn.playerSettings.hostilityResponse == HostilityResponseMode.Attack, "\"fight\" didn't set Attack");
                 }
 
@@ -594,20 +594,20 @@ namespace AIPawnControl
                     pawn.jobs.EndCurrentJob(Verse.AI.JobCondition.InterruptForced); // "fight" above: a fighter already fighting is left to it
                     log.Line("plan: " + DangerPlan.Assign(plan, hold, new List<PawnMind> { mind }, new List<PawnMind>()));
                     log.Check(plan.fighters.TryGetValue(pawn, out IntVec3 spot) && spot.IsValid && !DangerResponse.InsideCells(map).Contains(spot),
-                        "her spot isn't a cell outside the base");
+                        "its spot isn't a cell outside the base");
                     log.Check(pawn.playerSettings.hostilityResponse == HostilityResponseMode.Attack && pawn.playerSettings.AreaRestrictionInPawnCurrentMap == null,
                         "a fighter in the plan didn't get Attack and no area");
                     var job = pawn.CurJob;
                     log.Check(job != null && (job.def == JobDefOf.Goto || job.def == JobDefOf.Wait_Combat) && job.targetA.Cell == spot,
-                        $"she isn't going to her spot or waiting there ({job?.def.defName})");
+                        $"it isn't going to its spot or waiting there ({job?.def.defName})");
                     log.Line("my part: " + DangerPlan.Part(plan, pawn));
-                    log.Line($"her spot {spot}: cover {CoverUtility.CalculateOverallBlockChance(spot, plan.enemyAt, map):P0} against the enemy at {plan.enemyAt}");
+                    log.Line($"its spot {spot}: cover {CoverUtility.CalculateOverallBlockChance(spot, plan.enemyAt, map):P0} against the enemy at {plan.enemyAt}");
                     var from = pawn.Position;
                     pawn.Position = spot; // there already: she waits on her spot, shooting what comes (Wait_Combat, which must expire undrafted)
                     pawn.Notify_Teleported();
                     DangerPlan.Keep(plan, mind);
                     job = pawn.CurJob;
-                    log.Check(job != null && job.def == JobDefOf.Wait_Combat && job.expiryInterval > 0, $"on her spot she isn't waiting to fight ({job?.def.defName})");
+                    log.Check(job != null && job.def == JobDefOf.Wait_Combat && job.expiryInterval > 0, $"on its spot it isn't waiting to fight ({job?.def.defName})");
                     pawn.Position = from;
                     pawn.Notify_Teleported();
                 }
@@ -620,7 +620,7 @@ namespace AIPawnControl
             log.Check(DangerResponse.Threats(map).Count == 0, "still danger after the enemy is gone");
             mind.EndDanger();
             log.Check(pawn.playerSettings.AreaRestrictionInPawnCurrentMap == areaBefore && pawn.playerSettings.hostilityResponse == responseBefore,
-                "her own area and hostility response didn't come back");
+                "its own area and hostility response didn't come back");
             if (!hadInside)
                 map.areaManager.AllAreas.FirstOrDefault(a => a.Label == insideLabel)?.Delete();
         }
