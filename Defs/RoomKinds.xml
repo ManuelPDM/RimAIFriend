@@ -98,6 +98,7 @@
     <label>workshop</label>
     <description>a work table the colony doesn't have yet</description>
     <role>Workshop</role>
+    <size>(5,7)</size> <!-- room for the benches added later (BaseCall.BenchChoice) -->
     <items>
       <li>
         <defs><li>TableStonecutter</li><li>HandTailoringBench</li><li>FueledSmithy</li><li>TableSculpting</li></defs>

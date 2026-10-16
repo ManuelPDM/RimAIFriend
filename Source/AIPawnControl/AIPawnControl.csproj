@@ -13,9 +13,8 @@
 
     <!-- Override on the command line or in Directory.Build.props.user if your install differs -->
     <RimWorldDir Condition="'$(RimWorldDir)' == ''">D:\SteamLibrary\steamapps\common\RimWorld</RimWorldDir>
-    <HarmonyDir Condition="'$(HarmonyDir)' == ''">D:\SteamLibrary\steamapps\workshop\content\294100\2009463077\Current\Assemblies</HarmonyDir>
-    <ManagedDir>$(RimWorldDir)\RimWorldWin64_Data\Managed</ManagedDir>
-  </PropertyGroup>
+    <HarmonyDir Condition="'$(HarmonyDir)' == ''">D:\SteamLibrary\steamapps\workshop\content\294100\2009463077\1.6\Assemblies</HarmonyDir> <!-- Harmony has no 1.7 or Current folder; its 1.6 build runs on 1.7 -->
+    <ManagedDir>$(RimWorldDir)</ManagedDir> <!-- 1.7 keeps its assemblies in the game folder itself -->  </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
@@ -29,11 +28,9 @@
   <!-- Game + Harmony assemblies are provided at runtime; never copy them into the mod -->
   <ItemGroup>
     <Reference Include="Assembly-CSharp"><HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(ManagedDir)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(ManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <!-- 1.7 has no Unity: UnityEngine's types (Rect, Vector2, Texture2D, GUI…) come from these two -->
+    <Reference Include="UnityStubs"><HintPath>$(ManagedDir)\UnityStubs.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Waylith.UnityCompat"><HintPath>$(ManagedDir)\Waylith.UnityCompat.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="0Harmony"><HintPath>$(HarmonyDir)\0Harmony.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 

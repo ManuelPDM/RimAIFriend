@@ -27,6 +27,7 @@ namespace AIPawnControl
         private List<int> builtOnce = new List<int>(); // entry indexes seen built: gone later is a deconstruct, not a cancel
         public bool firstNight;
         public bool furnishing; // an upgrade to a room: one item, or a floor (FURNISHING.md §5)
+        public bool bench;      // a furnishing that adds a work table the colony lacks: outfitted like a new room (its bill)
         public TerrainDef floor; // a floor upgrade: this terrain on floorCells (entries is empty)
         public List<IntVec3> floorCells = new List<IntVec3>();
         public Pawn occupant;   // a bedroom she built for someone with no room of their own (STREAMLINE.md §7); null = her own
@@ -118,7 +119,7 @@ namespace AIPawnControl
             }
             if (state == State.Done)
             {
-                if (!outfitted && !furnishing)
+                if (!outfitted && (!furnishing || bench))
                 {
                     outfitted = true;
                     Outfitting.Outfit(this);
@@ -373,6 +374,7 @@ namespace AIPawnControl
             Scribe_Collections.Look(ref builtOnce, "builtOnce", LookMode.Value);
             Scribe_Values.Look(ref firstNight, "firstNight");
             Scribe_Values.Look(ref furnishing, "furnishing");
+            Scribe_Values.Look(ref bench, "bench");
             Scribe_Defs.Look(ref floor, "floor");
             Scribe_Collections.Look(ref floorCells, "floorCells", LookMode.Value);
             Scribe_References.Look(ref occupant, "occupant");

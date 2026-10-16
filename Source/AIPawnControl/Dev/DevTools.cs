@@ -686,11 +686,11 @@ namespace AIPawnControl
             List<Room> Sealed() => map.regionGrid.AllRooms.Where(r => !r.TouchesMapEdge && r.OpenRoofCount > 0 && !r.IsDoorway).ToList();
             var sealedCells = new HashSet<IntVec3>(Sealed().SelectMany(r => r.Cells));
             string Key(BaseCall.Choice c) => c.kind != null ? "room " + c.kind.defName + "|" + c.ask?.why : c.upgrade != null ? "upgrade " + c.upgrade.ID : c.label;
-            int Rank(BaseCall.Choice c) => c.kind != null && c.group == "Next for the base" ? 0 : c.kind != null ? 1 : c.layout != null || c.temperature != null ? 2 : 3;
+            int Rank(BaseCall.Choice c) => c.kind != null && c.group == "Next for the base" ? 0 : c.kind != null || c.bench != null ? 1 : c.layout != null || c.temperature != null ? 2 : 3;
             for (int step = 1; step <= picks; step++)
             {
                 var call = BaseCall.Prepare(mind, dev: true);
-                var choice = call.choices.Where(c => (c.kind != null || c.layout != null || c.upgrade != null || c.temperature != null) && !VillageFailed.Contains(Key(c)))
+                var choice = call.choices.Where(c => (c.kind != null || c.layout != null || c.upgrade != null || c.temperature != null || c.bench != null) && !VillageFailed.Contains(Key(c)))
                     .OrderBy(Rank).FirstOrDefault();
                 if (choice == null)
                 {
@@ -709,6 +709,8 @@ namespace AIPawnControl
                         result = choice.layout(pawn, stuff);
                     else if (choice.temperature != null)
                         result = choice.temperature(pawn);
+                    else if (choice.bench != null)
+                        result = choice.bench(pawn);
                     else
                     {
                         // Each kind of gain in turn, so looks, comfort and temperature all get built.

@@ -33,6 +33,7 @@ namespace AIPawnControl
             public List<IntVec3> cells;
             public List<IntVec3> conduits = new List<IntVec3>(); // its line to the powered grid (Wiring)
             public bool art;          // made at a bench and installed (Art): picking it orders it
+            public bool bench;        // a work table the colony lacks (NewBench): its room is outfitted once it's built
         }
 
         private static readonly HashSet<string> ItemCategories = new HashSet<string> { "Furniture", "Joy", "Temperature", "Misc", "Hygiene" }; // Hygiene: Dubs Bad Hygiene's tab (a basin, a bath mat)
@@ -235,9 +236,8 @@ namespace AIPawnControl
         private static IEnumerable<Upgrade> ItemUpgrades(Context ctx)
         {
             Room room = ctx.room;
-            CellRect extents = room.ExtentsClose;
-            if (extents.Cells.Any(c => !room.ContainsCell(c) && !(c.GetEdifice(ctx.map) is Building b && b.def.IsWall)))
-                yield break; // items go in rectangular rooms only (every room a mind builds is one), walls inside allowed (a bathroom's stalls)
+            if (!Rectangular(room))
+                yield break;
             var present = new HashSet<ThingDef>(ctx.things.Select(t => t is Blueprint || t is Frame ? t.def.entityDefToBuild as ThingDef : t.def));
             bool hot = TooHot(room, ctx.pawn), cold = TooCold(room, ctx.pawn);
             bool dark = Dark(room);
@@ -623,7 +623,7 @@ namespace AIPawnControl
         /// </summary>
         private static bool KeepsRole(Room room, ThingDef def, ThingDef stuff)
         {
-            RoomRoleDef Best() => DefDatabase<RoomRoleDef>.AllDefsListForReading.MaxBy(r => r.Worker.GetScore(room));
+            RoomRoleDef Best() => DefDatabase<RoomRoleDef>.AllDefsListForReading.OrderByDescending(r => r.Worker.GetScore(room)).First();
             var before = Best();
             Thing probe = ThingMaker.MakeThing(def, stuff);
             var lister = room.Regions[0].ListerThings;
@@ -688,6 +688,27 @@ namespace AIPawnControl
             if (entry == null)
                 return null;
             return GenConstruct.CanPlaceBlueprintAt(def, entry.cell, entry.rot, map, stuffDef: ctx.StuffFor(def, def.costStuffCount)).Accepted ? entry : null;
+        }
+
+        /// <summary>Items go in rectangular rooms only (every room a mind builds is one), walls inside allowed (a bathroom's stalls).</summary>
+        private static bool Rectangular(Room room) =>
+            !room.ExtentsClose.Cells.Any(c => !room.ContainsCell(c) && !(c.GetEdifice(room.Map) is Building b && b.def.IsWall));
+
+        /// <summary>
+        /// A work table the colony lacks, in a free slot of the room (one more bench in the workshop), with its conduit line:
+        /// "stonecutter's table (60 wood): in the workshop". Null when it can't be paid, run, wired or fit.
+        /// </summary>
+        public static Upgrade NewBench(Room room, Pawn pawn, ThingDef def)
+        {
+            var ctx = new Context(room, pawn, Supplies.WallMaterials(pawn));
+            if (!Rectangular(room) || !ctx.CanPay(def, out ThingDef stuff) || !ctx.CanRun(def))
+                return null;
+            var u = new Upgrade { def = def, stuff = stuff, cost = Cost(def, stuff), bench = true, entry = Slot(ctx, def, null),
+                                  label = $"{def.label}{CostText(def, stuff)}: in the {BuildManager.Label(room)}" };
+            if (u.entry == null || !ctx.Wire(u))
+                return null;
+            u.entry.stuff = stuff;
+            return u;
         }
 
         /// <summary>A free slot for one more item in the room, by the same rules as an upgrade's (a made sculpture whose planned spot was taken).</summary>
@@ -766,6 +787,7 @@ namespace AIPawnControl
             if (u.art)
                 return Art.Order(pawn, u.def, u.stuff, null, u.entry, where);
             var project = NewProject(pawn, room, where, u.stuff);
+            project.bench = u.bench;
             if (u.floor != null)
             {
                 var cells = u.cells.Where(c => c.GetTerrain(map) != u.floor && GenConstruct.CanPlaceBlueprintAt(u.floor, c, Rot4.North, map).Accepted).ToList();

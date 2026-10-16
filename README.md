@@ -1,6 +1,6 @@
 # AI Pawn Control
 
-A RimWorld 1.6 mod that gives colonists their own mind. An LLM decides what an "AI mind" colonist
+A RimWorld 1.7 mod that gives colonists their own mind. An LLM decides what an "AI mind" colonist
 does, says and remembers. It can be any OpenAI-compatible server, local or remote. Each mind:
 
 - has a persona;
@@ -358,7 +358,7 @@ flowchart TD
     BC --> F["Food / Medicine<br/>a field when the food outlook falls short"]
     BC --> S["Storage<br/>a first stockpile"]
     BC --> SU["Stock up<br/>cut · mine · stone blocks · hunt · gather"]
-    BC --> O["Other rooms<br/>throne room, temple, nursery, prison…<br/>my own bedroom, barn, classroom…"]
+    BC --> O["Other rooms<br/>throne room, temple, nursery, prison…<br/>my own bedroom, barn, classroom…<br/>a missing bench in the workshop"]
     BC --> U["Better rooms → Upgrade call"]
     N & I & O --> Place["BuildManager.Place<br/>validator → vanilla blueprints"]
     Place --> Mark["Supplies.MarkFor<br/>mark trees / ore / stonecutter bill<br/>for what's missing"]
@@ -437,7 +437,7 @@ fewer ways out.
 | Kitchen | stove + butcher table |
 | **Great hall** | 7×7: tables, a seat per sleeper, 2 joy items, ritual spot (Ideology) |
 | Bathroom | toilets + shower or wash bucket (Dubs Bad Hygiene) |
-| Workshop | a missing work bench |
+| Workshop | 5×7: a missing work bench; later ones go in it (below) |
 | Laboratory | research bench |
 | Hospital | 3 medical beds |
 | Storeroom | shelves + a filtered stockpile |
@@ -481,6 +481,11 @@ bill runs as a chore and doesn't block building. Once the piece exists, it gets 
 in its room, and the install is the project. An ideoligion building that is art (a styled sculpture)
 works the same way: the room it asks for is built with what vanilla requires (columns), then the piece
 is ordered for it.
+
+**More benches:** once a workshop stands, a bench the colony lacks is offered under "Other rooms" as
+an item for a free slot in that workshop, placed like an upgrade item (`BaseCall.BenchChoice`,
+`Upgrades.NewBench`). Only when no workshop has space is it a new workshop room. It's outfitted like a
+new room once built.
 
 **After a room is built:** `Outfitting` adds a default bill per work table and a filtered stockpile
 for storerooms, claims the throne, and orders the ideoligion's art.
@@ -711,7 +716,7 @@ docs/test-scripts/         RimBridge Lua and Python helpers (see §15)
 ## 15. Build and dev loop
 
 **Requirements:**
-- RimWorld 1.6;
+- RimWorld 1.7;
 - Harmony (Workshop 2009463077);
 - an OpenAI-compatible LLM server: LM Studio, Ollama, llama.cpp, vLLM or anything else that serves
   `/chat/completions` with `json_schema` structured output. It can be local or remote. Set its URL and

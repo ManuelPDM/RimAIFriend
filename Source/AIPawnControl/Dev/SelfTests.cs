@@ -50,6 +50,7 @@ namespace AIPawnControl
             new Test { name = "Hygiene", run = HygieneFixtures },
             new Test { name = "Customs", run = CustomsAndGatherings },
             new Test { name = "Every kind builds", builds = true, run = EveryKindBuilds },
+            new Test { name = "Workshop benches", builds = true, run = WorkshopBenches },
             new Test { name = "Materials get marked", builds = true, run = MaterialsGetMarked },
             new Test { name = "Upgrades", builds = true, run = UpgradesMatchVanilla },
             new Test { name = "Layout", builds = true, run = LayoutLines },
@@ -390,6 +391,48 @@ namespace AIPawnControl
                 log.Check(project.state == BuildProject.State.Done, what + " | " + project.StatusLine());
                 log.Line(what);
             }
+        }
+
+        /// <summary>
+        /// Builds: with a workshop standing, the Base call offers the next bench the colony lacks in it (not a new workshop),
+        /// and picking it puts the bench in that room.
+        /// </summary>
+        private static void WorkshopBenches(Log log)
+        {
+            Map map = Map;
+            Pawn pawn = Colonists.FirstOrDefault();
+            var kind = DefDatabase<RoomKindDef>.GetNamed("AIPC_Workshop");
+            if (!map.regionGrid.AllRooms.Any(r => r.Role == kind.role && Ground.Indoor(r)))
+            {
+                DevTools.PlaceRoom(pawn, kind, out BuildProject built);
+                if (built != null)
+                    DevTools.FinishInstantly(built);
+            }
+            var bench = kind.items.First(i => i.preferNew).Resolve(map);
+            if (bench == null || Upgrades.HasBenchFor(map, bench))
+            {
+                log.Line("the colony has every workshop bench it can build: nothing to add");
+                return;
+            }
+            var call = BaseCall.Prepare(DevTools.MindOrStandIn(pawn), dev: true);
+            var choice = call.choices.FirstOrDefault(c => c.bench != null);
+            log.Line($"missing: {bench.label}; offered: {choice?.label ?? "none"}");
+            log.Check(choice != null, $"no workshop has space offered for the {bench.label}");
+            log.Check(!call.choices.Any(c => c.kind == kind), "a new workshop room is offered while one has space");
+            if (choice == null)
+                return;
+            log.Line("result: " + choice.bench(pawn));
+            var project = BuildManager.Instance.ActiveOnAll(map).FirstOrDefault(p => p.bench);
+            if (project == null)
+            {
+                log.Fail("picking it started no project");
+                return;
+            }
+            DevTools.FinishInstantly(project);
+            var placed = map.listerBuildings.allBuildingsColonist.FirstOrDefault(b => b.def == bench);
+            Room room = placed?.GetRoom();
+            log.Check(room != null && room.Role == kind.role, $"the {bench.label} isn't in a workshop: {room?.Role?.label ?? "not built"}");
+            log.Line($"bills at the {bench.label}: {(placed as IBillGiver)?.BillStack.Count ?? 0}"); // only tables with a default goal get one (Outfitting)
         }
 
         /// <summary>Builds: a room laid out while storage falls short marks what's missing (trees, a vein, an order) or says why it can't.</summary>

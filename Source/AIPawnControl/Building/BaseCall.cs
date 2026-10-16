@@ -20,7 +20,7 @@ namespace AIPawnControl
         private const string None = "-";
         private static readonly string[] GroupOrder = { "Next for the base", "Inside the base", "Food", "Medicine", "Storage", "Stock up", "Other rooms" };
 
-        /// <summary>One numbered line. Exactly one of kind, layout, temperature, crop, upgrade, pile or chore is set.</summary>
+        /// <summary>One numbered line. Exactly one of kind, layout, temperature, bench, crop, upgrade, pile or chore is set.</summary>
         internal class Choice
         {
             public string group;
@@ -36,6 +36,7 @@ namespace AIPawnControl
             public CellRect pile;         // a stockpile, when the colony has none
             public Func<Pawn, ThingDef, string> layout; // a hub, a door between rooms, a way out closed (BASE_LAYOUT.md)
             public Func<Pawn, string> temperature; // warm or cool a room: survival, so it goes ahead even with a project running
+            public Func<Pawn, string> bench;       // a bench the colony lacks, in the workshop that has space for it
         }
 
         /// <summary>The call, built but not sent: its prompt, schema and what each number means.</summary>
@@ -168,6 +169,14 @@ namespace AIPawnControl
                 var validator = new RoomValidator(map, finder.center, finder.weights.maxWalk);
                 finder.For(rung?.kind); // the sites suit the ladder's next room (its goods' neighbours, BASE_GROWTH.md §6.2)
                 call.sites = finder.Sites(validator, call.materials[0], out _);
+                // A bench the colony lacks goes in a workshop with space for it; only without one is it a new workshop.
+                var others = DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => k != rung?.kind && OtherRoom(k, pawn)).ToList();
+                foreach (var kind in others.ToList())
+                    if (BenchChoice(kind, pawn) is Choice bench)
+                    {
+                        choices.Add(bench);
+                        others.Remove(kind);
+                    }
                 if (call.sites.Count == 0)
                 {
                     call.noSites = true;
@@ -185,7 +194,7 @@ namespace AIPawnControl
                             asked.ask = ask;
                             choices.Add(asked);
                         }
-                    foreach (var kind in DefDatabase<RoomKindDef>.AllDefsListForReading.Where(k => k != rung?.kind && OtherRoom(k, pawn)))
+                    foreach (var kind in others)
                         if (RoomChoice(kind, SizeFor(kind, map), "Other rooms", kind == RoomKindDef.Bedroom ? "my own bedroom" : null, finder, validator, call.sites, call.materials) is Choice other)
                             choices.Add(other);
                 }
@@ -328,6 +337,30 @@ namespace AIPawnControl
             return kind.role != null && !map.regionGrid.AllRooms.Any(r => r.Role == kind.role && Ground.Indoor(r));
         }
 
+        /// <summary>
+        /// "a stonecutter's table (60 wood): in the workshop": the kind's bench the colony lacks, in a room of the kind with a
+        /// free slot for it. Null when it has no such bench or no room has space.
+        /// </summary>
+        private static Choice BenchChoice(RoomKindDef kind, Pawn pawn)
+        {
+            Map map = pawn.Map;
+            if (kind.role == null || !(kind.items.FirstOrDefault(i => i.preferNew)?.Resolve(map) is ThingDef def) || Upgrades.HasBenchFor(map, def))
+                return null;
+            foreach (var room in map.regionGrid.AllRooms.Where(r => r.Role == kind.role && Ground.Indoor(r)))
+                if (Upgrades.NewBench(room, pawn, def) is Upgrades.Upgrade u)
+                {
+                    IntVec3 cell = room.Cells.First();
+                    return new Choice
+                    {
+                        group = "Other rooms",
+                        label = "a " + u.label,
+                        bench = p => cell.GetRoom(p.Map) is Room again && Upgrades.NewBench(again, p, def) is Upgrades.Upgrade fresh
+                            ? Upgrades.Place(p, again, fresh) : $"There's no space for the {def.label} there any more.",
+                    };
+                }
+            return null;
+        }
+
         /// <summary>"a kitchen (5x5: fueled stove, butcher table; 80 steel)". Null when it doesn't fit at the best site.</summary>
         private static Choice RoomChoice(RoomKindDef kind, (int w, int h) size, string group, string name, SiteFinder finder, RoomValidator validator,
                                          List<RoomPlan> sites, List<ThingDef> materials, AskedFor.Ask ask = null)
@@ -394,7 +427,7 @@ namespace AIPawnControl
                 return;
             }
             // One project at a time: someone else may have started one while she was thinking.
-            if ((choice.kind != null || choice.layout != null || choice.upgrade != null) && call.underway == null
+            if ((choice.kind != null || choice.layout != null || choice.upgrade != null || choice.bench != null) && call.underway == null
                 && BuildManager.Instance.Underway(pawn.Map) is BuildProject started)
             {
                 RemarkAndLog(mind, say, $"{ProjectName(started, pawn).CapitalizeFirst()} was started meanwhile, so I left it at that; the base builds one thing at a time.",
@@ -418,6 +451,8 @@ namespace AIPawnControl
                     return choice.layout(pawn, stuff);
                 if (choice.temperature != null)
                     return choice.temperature(pawn);
+                if (choice.bench != null)
+                    return choice.bench(pawn);
                 if (choice.crop != null)
                     return Fields.Place(pawn, choice.field, choice.crop, choice.where);
                 if (choice.group == "Storage")

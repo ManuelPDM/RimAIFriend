@@ -119,8 +119,8 @@ namespace AIPawnControl
             var threats = DangerResponse.Threats(plan.map);
             if (inside.Count == 0 || threats.Count == 0)
                 return;
-            var near = threats.Select(t => (t, cell: inside.MinBy(c => c.DistanceToSquared(t.Position))))
-                .MinBy(x => x.cell.DistanceToSquared(x.t.Position));
+            var near = threats.Select(t => (t, cell: inside.OrderBy(c => c.DistanceToSquared(t.Position)).First()))
+                .OrderBy(x => x.cell.DistanceToSquared(x.t.Position)).First();
             plan.edge = near.cell;
             plan.enemyAt = near.t.Position;
             var center = new IntVec3((int)inside.Average(c => c.x), 0, (int)inside.Average(c => c.z));
