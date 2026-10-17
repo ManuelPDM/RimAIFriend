@@ -7,7 +7,7 @@ namespace AIPawnControl
 {
     /// <summary>
     /// The colony's ideoligion as its customs (IDEOLOGY.md §4, §15): the rules everyone who follows them lives under, never
-    /// what a mind believes. [Colony customs], ideoligion roles, and the two-step reform choice.
+    /// what a mind believes. The customs report (dev), ideoligion roles, and the two-step reform choice.
     /// </summary>
     public static class Customs
     {
@@ -25,7 +25,7 @@ namespace AIPawnControl
             Primary.PreceptsListForReading.Where(p => p.GetType() == typeof(Precept) && p.def.issue != null && p.def.visible
                                                       && p.def.comps.Any(c => c is PreceptComp_Thought)).ToList();
 
-        /// <summary>[Colony customs]: "Male clothing: Pants and shirt · Cannibalism: Abhorrent · …", or null without Ideology.</summary>
+        /// <summary>The dev customs report: "Male clothing: Pants and shirt · Cannibalism: Abhorrent · …", or null without Ideology.</summary>
         public static string Section(Pawn pawn)
         {
             if (!Active || pawn.Map == null)

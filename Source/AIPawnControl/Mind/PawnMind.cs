@@ -19,7 +19,7 @@ namespace AIPawnControl
         private const int IdleTicksBeforeAct = GenDate.TicksPerHour;
         private const int MaxChatLines = 16; // 8 turns of the current conversation go into the Chat prompt
         private const int ChatForgetTicks = 6 * GenDate.TicksPerHour;
-        private const int ReflectTokens = 3000; // the reply is several fields long; a cut-off reply isn't valid JSON
+        internal const int ReflectTokens = 3000; // the reply is several fields long; a cut-off reply isn't valid JSON
 
         // Saved
         public Pawn pawn;
@@ -393,17 +393,23 @@ namespace AIPawnControl
                 ["history"] = history,
                 ["new"] = unread.Length > 0 ? "\n" + Prompts.Fill("message-new", new Dictionary<string, string> { ["other"] = name, ["new"] = unread }) + "\n" : "",
                 ["menu"] = menu,
+                ["memory"] = recall.MemoryLine,
             }, new Dictionary<string, string>(recall.Sections) { ["Messages"] = DirectMessages.Instance?.Context(pawn, pawn.Map, except: other) });
         }
 
         /// <summary>An optional act and the tone first (so the words match them), then the message ("" = none).</summary>
-        internal static Dictionary<string, object> MessageSchema(List<ActionCatalog.ActOption> menu, List<int> memories) => Schema.Obj(new Dictionary<string, object>
+        internal static Dictionary<string, object> MessageSchema(List<ActionCatalog.ActOption> menu, List<int> memories)
         {
-            ["act"] = Schema.IntEnum(new[] { 0 }.Concat(menu.Select(o => o.Id))),
-            ["tone"] = Schema.StrEnum(ActionCatalog.Tones),
-            ["message"] = Schema.Str(ActionCatalog.MaxChatReply + 60),
-            ["memory"] = Schema.IntEnum(new[] { 0 }.Concat(memories)),
-        });
+            var props = new Dictionary<string, object>
+            {
+                ["act"] = Schema.IntEnum(new[] { 0 }.Concat(menu.Select(o => o.Id))),
+                ["tone"] = Schema.StrEnum(ActionCatalog.Tones),
+                ["message"] = Schema.Str(ActionCatalog.MaxChatReply + 60),
+            };
+            if (memories.Count > 0)
+                props["memory"] = Schema.IntEnum(new[] { 0 }.Concat(memories));
+            return Schema.Obj(props);
+        }
 
         /// <summary>
         /// The message goes into the thread (or the played colonist's chat) and, with the other pawn in vanilla's interaction
@@ -549,14 +555,20 @@ namespace AIPawnControl
                 ["speaker"] = speaker,
                 ["situation"] = situation,
                 ["said"] = line == null ? "" : "\n" + Prompts.Fill("answer-said", new Dictionary<string, string> { ["speaker"] = speaker, ["line"] = line }) + "\n",
+                ["memory"] = recall.MemoryLine,
             }, recall.Sections);
 
-        private static Dictionary<string, object> AnswerSchema(List<int> memories) => Schema.Obj(new Dictionary<string, object>
+        internal static Dictionary<string, object> AnswerSchema(List<int> memories)
         {
-            ["accept"] = Schema.Bool(),
-            ["reply"] = Schema.Str(ActionCatalog.MaxChatReply + 60),
-            ["memory"] = Schema.IntEnum(new[] { 0 }.Concat(memories)),
-        });
+            var props = new Dictionary<string, object>
+            {
+                ["accept"] = Schema.Bool(),
+                ["reply"] = Schema.Str(ActionCatalog.MaxChatReply + 60),
+            };
+            if (memories.Count > 0)
+                props["memory"] = Schema.IntEnum(new[] { 0 }.Concat(memories));
+            return Schema.Obj(props);
+        }
 
         private void OnAnswer(Asked a, Dictionary<string, object> reply, Recall recall)
         {
@@ -682,7 +694,8 @@ namespace AIPawnControl
                 return;
             }
             string result = MindActions.Safely(pawn, option.Label, () => option.ApplyReply != null ? option.ApplyReply(reply) : option.Apply(option.Announces ? SpeechLog.Clean(reply.Str("say")) : null));
-            AddDecision($"{option.Label}: {result}");
+            if (option.Key != "keep") // carrying on is no news: [Doing now] has the job, and it would crowd [Recent] and Reflect's events
+                AddDecision($"{option.Label}: {result}");
             ModLog.Message($"{pawn.LabelShort} act: {option.Label} | {result} | Reason: {lastReason}");
             recall.MarkUsed(this, reply.Int("memory"), option.Target?.LabelShort);
             if (groupTurn)
@@ -799,6 +812,7 @@ namespace AIPawnControl
                 ["history"] = earlier.Count > 0 ? string.Join("\n", earlier) : "(this is the start of the conversation)",
                 ["message"] = message,
                 ["menu"] = menu,
+                ["memory"] = recall.MemoryLine,
             }, recall.Sections);
 
         private void OnChat(string speaker, Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
@@ -1013,7 +1027,8 @@ namespace AIPawnControl
         public void ChangeWork(WorkTypeDef work, string priority, string why)
         {
             string result = MindActions.ChangePriority(pawn, work, priority, out bool changed);
-            AddDecision($"{result}{(why != null ? $" ({why})" : "")}", importance: changed ? 4 : 0);
+            if (changed) // a priority it already had is no news, like "keep going"
+                AddDecision($"{result}{(why != null ? $" ({why})" : "")}", importance: 4);
             ModLog.Message($"{pawn.LabelShort} work: {work.defName} to {priority} | {result} | why: {why}");
         }
 

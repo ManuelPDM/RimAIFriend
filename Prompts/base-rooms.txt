@@ -1,0 +1,4 @@
+When you lay out a room, the trees or ore for whatever it's missing get marked right away, so a room never waits for someone to stock up first.
+
+Where a new room goes (the room you pick is built at the site you pick):
+{sites}

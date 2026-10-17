@@ -84,7 +84,6 @@ namespace AIPawnControl
                 ["Doing now"] = (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + ".", // null between jobs, e.g. as a mental break starts
                 ["My project"] = BuildManager.Instance?.ProjectLine(pawn),
                 ["People"] = People(pawn),
-                ["Colony customs"] = Customs.Section(pawn),
                 ["Colony"] = Colony(map),
                 ["Colony stores"] = Stores(map),
                 ["Colony work"] = ColonyWork.Line(pawn),
@@ -388,7 +387,7 @@ namespace AIPawnControl
                 if (items.Count == 0)
                     empty++;
                 else
-                    parts.Add($"{RoomName(room, pawn)} ({BuildManager.Impressiveness(room)}{Uncomfortable(room, pawn)}{BuiltBy(room, pawn)}): {ItemList(items, MaxRoomItems)}");
+                    parts.Add($"{RoomName(room, pawn)} ({BuildManager.Impressiveness(room)}{Uncomfortable(room, pawn)}): {ItemList(items, MaxRoomItems)}");
             }
             if (parts.Count > MaxRooms)
                 parts = parts.Take(MaxRooms).Append($"{parts.Count - MaxRooms} more rooms").ToList();
@@ -408,13 +407,6 @@ namespace AIPawnControl
         /// <summary>", 29F" when the room is too cold or too hot for her (her comfortable range, clothes included), else "".</summary>
         private static string Uncomfortable(Room room, Pawn pawn) =>
             Upgrades.TooCold(room, pawn) || Upgrades.TooHot(room, pawn) ? ", " + room.Temperature.ToStringTemperature("F0") : "";
-
-        /// <summary>", built by Sab" or ", built by me" (STREAMLINE.md §4), or "".</summary>
-        private static string BuiltBy(Room room, Pawn pawn)
-        {
-            Pawn builder = BuildManager.Instance?.BuilderOf(room);
-            return builder == null ? "" : builder == pawn ? ", built by me" : $", built by {builder.LabelShort}";
-        }
 
         /// <summary>"my bedroom" for hers, vanilla's label otherwise ("Mo's bedroom", "kitchen").</summary>
         public static string RoomName(Room room, Pawn pawn) =>

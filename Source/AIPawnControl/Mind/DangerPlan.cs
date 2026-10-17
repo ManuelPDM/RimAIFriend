@@ -83,7 +83,7 @@ namespace AIPawnControl
         private static bool Able(PawnMind m) => m.persona != null && m.PausedReason(ignoreSleep: true) == null && !m.Unreachable;
 
         /// <summary>The minds on this map that can be given a part.</summary>
-        private static List<PawnMind> Candidates(Map map) =>
+        internal static List<PawnMind> Candidates(Map map) =>
             (MindManager.Instance?.Minds ?? new List<PawnMind>()).Where(m => m.pawn != null && m.pawn.Map == map && m.pawn.playerSettings != null
                 && m.PausedReason(ignoreSleep: true) == null).ToList();
 
@@ -167,34 +167,36 @@ namespace AIPawnControl
             FindEdge(plan);
             var candidates = Candidates(plan.map);
             var options = Options(plan, candidates);
-            bool canInside = DangerResponse.CanGoInside(plan.map);
-            if (options.Count < 2 && !canInside)
+            if (options.Count < 2 && !DangerResponse.CanGoInside(plan.map))
                 return false;
-            var fightNames = candidates.Where(m => CanFight(m.pawn)).Select(m => m.pawn.LabelShort).ToList();
-            var allNames = candidates.Select(m => m.pawn.LabelShort).ToList();
-            string plansText = string.Join("\n", options.Select((o, i) => $"{i + 1}. {o.label}"));
-            var messages = PromptBuilder.Build("plan", mind, new Dictionary<string, string>
-            {
-                ["why"] = leader ? "you lead the colony" : "you're the first to react",
-                ["colonists"] = ColonistLines(candidates, mind.pawn),
-                ["plans"] = plansText,
-                ["noinside"] = canInside ? "" : " There's no inside to go to now, so leave it empty.",
-            });
-            var schema = Schema.Obj(new Dictionary<string, object>
-            {
-                ["reason"] = Schema.Reason(),
-                ["plan"] = Schema.IntEnum(Enumerable.Range(1, options.Count)),
-                ["fighters"] = Names(fightNames),
-                ["inside"] = Names(canInside ? allNames : new List<string>()),
-                ["say"] = Schema.Say(),
-            });
             plan.caller = mind;
-            ModLog.Message($"{mind.pawn.LabelShort} makes the danger plan ({(leader ? "the leader" : "first to react")}):\n{plansText}");
-            mind.Send("plan", messages, schema, reply => OnReply(plan, candidates, options, reply),
+            ModLog.Message($"{mind.pawn.LabelShort} makes the danger plan ({(leader ? "the leader" : "first to react")}):\n{PlansText(options)}");
+            mind.Send("plan", PlanMessages(mind, plan, leader, candidates, options), PlanSchema(plan, candidates, options), reply => OnReply(plan, candidates, options, reply),
                 stillValid: () => DangerResponse.Threats(plan.map).Count == 0 ? "the danger is over" : mind.PausedReason(ignoreSleep: true));
             mind.DangerThought();
             return true;
         }
+
+        private static string PlansText(List<Option> options) => string.Join("\n", options.Select((o, i) => $"{i + 1}. {o.label}"));
+
+        /// <summary>The Plan call's prompt: why she makes it, who can take part, and the plans possible now.</summary>
+        internal static List<KeyValuePair<string, string>> PlanMessages(PawnMind mind, Plan plan, bool leader, List<PawnMind> candidates, List<Option> options) =>
+            PromptBuilder.Build("plan", mind, new Dictionary<string, string>
+            {
+                ["why"] = leader ? "you lead the colony" : "you're the first to react",
+                ["colonists"] = ColonistLines(candidates, mind.pawn),
+                ["plans"] = PlansText(options),
+                ["noinside"] = DangerResponse.CanGoInside(plan.map) ? "" : " There's no inside to go to now, so leave it empty.",
+            });
+
+        internal static Dictionary<string, object> PlanSchema(Plan plan, List<PawnMind> candidates, List<Option> options) => Schema.Obj(new Dictionary<string, object>
+        {
+            ["reason"] = Schema.Reason(),
+            ["plan"] = Schema.IntEnum(Enumerable.Range(1, options.Count)),
+            ["fighters"] = Names(candidates.Where(m => CanFight(m.pawn)).Select(m => m.pawn.LabelShort).ToList()),
+            ["inside"] = Names(DangerResponse.CanGoInside(plan.map) ? candidates.Select(m => m.pawn.LabelShort).ToList() : new List<string>()),
+            ["say"] = Schema.Say(),
+        });
 
         private static Dictionary<string, object> Names(List<string> names) =>
             Schema.Arr(Schema.StrEnum(names.Count > 0 ? names : new List<string> { "-" }), names.Count);

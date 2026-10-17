@@ -8,9 +8,7 @@ It's {time}. {situation}
 Reply in character, or "" to leave it for now. 1-2 short sentences, plain speech. No narration, no *actions*, no quotation marks.
 "tone": positive (friendly or personal) or negative (a jab or an insult; it hurts the relationship and can start a fight), as you feel about them ([People], [About ...]) and who you are.
 If [Condition] says you're in a mental break, you're in it right now: reply the way someone in that state would, and don't act as if everything's fine.
-Your past is only what [I remember], [From my diary], [Since yesterday], the [About ...] lines and this conversation show. If {other} brings up an event, person or thing that isn't there, you don't know it: say plainly that you don't remember it or weren't there. Never pretend to half-remember, and don't make anything up.
-
-"memory": the M-number from [I remember] that you drew on in your reply, otherwise 0.
+Your past is only what [I remember], [From my diary], [Since yesterday], the [About ...] lines and this conversation show. If {other} brings up an event, person or thing that isn't there, you don't know it: say plainly that you don't remember it or weren't there. Never pretend to half-remember, and don't make anything up.{memory}
 
 "act": if you agree to do something right now, pick the option that actually does it. Otherwise 0, including when you refuse or put it off.
 0: nothing right now

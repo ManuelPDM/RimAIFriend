@@ -40,7 +40,8 @@ namespace AIPawnControl
         internal static void OnThought(Pawn pawn, Thought_Memory thought)
         {
             var mind = MindOf(pawn);
-            if (mind == null || !ThoughtUtility.CanGetThought(pawn, thought.def))
+            if (mind == null || !ThoughtUtility.CanGetThought(pawn, thought.def)
+                || thought.def == AIPC_ThoughtDefOf.AIPC_FeltCloser || thought.def == AIPC_ThoughtDefOf.AIPC_FeltCooler) // the mind's own Reflect wrote it
                 return;
             float mood = thought.MoodOffset();
             float opinion = thought is Thought_MemorySocial social ? social.OpinionOffset() : 0f;

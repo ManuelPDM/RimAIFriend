@@ -36,7 +36,7 @@ namespace AIPawnControl
         private static readonly string[] Snapshot =
         {
             "Me", "Time", "Condition", "Needs", "Feelings", "Doing now", "My project",
-            "People", "Colony customs", "Colony", "Colony stores", "Colony work", "Rooms", "Recent", "Group chat", "Messages", "Danger",
+            "People", "Colony", "Colony stores", "Colony work", "Rooms", "Recent", "Group chat", "Messages", "Danger",
         };
 
         // Every user-prompt section, in prompt order: the snapshot, then memory.
@@ -60,7 +60,7 @@ namespace AIPawnControl
             ["post"] = new HashSet<string>(Snapshot) { "Since yesterday", "About" }, // the group chat: [About X] for who wrote lately
             ["decide"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // a choice the game asks the colony (WORLD.md)
             ["plan"] = new HashSet<string>(Snapshot) { "Since yesterday" }, // the colony's plan for a danger (DANGER_RESPONSE.md §9)
-            ["reflect"] = new HashSet<string> { "Me", "Time", "Colony customs" }, // its events and people come in the task values
+            ["reflect"] = new HashSet<string> { "Me", "Time" }, // its events and people come in the task values
             ["upgrade"] = new HashSet<string> { "Me", "Time", "Condition", "Feelings" }, // small: the Base call just picked the room
         };
 

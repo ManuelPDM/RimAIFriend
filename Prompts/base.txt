@@ -6,15 +6,10 @@ It's {time}. You've decided to spend a moment on the base: what it gets next. Yo
 
 What you could do now:
 0: not now, let the stores build up
-{options}
-When you lay out a room, the trees or ore for whatever it's missing get marked right away, so a room never waits for someone to stock up first.
-
-{rooms}
+{options}{rooms}
 
 Pick one:
-- "choice": the option's number.
-- "site": for a room, a site letter from the list. Otherwise "-".
-- "material": for a room or anything built inside the base, what its walls and doors are made of. Otherwise "-".
+- "choice": the option's number.{site}{material}
 
 Think about what the base needs most ([Colony] says what's next and how the food looks), what the stores can pay for, your mood and who you are. Stocking up means the next thing goes up faster; better rooms lift everyone's mood; fewer ways out keep the weather out and the base easier to defend.
 

@@ -284,24 +284,36 @@ namespace AIPawnControl
             bool walls = anyRoom || call.choices.Any(c => c.layout != null);
             if (anyRoom)
                 call.letters = call.sites.Select((s, i) => ((char)('A' + i)).ToString()).ToList();
+            // Site and material lines, and their fields, only when the menu has something they apply to.
             string rooms = (anyRoom
-                ? "Sites for a room (walls and door cost at 5x5):\n" + string.Join("\n", call.sites.Select((s, i) => finder.Describe(s, call.letters[i][0], call.materials, finder.MaxFit(s)))) + "\n"
+                ? "\n" + Prompts.Fill("base-rooms", new Dictionary<string, string>
+                {
+                    ["sites"] = string.Join("\n", call.sites.Select((s, i) => finder.Describe(s, call.letters[i][0], finder.MaxFit(s)))),
+                })
                 : "")
-                + (walls ? $"Wall materials: {materialsLine}. The colony marks trees or ore for what's missing, but only what's nearby can be had." : "");
+                + (walls ? (anyRoom ? "\n" : "\n\n") + $"Wall materials: {materialsLine}. The colony marks trees or ore for what's missing, but only what's nearby can be had." : "");
             call.messages = PromptBuilder.Build("base", mind, new Dictionary<string, string>
             {
                 ["rung"] = rungText,
                 ["options"] = string.Join("\n", lines),
                 ["rooms"] = rooms,
+                ["site"] = anyRoom ? "\n" + Prompts.Fill("base-site", new Dictionary<string, string>()) : "",
+                ["material"] = walls ? "\n" + Prompts.Fill("base-material", new Dictionary<string, string>
+                {
+                    ["materials"] = string.Join(" or ", call.materials.Select(m => m.label)),
+                }) : "",
             });
-            call.schema = Schema.Obj(new Dictionary<string, object>
+            var props = new Dictionary<string, object>
             {
                 ["reason"] = Schema.Reason(),
                 ["choice"] = Schema.Pick(call.Count),
-                ["site"] = Schema.StrEnum(call.letters.Append(None)),
-                ["material"] = Schema.StrEnum((walls ? call.materials.Select(m => m.label) : Enumerable.Empty<string>()).Append(None)),
-                ["say"] = Schema.Say(),
-            });
+            };
+            if (anyRoom)
+                props["site"] = Schema.StrEnum(call.letters.Append(None));
+            if (walls)
+                props["material"] = Schema.StrEnum(call.materials.Select(m => m.label).Append(None));
+            props["say"] = Schema.Say();
+            call.schema = Schema.Obj(props);
             return call;
         }
 
@@ -373,9 +385,7 @@ namespace AIPawnControl
                 return null;
             var furniture = plan.Furniture.ToList();
             string items = string.Join(", ", furniture.GroupBy(e => e.def).Select(g => g.Count() > 1 ? $"{g.Count()} {Find.ActiveLanguageWorker.Pluralize(g.Key.label, g.Count())}" : g.Key.label));
-            var cost = new RoomPlan { kind = kind, map = plan.map, footprint = plan.footprint };
-            cost.entries.AddRange(furniture);
-            string what = furniture.Count > 0 ? $"{items}; {SiteFinder.CostText(cost, materials)}" : kind.description;
+            string what = $"{(furniture.Count > 0 ? items : kind.description)}; {SiteFinder.CostText(plan, materials)}";
             if (ask?.floorTags != null)
                 what += "; all floored";
             if (ask?.art != null)

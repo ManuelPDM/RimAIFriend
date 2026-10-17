@@ -956,8 +956,8 @@ namespace AIPawnControl
 
         // ---- materials and words ----
 
-        /// <summary>One site in words, with no coordinates (PHASE4.md §2): where, walls shared, distance, clearing, room to grow, wall cost.</summary>
-        public string Describe(RoomPlan plan, char letter, List<ThingDef> materials, (int w, int h) maxFit)
+        /// <summary>One site in words, with no coordinates (PHASE4.md §2): where, walls shared, distance, clearing, room to grow.</summary>
+        public string Describe(RoomPlan plan, char letter, (int w, int h) maxFit)
         {
             var parts = new List<string> { plan.apart ? "a building of its own " + Where(plan) : Where(plan) };
             Room into = plan.doorOutside.GetRoom(map);
@@ -975,7 +975,7 @@ namespace AIPawnControl
                 clearing.Add(plan.items == 1 ? "1 item to move" : $"{plan.items} items to move");
             parts.Add(clearing.Count > 0 ? string.Join(", ", clearing) : "open ground");
             parts.Add($"fits up to {maxFit.w}×{maxFit.h}");
-            return $"{letter}: {string.Join(", ", parts)}. Walls and door at {plan.SizeLabel}: {CostText(plan, materials)}.";
+            return $"{letter}: {string.Join(", ", parts)}.";
         }
 
         /// <summary>"80 wood or 90 granite blocks", plus anything that doesn't come in the listed materials.</summary>

@@ -125,6 +125,9 @@ namespace AIPawnControl
             return recall;
         }
 
+        /// <summary>The "memory" field's line (memory.txt) for Chat, Message and Answer: only when [I remember] is shown.</summary>
+        public string MemoryLine => Shown.Count > 0 ? "\n\n" + Prompts.Fill("memory", new Dictionary<string, string>()) : "";
+
         /// <summary>The "memory" field named one she was shown: it rests 3 days, and the person she told now knows it.</summary>
         public void MarkUsed(PawnMind mind, int memoryId, string audience)
         {

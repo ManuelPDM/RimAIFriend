@@ -213,7 +213,7 @@ flowchart LR
 
 | Option | When it's offered | What happens |
 |---|---|---|
-| **keep going** (job report) | Not in Chat/Message (their act 0 is that) | Carries on with vanilla's work. Plans a check-in 2 h later. During danger with a plan part, it reads "keep to my part in the plan (…)". |
+| **keep going** (job report) | Not in Chat/Message (their act 0 is that) | Carries on with vanilla's work. Plans a check-in 2 h later. During danger with a plan part, it reads "keep to my part in the plan (…)". Not logged as a decision, so it never fills `[Recent]` or the memory events. |
 | **talk to someone** | Not in Chat/Message; messages left today. Any other mind with a persona and the colonist the player plays, at any distance; colonists without a mind in vanilla's interaction range | `with` picks who. Opens the **Message call** ([§10](#private-messages)), which writes the words into their thread (to the played colonist: the Mind tab chat, [§13](#13-player-ui-and-settings)). In vanilla's interaction range they're also said out loud ([§10](#private-messages)). |
 | **work on the base: …** | `BaseCall.AnythingToDo` | Opens the **Base call** ([§7](#7-building-the-base)). While a project runs, the label reads "(X's barracks comes first)". |
 | **faith line** (at most one) | The `gatherings` setting is on; home map | Priority order: a burial, a due ritual obligation, a role, then an anytime ritual. See [§12](#12-ideology-gatherings-and-burials). |
@@ -262,13 +262,13 @@ persona and `guidance.txt`, plus its `[Who I am lately]`. All replies use a stri
 |---|---|---|---|---|
 | **Persona** | `persona.txt` | first think with no persona; dev "Regenerate" | `persona` | 2-3 sentences with one big want, built from a passion and a trait. Then the pawn's starting work priorities are set from its passions. |
 | **Act** | `act.txt` (+ `danger.txt` during danger) | the triggers in §2 | `reason, choice, with, memory` (+ `say` with a faith or party line) | Applies the pick. |
-| **Chat** | `chat.txt` (+ `chat-player.txt`) | the player types in the Mind tab | `act, reply, memory` | The reply goes to the chat and memory, and the pawn may act from the menu. Wakes a sleeper. Played as a colonist, the prompt names that colonist and leaves out `chat-player.txt` (the player's "usually go along with it" stance). |
-| **Message** | `message.txt` | Act → "talk to someone", or an unread line from someone in vanilla's interaction range | `act, tone, message, memory` | The prompt shows the conversation as read so far, then what's new since. One message into the thread (costs 1 message); "" leaves it for now. In vanilla's interaction range it's said out loud. The pawn may act (costs 1 decision). |
-| **Answer** | `answer.txt` (+ `answer-said.txt` when a mind asks out) | anyone asks the pawn out or proposes to it; a mind asks it to spend time together | `accept, reply, memory` | Asked out or proposed to: the attempt is held before vanilla's roll, and the asker waits by the pawn in a talk job. Vanilla then runs the interaction with the answer as its outcome (thoughts, relations, letter), and the reply is spoken. The patch on vanilla's odds runs last, so the answer wins over mods that change them (Romance on the Rim). Asked along: the reply goes into their thread, and a yes starts the activity ([§3](#3-the-act-menu-and-what-each-choice-leads-to)). One question at a time; one left 2 h unanswered is dropped and doesn't happen. |
-| **Base** | `base.txt` | Act → "work on the base" | `reason, choice, site, material, say` | A room, layout change, field, stockpile, stock-up chore, temperature item, or Upgrade call. |
+| **Chat** | `chat.txt` (+ `chat-player.txt`, `memory.txt`) | the player types in the Mind tab | `act, reply` (+ `memory` with [I remember]) | The reply goes to the chat and memory, and the pawn may act from the menu. Wakes a sleeper. Played as a colonist, the prompt names that colonist and leaves out `chat-player.txt` (the player's "usually go along with it" stance). |
+| **Message** | `message.txt` (+ `memory.txt`) | Act → "talk to someone", or an unread line from someone in vanilla's interaction range | `act, tone, message` (+ `memory` with [I remember]) | The prompt shows the conversation as read so far, then what's new since. One message into the thread (costs 1 message); "" leaves it for now. In vanilla's interaction range it's said out loud. The pawn may act (costs 1 decision). |
+| **Answer** | `answer.txt` (+ `answer-said.txt` when a mind asks out, `memory.txt`) | anyone asks the pawn out or proposes to it; a mind asks it to spend time together | `accept, reply` (+ `memory` with [I remember]) | Asked out or proposed to: the attempt is held before vanilla's roll, and the asker waits by the pawn in a talk job. Vanilla then runs the interaction with the answer as its outcome (thoughts, relations, letter), and the reply is spoken. The patch on vanilla's odds runs last, so the answer wins over mods that change them (Romance on the Rim). Asked along: the reply goes into their thread, and a yes starts the activity ([§3](#3-the-act-menu-and-what-each-choice-leads-to)). One question at a time; one left 2 h unanswered is dropped and doesn't happen. |
+| **Base** | `base.txt` (+ `base-rooms.txt`, `base-site.txt`, `base-material.txt`) | Act → "work on the base" | `reason, choice, say` (+ `site` with a room on the menu, `material` with anything walled) | A room, layout change, field, stockpile, stock-up chore, temperature item, or Upgrade call. |
 | **Upgrade** | `upgrade.txt` | Base → "upgrade X" | `reason, choice, say` | A furnishing or floor project. |
 | **Post** | `post.txt` | Act → "post in the group chat" | `reason, post` | A message in the group chat. |
-| **Reflect** | `reflect.txt` | once a night | `diary, lately, memories[], people[], work` | Memory written and embedded; one work priority changed. |
+| **Reflect** | `reflect.txt` | once a night | `diary, lately, memories[], people[], work` | Memory written and embedded; one work priority changed; each person's `feeling` (closer/cooler) becomes a social memory. |
 | **Decide** | `decide.txt` | an open colony choice | `reason, choice, say` | The choice is applied and posted to the group chat. |
 | **Plan** | `plan.txt` | danger starts | `reason, plan, fighters[], inside[], say` | Everyone gets their part; posted to the group chat. |
 | **Compact** | `compact.txt` / `compact-dm.txt` | group chat or a private thread has 15+ messages | `summary` | Older messages are folded into the summary. |
@@ -292,12 +292,11 @@ The mind only knows what these show, and every mind knows the whole map.
 | `[Needs]` / `[Feelings]` | needs under 25%; the top 3 mood thoughts |
 | `[Doing now]` / `[My project]` | job report; the pawn's build project's status |
 | `[People]` | up to 10 colonists, nearest first: relation, role, opinion, mood, where, best skills, job; for a mind, also its project and last chore |
-| `[Colony customs]` | the customs that give moods; "I don't follow them"; "One can be changed now" |
 | `[Colony]` | headcount, danger rating, the dead, alerts, the base ladder's next step, food outlook |
 | `[Colony stores]` | food days, medicine, wood, steel, components, silver, waiting to be hauled |
 | `[Colony work]` | fields, stockpiles, marked targets, work orders, with "(by me)" on the pawn's own |
 | `[Rooms]` | the room the pawn is in, then up to 12 others: impressiveness, temperature, builder, furniture |
-| `[Recent]` | the pawn's last 5 decisions |
+| `[Recent]` | the pawn's last 5 decisions ("keep going" isn't one) |
 | `[Group chat]` | the summary, then the last 5 messages |
 | `[Messages]` | each private thread active in the last day or unread: who, the unread count, the last 2 lines. The Mind tab chat with the colonist the player plays is one of them |
 | `[Danger]` | only during threats: enemies, who they're after, the pawn's weapon, who's armed, the plan and the pawn's part, each announced predator's own description |
@@ -311,7 +310,7 @@ Which call gets which sections:
 | Chat, Message, Answer | full snapshot + Since yesterday, About, I remember, From my diary |
 | Post | full snapshot + Since yesterday, About |
 | Base, Decide, Plan | full snapshot + Since yesterday |
-| Reflect | Me, Time, Colony customs |
+| Reflect | Me, Time |
 | Upgrade | Me, Time, Condition, Feelings |
 
 When a prompt runs over its ~80k-character budget, memory sections are dropped first, starting with
@@ -338,6 +337,7 @@ flowchart LR
     Ref --> Files[("Person files<br/>impression · threads · facts")]
     Ref --> Lately["'Who I am lately'<br/>→ system prompt"]
     Ref --> Work["one work priority change"]
+    Ref --> Feel["felt closer / cooler<br/>→ vanilla social memory"]
     Mem & Dia & Files --> Recall["Recall<br/>score = relevance + importance<br/>+ recency + match − penalty"]
     Recall --> Prompt["[On my mind] · [I remember]<br/>[From my diary] · [About X]"]
 ```
@@ -364,6 +364,12 @@ The code guards the reply:
 - memories must cite real events;
 - a retelling of events already in one memory is skipped;
 - importance can't drop more than 2 below its events'.
+
+**Feelings:** each person in the reply has a `feeling`: closer, cooler or same. Closer or cooler gives the pawn
+a vanilla social memory about them ("felt closer" +15 / "felt cooler" −5, the same numbers and 20-day
+duration as vanilla's deep talk and slighted), so the Social tab's opinion follows what the mind feels, not
+only vanilla's interactions. There's one per person: the same feeling renews it and the other replaces it.
+These memories aren't captured as events, since the mind wrote them itself.
 
 **Recall** scores each memory as relevance (embedding cosine) + importance + recency (14-day decay)
 + person or place match − a penalty (shown in the last 6 h, or already told to this listener).
@@ -446,6 +452,9 @@ Three sites are offered:
 - **A**: the best site joined to the base;
 - **B**: the best site as a building of its own;
 - **C**: the next best overall.
+
+A room option's price is the whole room (walls, door and furniture) as fitted at the best site; the site
+lines say only where.
 
 **Hubs** are walk-through rooms (up to 7 wide) that take in existing outside doors, so the base gets
 fewer ways out.
@@ -567,7 +576,8 @@ Chores are vanilla designations, bills and zones that a mind sets up and `ChoreM
   skill and passion. That's how a mind decides its nightly work change.
 
 **Work priorities:** a new mind sets them from its passions (major = 1, minor = 2, the rest 3). After
-that, Reflect changes one work type per night. Patient, bed rest and firefighting are never touched.
+that, Reflect changes one work type per night. Patient, bed rest and firefighting are never touched. A pick of
+the priority it already has changes nothing and isn't logged as a decision.
 
 ---
 
@@ -707,8 +717,8 @@ flowchart LR
 
 All of this needs the `gatherings` setting on.
 
-- **`[Colony customs]`:** one line listing the precepts that give moods. These are the colony's
-  rules, not what a mind believes; what the pawn wants comes from its persona.
+- **Customs** aren't listed in prompts: a custom shows up as a mood in `[Feelings]`, and the reform choice
+  lists each custom that can change with its current value.
 - **Rituals:** "hold the <ritual> (expected quality N%)". Only offered when vanilla's begin-dialog
   checks pass, it's off cooldown and the expected quality is at least 25%. Due obligations come first.
 - **Roles:** "take on the <role> ideoligion role" for a vacant leader, moral guide or specialist
@@ -855,7 +865,25 @@ Close the game first; it locks the DLL.
 | `budget.py` | call counts and prompt sizes over time |
 | `no_coords.py` | check that no prompt leaks coordinates or text grids |
 | `persona_replay.py` | replay persona calls with the current `persona.txt` |
+| `prompt_tour.py` | the prompt tour (below); `prompt_tour.py <tour>` (a folder name under `tours/`, or a `tour.json` path) renders one again |
 | `dump_memory.py` | a mind's memory from a save |
+
+**Prompt tour** (`python docs/test-scripts/prompt_tour.py`, with Steam running and the game closed):
+- It launches the game through Steam with the dev data folder, `-quicktest` and `-aipcPromptTour`.
+- On that flag, `PromptTour` gives every colonist a mind and runs the first colonist's calls in three world states,
+  one after another in the same game:
+  1. **Fresh landing:** Persona for each colonist, then Act, Chat ("How are you doing?"), Post, Base (and Upgrade if
+     Base picks one), a message thread of up to 4 lines with the colonist Act picked (or the first one it can talk
+     to), and Reflect over the thread.
+  2. **Settled:** "Grow test base" builds the ladder's rooms and vanilla's wanderer-joins incident fires. Then Act,
+     Base, Upgrade (forced on the first room that can be upgraded when Base picks something else), Decide (by the
+     mind `ColonyChoices` would ask) and Answer (forced: the second colonist asks it out with a line).
+  3. **Raid:** an enemy pawn spawns near the colonist. Then Act (with the danger menu) and Plan (by the leader, if any).
+- Every call uses its real prompt builder and schema. Replies are only recorded. Only the personas and the thread's
+  lines (with their `dm` events) are kept, since later prompts read them. Calls the state doesn't allow are listed as
+  not run, with why. Compact isn't in the tour.
+- It writes `tours/<time>/tour.json` and closes the game; the script renders `report.html` next to it and opens it: each call's
+  prompts, schema and reply, in order.
 
 ---
 

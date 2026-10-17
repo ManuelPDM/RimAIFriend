@@ -519,7 +519,7 @@ namespace AIPawnControl
         public string ProjectLine(Pawn pawn) => ActiveProject(pawn)?.StatusLine();
 
         /// <summary>
-        /// For [Me] (§7): "My bedroom: 5×5, dull." and "I built: kitchen (decent).", or where she sleeps when it isn't her
+        /// For [Me] (§7): "My bedroom: 5×5, dull.", or where she sleeps when it isn't her
         /// own room: "I sleep in the barracks." / "I have no bed of my own."
         /// </summary>
         public string RoomsPhrase(Pawn pawn)
@@ -539,13 +539,6 @@ namespace AIPawnControl
                 Room room = bed.GetRoom();
                 parts.Add(room == null || room.PsychologicallyOutdoors ? "My bed is outdoors." : $"I sleep in the {Label(room)}.");
             }
-            var built = projects.Where(p => p.pawn == pawn && p.state == BuildProject.State.Done && !p.furnishing && p.Bed == null && p.map == pawn.Map)
-                .Select(p => (p, room: p.Room))
-                .Where(x => x.room != null && x.room.ProperRoom)
-                .Select(x => $"{Label(x.room)} ({Impressiveness(x.room)})")
-                .ToList();
-            if (built.Count > 0)
-                parts.Add($"I built: {string.Join(", ", built)}.");
             return string.Join(" ", parts);
         }
 

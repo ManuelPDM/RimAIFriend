@@ -375,9 +375,13 @@ namespace AIPawnControl
             if (choice.reform)
                 best = able.FirstOrDefault(m => Customs.RoleOf(m.pawn) is Precept_Role r && Customs.IsStatusRole(r) && !r.def.leaderRole)
                        ?? able.FirstOrDefault(m => Customs.RoleOf(m.pawn)?.def.leaderRole == true);
-            best = best ?? able.OrderByDescending(m => m.pawn.GetStatValue(StatDefOf.NegotiationAbility)).FirstOrDefault();
+            best = best ?? able.OrderByDescending(m => Negotiation(m.pawn)).FirstOrDefault();
             return best != null && !best.Thinking ? best : null;
         }
+
+        /// <summary>Vanilla's negotiation ability; 0 for someone it's disabled for (Social incapable), whom vanilla won't ask for it.</summary>
+        private static float Negotiation(Pawn pawn) =>
+            StatDefOf.NegotiationAbility.Worker.IsDisabledFor(pawn) ? 0f : pawn.GetStatValue(StatDefOf.NegotiationAbility);
 
         /// <summary>Sends the Decide call. Returns false if the choice has nothing to pick.</summary>
         public bool Decide(PawnMind mind, ColonyChoice choice)
@@ -386,24 +390,29 @@ namespace AIPawnControl
             var options = choice.Options(pawn);
             if (options.Count < 2)
                 return false;
-            string text = string.Join("\n", options.Select((o, i) => $"{i + 1}: {o.label}"));
-            var messages = PromptBuilder.Build("decide", mind, new Dictionary<string, string>
-            {
-                ["choice"] = choice.Describe(pawn),
-                ["options"] = text,
-            });
-            var schema = Schema.Obj(new Dictionary<string, object>
-            {
-                ["reason"] = Schema.Reason(),
-                ["choice"] = Schema.IntEnum(Enumerable.Range(1, options.Count)),
-                ["say"] = Schema.Say(),
-            });
             deciding[choice.key] = mind;
-            ModLog.Message($"{pawn.LabelShort} decides \"{choice.key}\" with {options.Count} options:\n{text}");
-            mind.Send("decide", messages, schema, reply => OnReply(mind, choice, options, reply),
+            ModLog.Message($"{pawn.LabelShort} decides \"{choice.key}\" with {options.Count} options:\n{OptionsText(options)}");
+            mind.Send("decide", DecideMessages(mind, choice, options), DecideSchema(options), reply => OnReply(mind, choice, options, reply),
                 stillValid: () => !choice.Open ? "the choice is gone" : mind.PausedReason(ignoreSleep: true));
             return true;
         }
+
+        private static string OptionsText(List<ChoiceOption> options) => string.Join("\n", options.Select((o, i) => $"{i + 1}: {o.label}"));
+
+        /// <summary>The Decide call's prompt: the choice and its numbered options.</summary>
+        internal static List<KeyValuePair<string, string>> DecideMessages(PawnMind mind, ColonyChoice choice, List<ChoiceOption> options) =>
+            PromptBuilder.Build("decide", mind, new Dictionary<string, string>
+            {
+                ["choice"] = choice.Describe(mind.pawn),
+                ["options"] = OptionsText(options),
+            });
+
+        internal static Dictionary<string, object> DecideSchema(List<ChoiceOption> options) => Schema.Obj(new Dictionary<string, object>
+        {
+            ["reason"] = Schema.Reason(),
+            ["choice"] = Schema.IntEnum(Enumerable.Range(1, options.Count)),
+            ["say"] = Schema.Say(),
+        });
 
         private void OnReply(PawnMind mind, ColonyChoice choice, List<ChoiceOption> asked, Dictionary<string, object> reply)
         {

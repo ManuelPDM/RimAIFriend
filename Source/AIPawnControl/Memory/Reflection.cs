@@ -7,6 +7,15 @@ using Verse;
 
 namespace AIPawnControl
 {
+    [DefOf]
+    public static class AIPC_ThoughtDefOf
+    {
+        public static ThoughtDef AIPC_FeltCloser;
+        public static ThoughtDef AIPC_FeltCooler;
+
+        static AIPC_ThoughtDefOf() => DefOfHelper.EnsureInitializedInCtor(typeof(AIPC_ThoughtDefOf));
+    }
+
     /// <summary>
     /// One nightly Reflect (PHASE3.md §4): the only thing that writes memories. Prepare picks the events, the closest
     /// existing memories (for dedup) and the person files; Parse turns the reply into a guarded list of changes
@@ -164,6 +173,7 @@ namespace AIPawnControl
                 ["name"] = Enum(names),
                 ["impression"] = Str(MaxImpression),
                 ["threads"] = Str(MaxThreads),
+                ["feeling"] = Enum(new object[] { "closer", "cooler", "same" }),
                 ["facts"] = Arr(fact, 3),
             });
             var work = Obj(new Dictionary<string, object>
@@ -322,7 +332,10 @@ namespace AIPawnControl
                 Memory.lately = newLately;
 
             foreach (var (name, item) in personOps)
+            {
                 ApplyPerson(Memory.File(name, create: true), item, now);
+                ApplyFeeling(name, item.Str("feeling"));
+            }
 
             if (workChange.type != null)
                 mind.ChangeWork(workChange.type, workChange.change, workChange.why);
@@ -377,6 +390,21 @@ namespace AIPawnControl
             }
             while (file.facts.Count > PersonFile.MaxFacts)
                 file.facts.Remove(file.facts.FirstOrDefault(f => !f.Open) ?? file.facts[0]);
+        }
+
+        /// <summary>
+        /// "closer" or "cooler" becomes a vanilla social memory about them, so opinion follows how the mind feels. One per
+        /// person: the same feeling renews it, the other replaces it.
+        /// </summary>
+        private void ApplyFeeling(string name, string feeling)
+        {
+            ThoughtDef def = feeling == "closer" ? AIPC_ThoughtDefOf.AIPC_FeltCloser : feeling == "cooler" ? AIPC_ThoughtDefOf.AIPC_FeltCooler : null;
+            Pawn other = def != null ? People.Find(name, mind.pawn.MapHeld) : null;
+            var memories = mind.pawn.needs?.mood?.thoughts.memories;
+            if (memories == null || other == null || other == mind.pawn || !other.RaceProps.Humanlike || other.Dead)
+                return;
+            memories.RemoveMemoriesOfDefWhereOtherPawnIs(def == AIPC_ThoughtDefOf.AIPC_FeltCloser ? AIPC_ThoughtDefOf.AIPC_FeltCooler : AIPC_ThoughtDefOf.AIPC_FeltCloser, other);
+            memories.TryGainMemory(def, other);
         }
 
         /// <summary>An open fact in the file that says the same thing as this vector, or null.</summary>

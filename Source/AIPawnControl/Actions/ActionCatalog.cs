@@ -282,12 +282,17 @@ namespace AIPawnControl
         /// Chat: an optional action from the current menu (0 = none), then what she says back. "act" comes first so
         /// the words are written knowing what she does (PHASE6.md §4.1). Anything for later is just what she said.
         /// </summary>
-        public static Dictionary<string, object> ChatSchema(List<ActOption> menu, List<int> memories) => Schema.Obj(new Dictionary<string, object>
+        public static Dictionary<string, object> ChatSchema(List<ActOption> menu, List<int> memories)
         {
-            ["act"] = Schema.IntEnum(new[] { 0 }.Concat(menu.Select(o => o.Id))),
-            ["reply"] = Schema.Str(MaxChatReply + 60),
-            ["memory"] = MemorySchema(memories),
-        });
+            var props = new Dictionary<string, object>
+            {
+                ["act"] = Schema.IntEnum(new[] { 0 }.Concat(menu.Select(o => o.Id))),
+                ["reply"] = Schema.Str(MaxChatReply + 60),
+            };
+            if (memories.Count > 0)
+                props["memory"] = MemorySchema(memories);
+            return Schema.Obj(props);
+        }
 
         public static Dictionary<string, object> PersonaSchema() => Schema.Obj(new Dictionary<string, object>
         {
