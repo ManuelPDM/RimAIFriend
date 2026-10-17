@@ -12,8 +12,8 @@ namespace AIPawnControl
     /// gets a mind, and the first one goes through the calls of three world states in turn, with each call's real prompt and
     /// schema: the fresh landing, then settled (the test base grown, a joiner asking to join), then a raid. The replies are
     /// shown, not applied; only Persona (the system prompt needs it) and the message thread's lines (the other's prompt reads
-    /// them) are kept. Upgrade and Answer are forced when nothing leads to them. Writes tours/&lt;time&gt;/tour.json, then
-    /// closes the game.
+    /// them) are kept. Upgrade and Answer are forced when nothing leads to them. With -aipcTourSave=&lt;save&gt; instead, it
+    /// loads that save and runs every call once on it as it stands. Writes tours/&lt;time&gt;/tour.json, then closes the game.
     /// </summary>
     public class PromptTour : GameComponent
     {
@@ -26,7 +26,29 @@ namespace AIPawnControl
         public override void StartedNewGame()
         {
             if (GenCommandLine.CommandLineArgPassed("aipcPromptTour"))
-                LongEventHandler.ExecuteWhenFinished(() => new Run().Start());
+                LongEventHandler.ExecuteWhenFinished(() => new Run().Start(null));
+        }
+
+        public override void LoadedGame()
+        {
+            if (GenCommandLine.TryGetCommandLineArg("aipcTourSave", out string save))
+                LongEventHandler.ExecuteWhenFinished(() => new Run().Start(save));
+        }
+
+        /// <summary>Loads the -aipcTourSave save once the game has started up.</summary>
+        [StaticConstructorOnStartup]
+        private static class LoadSave
+        {
+            static LoadSave()
+            {
+                if (GenCommandLine.TryGetCommandLineArg("aipcTourSave", out string save))
+                    LongEventHandler.ExecuteWhenFinished(() => LongEventHandler.QueueLongEvent(() =>
+                    {
+                        // GameDataSaveLoader.LoadGame(string), which can't be named here: its FileInfo overload needs .NET 10
+                        Verse.Profile.MemoryUtility.ClearAllMapsAndWorld();
+                        Current.Game = new Game { InitData = new GameInitData { gameToLoad = save } };
+                    }, "Play", "LoadingLongEvent", true, null));
+            }
         }
 
         private class Run
@@ -43,15 +65,33 @@ namespace AIPawnControl
             private Pawn Pawn => mind.pawn;
             private Map Map => mind.pawn.Map;
 
-            public void Start()
+            public void Start(string save)
             {
                 Find.TickManager.CurTimeSpeed = TimeSpeed.Paused; // the minds' own triggers only run on ticks
                 answerChoices = AIPawnControlMod.Settings.answerChoices;
                 AIPawnControlMod.Settings.answerChoices = false;  // the tour sends Decide itself
-                foreach (var p in Find.CurrentMap.mapPawns.FreeColonistsSpawned.ToList())
+                foreach (var p in Find.CurrentMap.mapPawns.FreeColonistsSpawned.Where(p => p != MindManager.Instance.PlayingAs).ToList())
                     MindManager.Instance.Enable(p, null);
                 minds = MindManager.Instance.Minds;
-                mind = minds[0];
+                mind = minds.First(m => m.pawn.Map == Find.CurrentMap);
+
+                if (save != null)
+                {
+                    steps.Add(() => State("Save", () => save + " as it stands"));
+                    foreach (var m in minds.Where(m => m.persona.NullOrEmpty()))
+                        steps.Add(() => Persona(m));
+                    steps.Add(() => Act("A few hours have passed."));
+                    steps.Add(Chat);
+                    steps.Add(() => Send("post", null, GroupChat.PostMessages(mind), GroupChat.PostSchema(), null));
+                    steps.Add(() => Base(forceUpgrade: true));
+                    steps.Add(Thread);
+                    steps.Add(Reflect);
+                    steps.Add(Decide);
+                    steps.Add(Answer);
+                    steps.Add(Plan);
+                    Next();
+                    return;
+                }
 
                 steps.Add(() => State("Fresh landing", () => "the quicktest colony as it starts"));
                 foreach (var m in minds)
@@ -60,11 +100,7 @@ namespace AIPawnControl
                 steps.Add(Chat);
                 steps.Add(() => Send("post", null, GroupChat.PostMessages(mind), GroupChat.PostSchema(), null));
                 steps.Add(() => Base(forceUpgrade: false));
-                steps.Add(() =>
-                {
-                    var other = talkTo ?? ActionCatalog.TalkTargets(Pawn, mind).FirstOrDefault();
-                    return other == null ? Skip("message", "nobody to talk to") : Message(mind, MindManager.Instance.MindOf(other), started: true, line: 1);
-                });
+                steps.Add(Thread);
                 steps.Add(Reflect); // after the thread: its lines are the events
 
                 steps.Add(() => State("Settled", Settle));
@@ -211,6 +247,13 @@ namespace AIPawnControl
                 var caller = leader ?? mind;
                 return Send("plan", $"by {caller.pawn.LabelShort} ({(leader != null ? "the leader" : "first to react")})",
                     DangerPlan.PlanMessages(caller, plan, leader != null, candidates, options), DangerPlan.PlanSchema(plan, candidates, options), null);
+            }
+
+            /// <summary>Starts a message thread with the colonist Act picked, or the first one it can talk to.</summary>
+            private bool Thread()
+            {
+                var other = talkTo ?? ActionCatalog.TalkTargets(Pawn, mind).FirstOrDefault();
+                return other == null ? Skip("message", "nobody to talk to") : Message(mind, MindManager.Instance.MindOf(other), started: true, line: 1);
             }
 
             /// <summary>

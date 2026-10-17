@@ -89,7 +89,7 @@ namespace AIPawnControl
             var names = present.Select(p => p.LabelShort).ToList();
             string player = MindManager.Speaker; // the player, or the colonist they play
             bool threads = !string.IsNullOrEmpty(memory.File(player, create: false)?.threads);
-            recall.Sections["About"] = Retrieval.About(mind, threads ? names.Prepend(player).Distinct() : names, threads ? 4 : 3, 110);
+            recall.Sections["About"] = Retrieval.About(mind, threads ? names.Prepend(player).Distinct() : names, threads ? 4 : 3, 400);
             int now = Find.TickManager.TicksGame;
             if (now - memory.lastOnMindTick < Retrieval.OnMindGapTicks)
                 return recall;

@@ -214,7 +214,7 @@ flowchart LR
 | Option | When it's offered | What happens |
 |---|---|---|
 | **keep going** (job report) | Not in Chat/Message (their act 0 is that) | Carries on with vanilla's work. Plans a check-in 2 h later. During danger with a plan part, it reads "keep to my part in the plan (…)". Not logged as a decision, so it never fills `[Recent]` or the memory events. |
-| **talk to someone** | Not in Chat/Message; messages left today. Any other mind with a persona and the colonist the player plays, at any distance; colonists without a mind in vanilla's interaction range | `with` picks who. Opens the **Message call** ([§10](#private-messages)), which writes the words into their thread (to the played colonist: the Mind tab chat, [§13](#13-player-ui-and-settings)). In vanilla's interaction range they're also said out loud ([§10](#private-messages)). |
+| **talk to someone** | Not in Chat/Message; messages left today. Any other mind with a persona that's still of the colony and the colonist the player plays, at any distance; colonists without a mind in vanilla's interaction range | `with` picks who. Opens the **Message call** ([§10](#private-messages)), which writes the words into their thread (to the played colonist: the Mind tab chat, [§13](#13-player-ui-and-settings)). In vanilla's interaction range they're also said out loud ([§10](#private-messages)). |
 | **work on the base: …** | `BaseCall.AnythingToDo` | Opens the **Base call** ([§7](#7-building-the-base)). While a project runs, the label reads "(X's barracks comes first)". |
 | **faith line** (at most one) | The `gatherings` setting is on; home map | Priority order: a burial, a due ritual obligation, a role, then an anytime ritual. See [§12](#12-ideology-gatherings-and-burials). |
 | **throw a party / hold our wedding** | Vanilla allows it now | Starts vanilla's gathering or marriage ceremony and posts it to the group chat. |
@@ -286,19 +286,19 @@ The mind only knows what these show, and every mind knows the whole map.
 
 | Section | Holds |
 |---|---|
-| `[Me]` | name, age, gender, backstory, traits, top skills and passions, ideoligion role, the pawn's rooms |
+| `[Me]` | name, age, gender, "I'm a guest from X" for a quest lodger (refugee, helper, royal guest), backstory, traits, top skills and passions, ideoligion role, the pawn's rooms |
 | `[Time]` | date, time, weather, outdoor temperature, the room the pawn is in |
 | `[Condition]` | mental break, health, injuries, pain, bleeding, mood in words |
 | `[Needs]` / `[Feelings]` | needs under 25%; the top 3 mood thoughts |
 | `[Doing now]` / `[My project]` | job report; the pawn's build project's status |
-| `[People]` | up to 10 colonists, nearest first: relation, role, opinion, mood, where, best skills, job; for a mind, also its project and last chore |
+| `[People]` | up to 10 colonists, nearest first: relation (a quest lodger is "guest from X"), role, opinion, mood, where, best skills, job; for a mind, also its project and last chore |
 | `[Colony]` | headcount, danger rating, the dead, alerts, the base ladder's next step, food outlook |
 | `[Colony stores]` | food days, medicine, wood, steel, components, silver, waiting to be hauled |
 | `[Colony work]` | fields, stockpiles, marked targets, work orders, with "(by me)" on the pawn's own |
 | `[Rooms]` | the room the pawn is in, then up to 12 others: impressiveness, temperature, builder, furniture |
 | `[Recent]` | the pawn's last 5 decisions ("keep going" isn't one) |
 | `[Group chat]` | the summary, then the last 5 messages |
-| `[Messages]` | each private thread active in the last day or unread: who, the unread count, the last 2 lines. The Mind tab chat with the colonist the player plays is one of them |
+| `[Messages]` | each private thread active in the last day or unread, unless the other pawn is dead or no longer of the colony: who, the unread count, the last 2 lines. The Mind tab chat with the colonist the player plays is one of them |
 | `[Danger]` | only during threats: enemies, who they're after, the pawn's weapon, who's armed, the plan and the pawn's part, each announced predator's own description |
 | memory sections | `[Since yesterday]`, `[About X]`, `[On my mind]`, `[I remember]`, `[From my diary]` (see §6) |
 
@@ -676,6 +676,8 @@ flowchart LR
   to answer. Nothing forces turns: either side can write again before an answer, and an empty reply
   leaves the thread until someone writes.
 - The Message call's own thread is left out of its `[Messages]`, since the prompt shows it whole.
+- Once the other pawn is dead or no longer of the colony (a guest gone home, someone banished), the thread
+  leaves every prompt and the pawn leaves "talk to someone". The thread stays saved for the Messages window.
 - **Near or far:** when the other pawn is in vanilla's interaction range (`IsGoodPositionForInteraction`),
   the words are also said out loud: vanilla's weights pick an interaction for the call's `tone` (chitchat or
   deep talk; slight or insult), which carries them as its line with its thoughts, opinion and bubble.
@@ -865,7 +867,7 @@ Close the game first; it locks the DLL.
 | `budget.py` | call counts and prompt sizes over time |
 | `no_coords.py` | check that no prompt leaks coordinates or text grids |
 | `persona_replay.py` | replay persona calls with the current `persona.txt` |
-| `prompt_tour.py` | the prompt tour (below); `prompt_tour.py <tour>` (a folder name under `tours/`, or a `tour.json` path) renders one again |
+| `prompt_tour.py` | the prompt tour (below); `prompt_tour.py --save <name>` runs it on a dev save; `prompt_tour.py <tour>` (a folder name under `tours/`, or a `tour.json` path) renders one again |
 | `dump_memory.py` | a mind's memory from a save |
 
 **Prompt tour** (`python docs/test-scripts/prompt_tour.py`, with Steam running and the game closed):
@@ -882,6 +884,9 @@ Close the game first; it locks the DLL.
 - Every call uses its real prompt builder and schema. Replies are only recorded. Only the personas and the thread's
   lines (with their `dm` events) are kept, since later prompts read them. Calls the state doesn't allow are listed as
   not run, with why. Compact isn't in the tour.
+- `--save <name>` launches with `-aipcTourSave=<name>` instead: the save loads, and its first colonist on the current
+  map runs Persona (only for minds without one), Act, Chat, Post, Base, Upgrade (forced as in Settled), the message
+  thread, Reflect, Decide, Answer and Plan once, on the save as it stands.
 - It writes `tours/<time>/tour.json` and closes the game; the script renders `report.html` next to it and opens it: each call's
   prompts, schema and reply, in order.
 

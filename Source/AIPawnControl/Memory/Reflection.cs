@@ -379,7 +379,7 @@ namespace AIPawnControl
                     if (text == null)
                         continue;
                     newFactVectors.TryGetValue(text, out string vector);
-                    if (vector != null && SameAsOpenFact(file, vector) != null)
+                    if (file.facts.Any(f => f.Open && f.text == text) || vector != null && SameAsOpenFact(file, vector) != null)
                     {
                         factsMerged++;
                         continue;

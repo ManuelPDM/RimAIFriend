@@ -21,6 +21,10 @@ namespace AIPawnControl
                    ?? Verse.Find.WorldPawns.AllPawnsAliveOrDead.FirstOrDefault(p => p.LabelShort == name);
         }
 
+        /// <summary>"guest from the Shattered Empire": a quest lodger (refugee, helper, royal guest), who stays only for its quest. Null for anyone else.</summary>
+        public static string Guest(Pawn p) =>
+            p.IsQuestLodger() ? "guest" + (p.HomeFaction is Faction f && !f.IsPlayer ? $" from {f.Name}" : "") : null;
+
         /// <summary>"male, colonist, my lover", "our animal, a husky, dead", "female, outsider, enemy (Virus Pillers)".</summary>
         public static string Label(Pawn p, Pawn viewer)
         {
@@ -29,7 +33,7 @@ namespace AIPawnControl
             {
                 string role = p.IsPrisonerOfColony ? "our prisoner"
                     : p.IsSlaveOfColony ? "our slave"
-                    : p.IsColonist ? "colonist"
+                    : p.IsColonist ? Guest(p) ?? "colonist"
                     : p.Faction == null ? "outsider"
                     : p.Faction.HostileTo(Faction.OfPlayer) ? $"outsider, enemy ({p.Faction.Name})"
                     : $"outsider from {p.Faction.Name}";

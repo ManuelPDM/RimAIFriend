@@ -72,6 +72,7 @@ namespace AIPawnControl
             return new Dictionary<string, string>
             {
                 ["Me"] = $"{pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
+                         (AIPawnControl.People.Guest(pawn) is string guest ? $"I'm a {guest}. " : "") +
                          $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}." +
                          (skills != null ? $" Skills: {skills}." : "") +
                          (Customs.RoleOf(pawn) is Precept_Role role ? $" Ideoligion role: {role.def.label}." : "") +
@@ -236,7 +237,10 @@ namespace AIPawnControl
                 return null;
             return string.Join(" — ", others.Select(p =>
             {
-                string relation = pawn.GetMostImportantRelation(p) is PawnRelationDef rel ? "my " + rel.GetGenderSpecificLabel(p) : "colonist";
+                string guest = AIPawnControl.People.Guest(p);
+                string relation = pawn.GetMostImportantRelation(p) is PawnRelationDef rel
+                    ? "my " + rel.GetGenderSpecificLabel(p) + (guest != null ? ", " + guest : "")
+                    : guest ?? "colonist";
                 string role = Customs.RoleOf(p) is Precept_Role r ? $", ideoligion role: {r.def.label}" : "";
                 int opinion = pawn.relations?.OpinionOf(p) ?? 0;
                 string mood = p.InMentalState ? $"in a mental break: {p.MentalStateDef.label}" // MoodString would just say "mental state"

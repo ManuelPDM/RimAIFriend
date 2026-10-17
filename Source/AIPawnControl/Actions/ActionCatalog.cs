@@ -242,7 +242,7 @@ namespace AIPawnControl
             var manager = MindManager.Instance;
             if (manager == null || mind.MessagesLeft <= 0)
                 return new List<Pawn>();
-            return manager.Minds.Where(m => m != mind && m.persona != null && !m.pawn.Dead && !m.pawn.Destroyed).Select(m => m.pawn)
+            return manager.Minds.Where(m => m != mind && m.persona != null && !DirectMessages.Gone(m.pawn)).Select(m => m.pawn)
                 .Concat(Nearby(pawn).Where(p => manager.MindOf(p) == null && MindActions.InRange(pawn, p)))
                 .Append(manager.PlayingAs).Where(p => p != null).Distinct().ToList();
         }

@@ -102,6 +102,9 @@ namespace AIPawnControl
             return thread;
         }
 
+        /// <summary>Dead, or no longer of the colony (a guest gone home, someone banished): their threads leave every prompt but stay saved.</summary>
+        public static bool Gone(Pawn p) => p.Dead || p.Destroyed || p.Faction != Faction.OfPlayer;
+
         public IEnumerable<DmThread> ThreadsOf(Pawn p) => threads.Where(t => t.Has(p) && t.lines.Count + (t.summary != null ? 1 : 0) > 0)
             .OrderByDescending(t => t.LastTick);
 
@@ -121,7 +124,7 @@ namespace AIPawnControl
         /// the oldest unread first. Null if none: unread lines from farther away wait for the pawn's next Act.
         /// </summary>
         public DmThread Unanswered(Pawn p) => threads
-            .Where(t => t.Has(p) && t.UnreadBy(p).Count > 0 && MindActions.InRange(p, t.Other(p)))
+            .Where(t => t.Has(p) && !Gone(t.Other(p)) && t.UnreadBy(p).Count > 0 && MindActions.InRange(p, t.Other(p)))
             .OrderBy(t => t.UnreadBy(p)[0].tick).FirstOrDefault();
 
         /// <summary>
@@ -132,7 +135,7 @@ namespace AIPawnControl
         public string Context(Pawn p, Map map, Pawn except = null)
         {
             int from = Find.TickManager.TicksGame - GenDate.TicksPerDay;
-            var entries = ThreadsOf(p).Where(t => !t.Has(except) && t.lines.Count > 0 && (t.LastTick >= from || t.UnreadBy(p).Count > 0))
+            var entries = ThreadsOf(p).Where(t => !t.Has(except) && !Gone(t.Other(p)) && t.lines.Count > 0 && (t.LastTick >= from || t.UnreadBy(p).Count > 0))
                 .Select(t => (tick: t.LastTick, text: Entry(t.Other(p), t.UnreadBy(p).Count, t.lines.Skip(t.lines.Count - Shown).Select(l => t.Line(l, p, map)))))
                 .ToList();
             Pawn played = MindManager.Instance?.PlayingAs;

@@ -2,6 +2,7 @@
 in three world states (fresh landing, settled, raid), writes D:/RimDev/AIPawnControl/tours/<time>/tour.json and closes
 the game; this then writes report.html next to it and opens it.
     python prompt_tour.py                  launch, wait, render
+    python prompt_tour.py --save <name>    the same, but on a dev save (D:/RimDev/Saves/<name>.rws) as it stands
     python prompt_tour.py <tour>           render a saved tour again: its folder name (2026-10-16_18-19-29) or its tour.json path
 Steam must be running, and the game closed (it locks the mod's DLL)."""
 import glob, html, json, os, subprocess, sys, time, winreg
@@ -16,13 +17,13 @@ def running():
     return 'RimWorld.exe' in out
 
 
-def launch():
+def launch(args):
     if running():
         sys.exit('RimWorld is running; close it first.')
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as key:
         steam = winreg.QueryValueEx(key, 'SteamExe')[0]
     start = time.time()
-    subprocess.Popen([steam, '-applaunch', '294100', *ARGS])
+    subprocess.Popen([steam, '-applaunch', '294100', *args])
     print('Launched; waiting for the tour (the game closes itself when it is done)...')
     seen = False
     while time.time() - start < TIMEOUT:
@@ -116,7 +117,10 @@ def find(arg):
 
 
 if __name__ == '__main__':
-    tour = find(sys.argv[1]) if len(sys.argv) > 1 else launch()
+    if len(sys.argv) > 2 and sys.argv[1] == '--save':
+        tour = launch([ARGS[0], '-aipcTourSave=' + sys.argv[2]])
+    else:
+        tour = find(sys.argv[1]) if len(sys.argv) > 1 else launch(ARGS)
     report = os.path.abspath(render(tour))
     print(report)
     os.startfile(report)
