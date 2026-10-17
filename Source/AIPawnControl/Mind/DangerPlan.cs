@@ -368,15 +368,15 @@ namespace AIPawnControl
 
         /// <summary>
         /// She picked something else in the danger menu: she's out of the plan from now on. Still her part: helping the one
-        /// a Save plan is saving, and for a Hold or Out fighter, fighting an enemy that's after her or within her weapon's
-        /// range (or any enemy once Out has gone). Her spot keeps her afterwards.
+        /// a Save plan is saving, and for any fighter, fighting an enemy that's after her or within her weapon's range (or
+        /// any enemy once Out has gone). Her spot keeps her afterwards.
         /// </summary>
         public static void Leave(Pawn pawn, Pawn helping = null, Thing fighting = null)
         {
             var plan = Of(pawn.Map);
             if (helping != null && plan?.picked?.kind == Save && plan.picked.victim == helping && plan.fighters.ContainsKey(pawn))
                 return;
-            if (fighting != null && plan?.picked != null && plan.fighters.ContainsKey(pawn) && (plan.picked.kind == Hold || plan.picked.kind == Out)
+            if (fighting != null && plan?.picked != null && plan.fighters.ContainsKey(pawn)
                 && ((plan.picked.kind == Out && plan.goneOut) || DangerResponse.Victim(fighting) == pawn
                     || InReach(pawn, fighting)))
                 return;
@@ -413,34 +413,39 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// Keeps a fighter at her part: to her spot (fighting an enemy in reach on the way), then wait there and fight what
-        /// comes (vanilla's Wait_Combat shoots what's in range); once Out has gone, or for Save, after the nearest enemy (X's attacker for Save).
+        /// Keeps a fighter at her part: first, an enemy in reach on her way is fought where she is (an ordered walk or charge
+        /// never stops for one by itself). Then to her spot, wait there and fight what comes (vanilla's Wait_Combat shoots
+        /// what's in range); once Out has gone, or for Save, after the nearest enemy (X's attacker for Save).
         /// </summary>
         internal static void Keep(Plan plan, PawnMind mind)
         {
             Pawn p = mind.pawn;
             Job job = p.CurJob;
-            if (job != null && (job.def == JobDefOf.AttackMelee || job.def == JobDefOf.AttackStatic))
-                return; // fighting already
+            var met = job?.def == JobDefOf.Wait_Combat ? null : DangerResponse.Threats(plan.map) // the wait shoots by itself
+                .Where(t => InReach(p, t) && GenSight.LineOfSight(p.Position, t.Position, plan.map))
+                .OrderBy(t => t.Position.DistanceToSquared(p.Position)).FirstOrDefault();
+            if (job != null && (job.def == JobDefOf.AttackMelee || job.def == JobDefOf.AttackStatic) && (met == null || InReach(p, job.targetA.Thing)))
+                return; // fighting already, and her target is in reach or nothing else is
             var spot = plan.fighters[p];
-            if (plan.picked.kind == Hold || (plan.picked.kind == Out && !plan.goneOut))
+            bool holding = plan.picked.kind == Hold || (plan.picked.kind == Out && !plan.goneOut);
+            if (met != null)
+            {
+                // an enemy in reach: fight it from here, then (holding) on to her spot
+                Verb verb = p.TryGetAttackVerb(met);
+                Job attack = JobMaker.MakeJob(verb == null || verb.IsMeleeAttack ? JobDefOf.AttackMelee : JobDefOf.AttackStatic, met);
+                attack.endIfCantShootTargetFromCurPos = true;
+                MindActions.Order(mind, attack);
+                if (holding)
+                {
+                    MindActions.Order(mind, JobMaker.MakeJob(JobDefOf.Goto, spot), queue: true);
+                    MindActions.Order(mind, WaitOn(spot), queue: true);
+                }
+                return;
+            }
+            if (holding)
             {
                 if (p.Position != spot)
                 {
-                    var met = DangerResponse.Threats(plan.map)
-                        .Where(t => InReach(p, t) && GenSight.LineOfSight(p.Position, t.Position, plan.map))
-                        .OrderBy(t => t.Position.DistanceToSquared(p.Position)).FirstOrDefault();
-                    if (met != null)
-                    {
-                        // an enemy in reach on her way: fight it from here, then on to her spot
-                        Verb verb = p.TryGetAttackVerb(met);
-                        Job attack = JobMaker.MakeJob(verb == null || verb.IsMeleeAttack ? JobDefOf.AttackMelee : JobDefOf.AttackStatic, met);
-                        attack.endIfCantShootTargetFromCurPos = true;
-                        MindActions.Order(mind, attack);
-                        MindActions.Order(mind, JobMaker.MakeJob(JobDefOf.Goto, spot), queue: true);
-                        MindActions.Order(mind, WaitOn(spot), queue: true);
-                        return;
-                    }
                     if (job?.def != JobDefOf.Goto || job.targetA.Cell != spot)
                     {
                         MindActions.Order(mind, JobMaker.MakeJob(JobDefOf.Goto, spot));

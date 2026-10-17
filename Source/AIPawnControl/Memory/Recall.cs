@@ -16,6 +16,7 @@ namespace AIPawnControl
         private const float PresentRange = 12f;
 
         public readonly Dictionary<string, string> Sections = new Dictionary<string, string>();
+        public List<(string name, string text)> About; // what she thinks of each, for their [People] entry
         public readonly List<int> Shown = new List<int>(); // memory ids the "memory" field may name
 
         private static bool Enabled => AIPawnControlMod.Settings.memoryEnabled;
@@ -75,7 +76,7 @@ namespace AIPawnControl
         }
 
         /// <summary>
-        /// Act: [About X] for up to 3 people present, the player first when their file has open threads (so yesterday's
+        /// Act: her view of up to 3 people present, the player first when their file has open threads (so yesterday's
         /// conversation reaches the next day, PHASE6.md §2.2), and [On my mind]: at most 2 strong matches, at most once
         /// every 4 hours. Without a query vector it ranks by people, place, importance and recency.
         /// </summary>
@@ -89,7 +90,7 @@ namespace AIPawnControl
             var names = present.Select(p => p.LabelShort).ToList();
             string player = MindManager.Speaker; // the player, or the colonist they play
             bool threads = !string.IsNullOrEmpty(memory.File(player, create: false)?.threads);
-            recall.Sections["About"] = Retrieval.About(mind, threads ? names.Prepend(player).Distinct() : names, threads ? 4 : 3, 400);
+            recall.About = Retrieval.About(mind, threads ? names.Prepend(player).Distinct() : names, threads ? 4 : 3, 400);
             int now = Find.TickManager.TicksGame;
             if (now - memory.lastOnMindTick < Retrieval.OnMindGapTicks)
                 return recall;
@@ -115,7 +116,7 @@ namespace AIPawnControl
                 return recall;
             var memory = mind.memory;
             var people = new[] { audience }.Concat(mentioned ?? new List<string>()).ToList();
-            recall.Sections["About"] = Retrieval.About(mind, people, 4, 400);
+            recall.About = Retrieval.About(mind, people, 4, 400);
             recall.Sections["From my diary"] = Retrieval.Diary(memory, query, tag);
             var picked = Retrieval.Pick(Retrieval.Rank(memory, query, tag, people, null, new[] { audience }), max, Retrieval.MinRemember);
             if (picked.Count == 0)

@@ -60,7 +60,7 @@ namespace AIPawnControl
             return $"{p ?? t} and {(p != null && t != null ? t : "their backstory")}";
         }
 
-        /// <summary>The live snapshot as section name → text; null means leave it out. PromptBuilder labels and orders them.</summary>
+        /// <summary>The live snapshot as section name → text; null means leave it out. PromptBuilder labels and orders them, and builds [People].</summary>
         public static Dictionary<string, string> Sections(Pawn pawn, PawnMind mind)
         {
             Map map = pawn.Map;
@@ -71,12 +71,15 @@ namespace AIPawnControl
             string skills = Skills(pawn);
             return new Dictionary<string, string>
             {
-                ["Me"] = $"{pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
-                         (AIPawnControl.People.Guest(pawn) is string guest ? $"I'm a {guest}. " : "") +
-                         $"{Backstory(pawn)}Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}." +
-                         (skills != null ? $" Skills: {skills}." : "") +
-                         (Customs.RoleOf(pawn) is Precept_Role role ? $" Ideoligion role: {role.def.label}." : "") +
-                         (BuildManager.Instance?.RoomsPhrase(pawn) is string rooms && rooms.Length > 0 ? " " + rooms : ""),
+                ["Me"] = string.Join("\n", new[]
+                {
+                    $"{pawn.LabelShort}, {pawn.ageTracker.AgeBiologicalYears}, {pawn.gender.GetLabel()}. " +
+                    (AIPawnControl.People.Guest(pawn) is string guest ? $"I'm a {guest}. " : "") + Backstory(pawn).TrimEnd(),
+                    $"Traits: {string.Join(", ", pawn.story?.traits?.allTraits.Select(t => t.LabelCap.ToString()) ?? Enumerable.Empty<string>())}.",
+                    skills != null ? $"Skills: {skills}." : null,
+                    Customs.RoleOf(pawn) is Precept_Role role ? $"Ideoligion role: {role.def.label}." : null,
+                    BuildManager.Instance?.RoomsPhrase(pawn) is string rooms && rooms.Length > 0 ? rooms : null,
+                }.Where(l => l != null)),
                 ["Time"] = $"{GameTime.Now(map)}, {map.weatherManager.curWeather.label}, {map.mapTemperature.OutdoorTemp.ToStringTemperature("F0")} outside. " +
                            $"I'm in: {RoomLabel(pawn)}.",
                 ["Condition"] = Condition(pawn),
@@ -84,33 +87,24 @@ namespace AIPawnControl
                 ["Feelings"] = Feelings(pawn),
                 ["Doing now"] = (pawn.GetJobReport() ?? "Nothing yet").TrimEnd('.') + ".", // null between jobs, e.g. as a mental break starts
                 ["My project"] = BuildManager.Instance?.ProjectLine(pawn),
-                ["People"] = People(pawn),
                 ["Colony"] = Colony(map),
                 ["Colony stores"] = Stores(map),
                 ["Colony work"] = ColonyWork.Line(pawn),
                 ["Rooms"] = Rooms(pawn),
                 ["Recent"] = Recent(mind, map),
                 ["Group chat"] = GroupChat.Instance?.Context(map),
-                ["Messages"] = DirectMessages.Instance?.Context(pawn, map),
                 ["Danger"] = DangerResponse.Line(pawn),
             };
         }
 
-        /// <summary>Her last 5 decisions grouped by day: "Yesterday: 13:00 … · 21:00 … — Today: 07:00 …".</summary>
+        /// <summary>Her last 5 decisions, one per line: "Yesterday 13:00 …".</summary>
         private static string Recent(PawnMind mind, Map map)
         {
             int count = Math.Min(5, mind.decisions.Count);
             if (count == 0)
                 return null;
-            var groups = new List<KeyValuePair<string, List<string>>>();
-            for (int i = mind.decisions.Count - count; i < mind.decisions.Count; i++)
-            {
-                string day = GameTime.DayLabel(mind.decisionTicks[i], map);
-                if (groups.Count == 0 || groups[groups.Count - 1].Key != day)
-                    groups.Add(new KeyValuePair<string, List<string>>(day, new List<string>()));
-                groups[groups.Count - 1].Value.Add(mind.decisions[i]);
-            }
-            return string.Join(" — ", groups.Select(g => $"{g.Key}: {string.Join(" · ", g.Value)}"));
+            return string.Join("\n", Enumerable.Range(mind.decisions.Count - count, count)
+                .Select(i => $"{GameTime.DayLabel(mind.decisionTicks[i], map)} {mind.decisions[i]}"));
         }
 
         private static string Backstory(Pawn pawn)
@@ -224,18 +218,17 @@ namespace AIPawnControl
         /// <summary>
         /// [People] (STREAMLINE.md §4, PHASE6.md §2.3): every other colonist, nearest first. How she relates to them, their
         /// ideoligion role, mood, where they are and their best skills; then what they're doing, and for a mind its project and
-        /// the last chore it set up. What anyone in the colony could see or be told.
+        /// the last chore it set up. What anyone in the colony could see or be told. One entry of two lines per person, by
+        /// name; PromptBuilder adds her view of them and their thread.
         /// </summary>
-        private static string People(Pawn pawn)
+        internal static List<(string name, string text)> People(Pawn pawn)
         {
             var others = pawn.Map.mapPawns.FreeColonistsSpawned
                 .Where(p => p != pawn)
                 .OrderBy(p => p.Position.DistanceToSquared(pawn.Position))
                 .Take(MaxPeople)
                 .ToList();
-            if (others.Count == 0)
-                return null;
-            return string.Join(" — ", others.Select(p =>
+            return others.Select(p =>
             {
                 string guest = AIPawnControl.People.Guest(p);
                 string relation = pawn.GetMostImportantRelation(p) is PawnRelationDef rel
@@ -248,7 +241,7 @@ namespace AIPawnControl
                 int dist = (int)p.Position.DistanceTo(pawn.Position);
                 string asleep = p.Awake() ? "" : ", asleep";
                 string where = dist <= NearbyTiles ? "nearby" : RoomLabel(p) == "outside" ? $"outside, {dist} tiles away" : $"in the {RoomLabel(p)}";
-                string skills = BestSkills(p) is string best ? $"; best skills: {best}" : "";
+                string skills = BestSkills(p) is string best ? $" Best skills: {best}." : "";
                 var doing = new List<string> { (p.GetJobReport() ?? "idle").TrimEnd('.') };
                 if (MindManager.Instance?.MindOf(p) != null)
                 {
@@ -257,8 +250,9 @@ namespace AIPawnControl
                     if (ChoreManager.Instance?.LastOf(p) is Chore chore)
                         doing.Add($"{Ago(chore.placedTick)} {ChoreManager.Did(chore)}");
                 }
-                return $"{p.LabelShort} ({p.gender.GetLabel()}, {relation}{role}, opinion {opinion:+0;-0;0}, {mood}{asleep}, {where}{skills}): {string.Join(" · ", doing)}";
-            })) + ".";
+                return (p.LabelShort, $"{p.LabelShort}: {p.gender.GetLabel()}, {relation}{role}, opinion {opinion:+0;-0;0}, {mood}{asleep}, {where}.{skills}\n" +
+                                      $"Doing now: {string.Join(" · ", doing)}.");
+            }).ToList();
         }
 
         /// <summary>What [People] calls "nearby"; only people this close can be talked to.</summary>
@@ -268,20 +262,19 @@ namespace AIPawnControl
 
         internal static string Colony(Map map)
         {
-            var parts = new List<string>
+            var lines = new List<string>
             {
-                $"{map.mapPawns.FreeColonistsSpawnedCount} colonists",
-                "Danger: " + map.dangerWatcher.DangerRating.ToString().ToLower(),
+                $"{map.mapPawns.FreeColonistsSpawnedCount} colonists. Danger: {map.dangerWatcher.DangerRating.ToString().ToLower()}.",
             };
             string dead = Dead(map);
             if (dead != null)
-                parts.Add("Dead: " + dead);
+                lines.Add("Dead: " + dead + ".");
             string alerts = Alerts();
             if (alerts != null)
-                parts.Add("Alerts: " + alerts);
-            parts.Add("Base: " + Ladder.Line(map));
-            parts.Add("Food: " + FoodOutlook.For(map).Line());
-            return string.Join(". ", parts) + ".";
+                lines.Add("Alerts: " + alerts + ".");
+            lines.Add("Base: " + Ladder.Line(map) + ".");
+            lines.Add("Food: " + FoodOutlook.For(map).Line() + ".");
+            return string.Join("\n", lines);
         }
 
         /// <summary>
@@ -317,7 +310,7 @@ namespace AIPawnControl
             foreach (var def in new[] { ThingDefOf.WoodLog, ThingDefOf.Steel, ThingDefOf.ComponentIndustrial, ThingDefOf.Silver })
                 parts.Add($"{def.label} {counter.GetCount(def)}");
             string haul = WaitingToBeHauled(map);
-            return string.Join(", ", parts) + " (in stockpiles and shelves only)." + (haul != null ? " Waiting to be hauled: " + haul + "." : "");
+            return "In stockpiles and shelves: " + string.Join(", ", parts) + "." + (haul != null ? "\nWaiting to be hauled: " + haul + "." : "");
         }
 
         /// <summary>
@@ -398,14 +391,14 @@ namespace AIPawnControl
             if (empty > 0)
                 parts.Add(empty == 1 ? "an empty room" : $"{empty} empty rooms");
 
-            string others = parts.Count > 0 ? string.Join(" · ", parts) : null;
+            string others = parts.Count > 0 ? string.Join("\n", parts.Select(p => "- " + p)) : null;
             if (here == null)
                 return others ?? "no proper rooms yet";
             var hereItems = Furniture(here);
             string name = RoomName(here, pawn);
             string detail = $"I'm in {(here.Owners.Any() ? name : "the " + name)}: {RoomFeel(here, pawn)}. " +
                             (hereItems.Count > 0 ? $"Has: {ItemList(hereItems, int.MaxValue)}." : "Nothing in it.");
-            return others != null ? $"{detail} Other rooms: {others}" : detail;
+            return others != null ? $"{detail}\nOther rooms:\n{others}" : detail;
         }
 
         /// <summary>", 29F" when the room is too cold or too hot for her (her comfortable range, clothes included), else "".</summary>

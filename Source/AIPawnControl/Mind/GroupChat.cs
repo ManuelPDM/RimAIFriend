@@ -171,12 +171,12 @@ namespace AIPawnControl
             var chat = Instance;
             var readers = Minds.Where(m => m != mind && m.pawn != null).Select(m => m.pawn.LabelShort).ToList();
             readers.Add(MindManager.Speaker);
-            Dictionary<string, string> recalled = null;
+            Recall recalled = null;
             if (AIPawnControlMod.Settings.memoryEnabled && chat != null)
             {
                 var authors = chat.messages.Skip(chat.messages.Count - Shown).Select(m => m.author == Player ? PersonFile.Player : m.author)
                     .Where(n => n != mind.pawn.LabelShort).Reverse();
-                recalled = new Dictionary<string, string> { ["About"] = Retrieval.About(mind, authors, 4, 110) };
+                recalled = new Recall { About = Retrieval.About(mind, authors, 4, 110) };
             }
             return PromptBuilder.Build("post", mind, new Dictionary<string, string> { ["readers"] = string.Join(", ", readers) }, recalled);
         }
@@ -254,8 +254,8 @@ namespace AIPawnControl
             if (map == null)
                 return "(unknown)";
             var rooms = map.regionGrid.AllRooms.Where(r => Ground.Indoor(r) && !r.Fogged && Ground.AnyRole(r)).Select(BuildManager.Label).Distinct().ToList();
-            return $"{GameTime.Now(map)}. Colonists: {string.Join(", ", map.mapPawns.FreeColonistsSpawned.Select(p => p.LabelShort))}. "
-                   + SnapshotBuilder.Colony(map) + $" Rooms: {(rooms.Count > 0 ? string.Join(", ", rooms) : "none yet")}.";
+            return $"{GameTime.Now(map)}. Colonists: {string.Join(", ", map.mapPawns.FreeColonistsSpawned.Select(p => p.LabelShort))}.\n"
+                   + SnapshotBuilder.Colony(map) + $"\nRooms: {(rooms.Count > 0 ? string.Join(", ", rooms) : "none yet")}.";
         }
 
         public override void GameComponentTick()

@@ -381,7 +381,7 @@ namespace AIPawnControl
 
         /// <summary>
         /// The Message call's prompt: the conversation as read so far, then what's new since (when there is), and what the
-        /// pawn may do now. [Messages] leaves this thread out: it's here whole.
+        /// pawn may do now. [People] leaves this thread out: it's here whole.
         /// </summary>
         internal List<KeyValuePair<string, string>> MessageMessages(Pawn other, string situation, string history, string unread, string menu, Recall recall)
         {
@@ -394,7 +394,7 @@ namespace AIPawnControl
                 ["new"] = unread.Length > 0 ? "\n" + Prompts.Fill("message-new", new Dictionary<string, string> { ["other"] = name, ["new"] = unread }) + "\n" : "",
                 ["menu"] = menu,
                 ["memory"] = recall.MemoryLine,
-            }, new Dictionary<string, string>(recall.Sections) { ["Messages"] = DirectMessages.Instance?.Context(pawn, pawn.Map, except: other) });
+            }, recall, thread: other);
         }
 
         /// <summary>An optional act and the tone first (so the words match them), then the message ("" = none).</summary>
@@ -556,7 +556,7 @@ namespace AIPawnControl
                 ["situation"] = situation,
                 ["said"] = line == null ? "" : "\n" + Prompts.Fill("answer-said", new Dictionary<string, string> { ["speaker"] = speaker, ["line"] = line }) + "\n",
                 ["memory"] = recall.MemoryLine,
-            }, recall.Sections);
+            }, recall);
 
         internal static Dictionary<string, object> AnswerSchema(List<int> memories)
         {
@@ -646,7 +646,7 @@ namespace AIPawnControl
                 ["talkto"] = TalkToText(menu),
                 ["announce"] = menu.Any(o => o.Announces) ? "\n\n" + Prompts.Fill("act-announce", new Dictionary<string, string>()) : "", // only with a line that posts
                 ["danger"] = DangerResponse.Threats(pawn.Map).Count > 0 ? "\n\n" + Prompts.Fill("danger", new Dictionary<string, string>()) : "", // only with the danger menu
-            }, recall.Sections);
+            }, recall);
 
         /// <summary>
         /// Embeds the situation's query (when memory is on), then goes on with the vector on the main thread, unless the
@@ -813,7 +813,7 @@ namespace AIPawnControl
                 ["message"] = message,
                 ["menu"] = menu,
                 ["memory"] = recall.MemoryLine,
-            }, recall.Sections);
+            }, recall);
 
         private void OnChat(string speaker, Dictionary<string, object> reply, List<ActionCatalog.ActOption> menu, Recall recall)
         {

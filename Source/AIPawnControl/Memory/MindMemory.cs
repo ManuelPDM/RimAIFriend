@@ -194,7 +194,7 @@ namespace AIPawnControl
                 .OrderBy(e => e.tick)
                 .Select(e => $"{GameTime.DayLabel(e.tick, map)} {GameTime.Clock(e.tick, map)} {e.Text}")
                 .ToList();
-            return top.Count > 0 ? string.Join(" · ", top) : null;
+            return top.Count > 0 ? string.Join("\n", top) : null;
         }
 
         public void ExposeData()

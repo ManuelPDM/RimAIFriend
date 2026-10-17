@@ -68,7 +68,7 @@ namespace AIPawnControl
 
     /// <summary>
     /// What minds say to each other, near or far: one private thread per pair. Every snapshot shows the last 2 lines of each
-    /// thread active since yesterday ([Messages]); only the Message call loads a whole thread. At 15 lines the Compact call
+    /// thread active since yesterday, under the other's [People] entry; only the Message call loads a whole thread. At 15 lines the Compact call
     /// folds all but the last 5 into the thread's summary, as the group chat does.
     /// </summary>
     public class DirectMessages : GameComponent
@@ -128,15 +128,15 @@ namespace AIPawnControl
             .OrderBy(t => t.UnreadBy(p)[0].tick).FirstOrDefault();
 
         /// <summary>
-        /// [Messages]: each thread active since yesterday or unread, newest first, with its unread count and last 2 lines.
-        /// The Mind tab chat with the colonist the player plays is one of them, like any other thread. The Message call
-        /// leaves out its own thread, which it shows whole.
+        /// The "Messages" lines of [People], by the other's name: each thread active since yesterday or unread, newest first,
+        /// with its unread count and last 2 lines. The Mind tab chat with the colonist the player plays is one of them, like
+        /// any other thread. The Message call leaves out its own thread, which it shows whole.
         /// </summary>
-        public string Context(Pawn p, Map map, Pawn except = null)
+        public List<(string name, string text)> Context(Pawn p, Map map, Pawn except = null)
         {
             int from = Find.TickManager.TicksGame - GenDate.TicksPerDay;
             var entries = ThreadsOf(p).Where(t => !t.Has(except) && !Gone(t.Other(p)) && t.lines.Count > 0 && (t.LastTick >= from || t.UnreadBy(p).Count > 0))
-                .Select(t => (tick: t.LastTick, text: Entry(t.Other(p), t.UnreadBy(p).Count, t.lines.Skip(t.lines.Count - Shown).Select(l => t.Line(l, p, map)))))
+                .Select(t => (tick: t.LastTick, name: t.Other(p).LabelShort, text: Entry(t.UnreadBy(p).Count, t.lines.Skip(t.lines.Count - Shown).Select(l => t.Line(l, p, map)))))
                 .ToList();
             Pawn played = MindManager.Instance?.PlayingAs;
             var chat = MindManager.Instance?.MindOf(p)?.chat.Where(l => l.from != ChatLine.From.System).ToList();
@@ -145,14 +145,15 @@ namespace AIPawnControl
                 int answered = chat.FindLastIndex(l => l.from == ChatLine.From.Mind);
                 var last = chat[chat.Count - 1];
                 if (last.tick >= from || answered < chat.Count - 1)
-                    entries.Add((last.tick, Entry(played, chat.Count - 1 - answered, chat.Skip(chat.Count - Shown).Select(l =>
+                    entries.Add((last.tick, played.LabelShort, Entry(chat.Count - 1 - answered, chat.Skip(chat.Count - Shown).Select(l =>
                         (map != null ? $"{GameTime.DayLabel(l.tick, map)} {GameTime.Clock(l.tick, map)} " : "") + (l.from == ChatLine.From.Mind ? "Me" : played.LabelShort) + ": " + l.text))));
             }
-            return entries.Count > 0 ? string.Join("\n", entries.OrderByDescending(e => e.tick).Select(e => e.text)) : null;
+            return entries.OrderByDescending(e => e.tick).Select(e => (e.name, e.text)).ToList();
         }
 
-        private static string Entry(Pawn other, int unread, IEnumerable<string> lines) =>
-            $"{other.LabelShort}{(unread > 0 ? $" ({unread} unread)" : "")}: {string.Join(" · ", lines)}";
+        /// <summary>"Messages (1 unread):" and the lines under it.</summary>
+        private static string Entry(int unread, IEnumerable<string> lines) =>
+            $"Messages{(unread > 0 ? $" ({unread} unread)" : "")}:" + string.Concat(lines.Select(l => "\n  " + l));
 
         /// <summary>The thread as the reader has read it, for the Message call: the summary, then every line but the unread ones.</summary>
         public static string Full(DmThread thread, Pawn reader, Map map)

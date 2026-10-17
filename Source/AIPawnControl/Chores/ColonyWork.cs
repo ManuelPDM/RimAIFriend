@@ -33,13 +33,13 @@ namespace AIPawnControl
             if (shelves.Count > 0)
                 storage += ". Storage buildings: " + string.Join(", ", shelves);
 
-            return string.Join(". ", new[]
+            return string.Join("\n", new[]
             {
-                "Fields: " + Join(fields, MaxFields, "none"),
-                storage,
-                "Marked: " + Join(Marks(pawn, map), MaxMarks, "nothing"),
-                "Orders: " + Join(Orders(pawn, map), MaxOrders, "none"),
-            }) + ".";
+                "Fields:" + List(fields, MaxFields, "none"),
+                storage + ".",
+                "Marked: " + Join(Marks(pawn, map), MaxMarks, "nothing") + ".",
+                "Orders:" + List(Orders(pawn, map), MaxOrders, "none"),
+            });
         }
 
         private static string Join(List<string> items, int max, string none)
@@ -47,6 +47,15 @@ namespace AIPawnControl
             if (items.Count == 0)
                 return none;
             return items.Count > max ? string.Join(" · ", items.Take(max)) + $" · {items.Count - max} more" : string.Join(" · ", items);
+        }
+
+        /// <summary>" none", or one "- item" line each below the label.</summary>
+        private static string List(List<string> items, int max, string none)
+        {
+            if (items.Count == 0)
+                return " " + none;
+            var shown = items.Count > max ? items.Take(max).Append($"{items.Count - max} more") : items;
+            return string.Concat(shown.Select(i => "\n- " + i));
         }
 
         /// <summary>Plants grow only between 25% and 80% of the day (Plant.Resting).</summary>

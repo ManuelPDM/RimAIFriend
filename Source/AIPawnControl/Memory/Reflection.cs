@@ -135,7 +135,7 @@ namespace AIPawnControl
                 for (int i = 0; i < open.Count; i++)
                     sb.Add($"F{i + 1} {open[i].text} ({open[i].source}, since day {GenDate.DaysPassedAt(open[i].since) + 1})");
             }
-            return $"[{name}] " + string.Join("; ", sb);
+            return $"- {name}" + string.Concat(sb.Select(l => "\n  " + l));
         }
 
         public Dictionary<string, object> ReplySchema()

@@ -104,7 +104,7 @@ namespace AIPawnControl
             parts.Add("Armed: " + (armed.Count > 0 ? string.Join(", ", armed) : "nobody else"));
             if (DangerPlan.Line(pawn) is string plan)
                 parts.Add(plan.TrimEnd('.'));
-            return string.Join(". ", parts) + "." + string.Concat(DangerPlan.Announced(pawn.Map).GroupBy(p => p.def)
+            return string.Join(".\n", parts) + "." + string.Concat(DangerPlan.Announced(pawn.Map).GroupBy(p => p.def)
                 .Select(g => $"\n{Label(g.First())}: {g.Key.description}"));
         }
 

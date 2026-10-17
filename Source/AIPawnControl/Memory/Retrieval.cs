@@ -85,23 +85,20 @@ namespace AIPawnControl
             return picked;
         }
 
-        /// <summary>"[About Sheet] impression · threads" lines for the people who have a file, at most max, each cut to lineCap.</summary>
-        public static string About(PawnMind mind, IEnumerable<string> names, int max, int lineCap)
+        /// <summary>"My view: impression" and "Open between us: threads" for the people who have a file, at most max, each cut to lineCap.</summary>
+        public static List<(string name, string text)> About(PawnMind mind, IEnumerable<string> names, int max, int lineCap)
         {
-            var lines = names.Distinct().Select(n => mind.memory.File(n, create: false))
+            string Cut(string text)
+            {
+                if (text.Length <= lineCap)
+                    return text;
+                int cut = text.LastIndexOf(' ', lineCap - 1);
+                return text.Substring(0, cut > 0 ? cut : lineCap - 1) + "…";
+            }
+            return names.Distinct().Select(n => mind.memory.File(n, create: false))
                 .Where(f => f != null && !string.IsNullOrEmpty(f.impression)).Take(max)
-                .Select(f =>
-                {
-                    string text = f.impression + (string.IsNullOrEmpty(f.threads) ? "" : " · " + f.threads);
-                    if (text.Length > lineCap)
-                    {
-                        int cut = text.LastIndexOf(' ', lineCap - 1);
-                        text = text.Substring(0, cut > 0 ? cut : lineCap - 1) + "…";
-                    }
-                    string who = People.Label(f.name, mind.pawn);
-                    return $"[About {f.name}] {(who != null ? $"({who}) " : "")}{text}";
-                }).ToList();
-            return lines.Count > 0 ? string.Join("\n", lines) : null;
+                .Select(f => (f.name, "My view: " + Cut(f.impression) + (string.IsNullOrEmpty(f.threads) ? "" : "\nOpen between us: " + Cut(f.threads))))
+                .ToList();
         }
 
         /// <summary>The picked memories as "M12 (3 days ago) text" lines, and marks them shown (not when it is only a look).</summary>

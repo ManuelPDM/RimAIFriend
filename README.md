@@ -281,7 +281,9 @@ prompts**; no rebuild is needed. Every prompt and reply is logged to
 
 ## 5. What a mind sees: the snapshot
 
-`SnapshotBuilder` writes the live world as labelled sections, built fresh for each call.
+`SnapshotBuilder` writes the live world as labelled sections, built fresh for each call. A section of several
+lines starts on the line below its `[Label]`, with a blank line around it and one item per line (a person, a room, a field, a work order, a
+message); short lists of counts stay on one line.
 The mind only knows what these show, and every mind knows the whole map.
 
 | Section | Holds |
@@ -291,18 +293,17 @@ The mind only knows what these show, and every mind knows the whole map.
 | `[Condition]` | mental break, health, injuries, pain, bleeding, mood in words |
 | `[Needs]` / `[Feelings]` | needs under 25%; the top 3 mood thoughts |
 | `[Doing now]` / `[My project]` | job report; the pawn's build project's status |
-| `[People]` | up to 10 colonists, nearest first: relation (a quest lodger is "guest from X"), role, opinion, mood, where, best skills, job; for a mind, also its project and last chore |
+| `[People]` | one entry per person. Up to 10 colonists, nearest first: relation (a quest lodger is "guest from X"), role, opinion, mood, where, best skills; then what they're doing (for a mind, also its project and last chore), the pawn's view of them ("My view", "Open between us", from its person file, in the calls that get About) and its private thread with them ("Messages": the unread count and last 2 lines, for each thread active in the last day or unread, unless the other pawn is dead or no longer of the colony). Anyone else the pawn has a view of or a thread with (the player, someone away) gets an entry after them. The Mind tab chat with the colonist the player plays is one of the threads |
 | `[Colony]` | headcount, danger rating, the dead, alerts, the base ladder's next step, food outlook |
 | `[Colony stores]` | food days, medicine, wood, steel, components, silver, waiting to be hauled |
 | `[Colony work]` | fields, stockpiles, marked targets, work orders, with "(by me)" on the pawn's own |
 | `[Rooms]` | the room the pawn is in, then up to 12 others: impressiveness, temperature, builder, furniture |
 | `[Recent]` | the pawn's last 5 decisions ("keep going" isn't one) |
 | `[Group chat]` | the summary, then the last 5 messages |
-| `[Messages]` | each private thread active in the last day or unread, unless the other pawn is dead or no longer of the colony: who, the unread count, the last 2 lines. The Mind tab chat with the colonist the player plays is one of them |
 | `[Danger]` | only during threats: enemies, who they're after, the pawn's weapon, who's armed, the plan and the pawn's part, each announced predator's own description |
-| memory sections | `[Since yesterday]`, `[About X]`, `[On my mind]`, `[I remember]`, `[From my diary]` (see §6) |
+| memory sections | `[Since yesterday]`, `[On my mind]`, `[I remember]`, `[From my diary]` (see §6) |
 
-Which call gets which sections:
+Which call gets which sections (About is the "My view" lines in `[People]`):
 
 | Call | Sections |
 |---|---|
@@ -339,7 +340,7 @@ flowchart LR
     Ref --> Work["one work priority change"]
     Ref --> Feel["felt closer / cooler<br/>→ vanilla social memory"]
     Mem & Dia & Files --> Recall["Recall<br/>score = relevance + importance<br/>+ recency + match − penalty"]
-    Recall --> Prompt["[On my mind] · [I remember]<br/>[From my diary] · [About X]"]
+    Recall --> Prompt["[On my mind] · [I remember]<br/>[From my diary] · My view in [People]"]
 ```
 
 **Stores** (`MindMemory`, saved in the game save; nothing external):
@@ -611,11 +612,13 @@ sequenceDiagram
 - The Ideology leader plans if able; otherwise the first mind to react does. Everyone else waits for
   the plan.
 - **Hold the base:** fighters take spots near the threatened edge, ordered by line of sight, then
-  cover, then distance. A fighter who meets an enemy in reach (weapon range, line of sight) on the
-  way fights it there, then goes on to its spot. Not offered when the only danger is announced predators.
+  cover, then distance. Not offered when the only danger is announced predators.
 - **Go out together:** fighters gather at their spots, then go after the nearest enemy together.
 - **Save X:** one per colonist under attack; fighters go after X's attacker.
 - **No fighting:** always offered.
+- Any fighter, in any plan, who meets an enemy in reach (weapon range, line of sight) on the way
+  fights it there first, then goes on with its part. An ordered walk or charge never stops for an
+  enemy by itself.
 - Anyone the planner names under `inside` goes inside. Anyone not named keeps going.
 
 **Each mind's danger menu:**
@@ -627,8 +630,8 @@ sequenceDiagram
 | **fight** the nearest enemy | response Attack: melee charge, or move to a covered firing spot |
 | **help X** | attack the enemy attacking X |
 
-- Picking another danger option leaves the plan. "help X" in a Save-X plan, or fighting in range of
-  your spot, still counts as your part.
+- Picking another danger option leaves the plan. "help X" in a Save-X plan, or fighting an enemy
+  that's after you or in your weapon's range, still counts as your part.
 - When the danger ends, each mind gets its own area and hostility response back.
 
 ---
@@ -664,18 +667,18 @@ flowchart LR
     Act["Act → 'talk to someone'"] --> MC["Message call<br/>(whole thread)"]
     MC -- "a message" --> TH[("thread")]
     TH -- "unread, in range" --> MC2["the other's Message call"]
-    TH -- "unread, farther away" --> Later["[Messages] shows it unread;<br/>the reader's next Act may talk back"]
+    TH -- "unread, farther away" --> Later["[People] shows it unread;<br/>the reader's next Act may talk back"]
     MC2 -- "a message, or '' to leave it" --> TH
-    TH --> Snap["[Messages] in every snapshot<br/>last 2 lines per thread"]
+    TH --> Snap["[People] in every snapshot<br/>last 2 lines per thread"]
     TH -- "≥15 lines" --> Compact["Compact call<br/>folds all but the last 5"]
 ```
 
 - **Pacing:** face to face (in vanilla's interaction range), an unread line gets the reader's Message
   call at its next trigger check once it's awake and free, with no danger and messages left. Farther
-  away it waits: `[Messages]` shows it as unread, and the reader's next Act may pick "talk to someone"
+  away it waits: its `[People]` entry shows it as unread, and the reader's next Act may pick "talk to someone"
   to answer. Nothing forces turns: either side can write again before an answer, and an empty reply
   leaves the thread until someone writes.
-- The Message call's own thread is left out of its `[Messages]`, since the prompt shows it whole.
+- The Message call's own thread is left out of its `[People]`, since the prompt shows it whole.
 - Once the other pawn is dead or no longer of the colony (a guest gone home, someone banished), the thread
   leaves every prompt and the pawn leaves "talk to someone". The thread stays saved for the Messages window.
 - **Near or far:** when the other pawn is in vanilla's interaction range (`IsGoodPositionForInteraction`),
@@ -687,7 +690,7 @@ flowchart LR
 - The Message call's act menu also offers asking the other pawn out, proposing or breaking up ([§3](#3-the-act-menu-and-what-each-choice-leads-to)); then the message is that interaction's line instead of being said on the spot.
 - It also offers spending time with the other pawn now ([§3](#3-the-act-menu-and-what-each-choice-leads-to)); the message is the invitation, and another mind answers it.
 - Each sent burst is a `dm` event for both minds, so the night's Reflect sees the day's messages.
-  `[Since yesterday]` leaves them out, since `[Messages]` shows them.
+  `[Since yesterday]` leaves them out, since `[People]` shows them.
 - Talking to the colonist the player plays uses the Mind tab chat as the thread and lands there.
 
 ---
