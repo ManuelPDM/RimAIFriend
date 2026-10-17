@@ -760,7 +760,7 @@ flowchart LR
 - **Settings** (`mpreston.aipawncontrol`):
   - **Model:** endpoint, API key, model, temperature, timeout, max tokens, thinking, log prompts, parallel
     requests (1-4).
-  - **Cadence:** periodic hours (4), decisions per day (10), messages per day (20).
+  - **Cadence:** periodic hours (4), decisions per day (20), messages per day (40).
   - **Voice:** speak lines, chat bubbles.
   - **Features:** memory, building, chores, answer colony choices, gatherings.
   - **Embeddings:** endpoint, API key (only with its own endpoint; otherwise the chat key), model.

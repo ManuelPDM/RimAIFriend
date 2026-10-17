@@ -17,8 +17,8 @@ namespace AIPawnControl
         public int maxTokens = 1024;
         public bool logPrompts = true;
         public int periodicHours = 4;
-        public int actsPerDay = 10;
-        public int messagesPerDay = 20;    // Message calls that send something; 0: no private messages, and nobody answers a talk
+        public int actsPerDay = 20;
+        public int messagesPerDay = 40;    // Message calls that send something; 0: no private messages, and nobody answers a talk
         public bool speakLines = true;
         public bool chatBubbles = true;
         public bool memoryEnabled = true; // off: no Reflect and no retrieval; events are still kept
@@ -54,8 +54,8 @@ namespace AIPawnControl
             Scribe_Values.Look(ref maxTokens, "maxTokens", 1024);
             Scribe_Values.Look(ref logPrompts, "logPrompts", true);
             Scribe_Values.Look(ref periodicHours, "periodicHours", 4);
-            Scribe_Values.Look(ref actsPerDay, "actsPerDay", 10);
-            Scribe_Values.Look(ref messagesPerDay, "messagesPerDay", 20);
+            Scribe_Values.Look(ref actsPerDay, "actsPerDay", 20);
+            Scribe_Values.Look(ref messagesPerDay, "messagesPerDay", 40);
             Scribe_Values.Look(ref speakLines, "speakLines", true);
             Scribe_Values.Look(ref chatBubbles, "chatBubbles", true);
             Scribe_Values.Look(ref memoryEnabled, "memoryEnabled", true);

@@ -2,7 +2,7 @@ It's {time}. {trigger}
 
 {snapshot}
 
-What do you do now? Pick one option by its number. "keep going" means carry on with your day: your work, meals, sleep and recreation happen on their own. Pick something else when it fits the colony's needs, your mood or who you are better right now.
+What do you do now? Pick one option by its number. "keep going" means carry on with your day: your work, meals, sleep and recreation happen on their own. "talk to someone" is keep going, but you also talk to someone. Pick something else when it fits the colony's needs, your mood or who you are better right now.
 {menu}
 
 If you pick "talk to someone": "with" is who (one of: {talkto}), and you write what you say next. Otherwise "with" is "-".{announce}{danger}
